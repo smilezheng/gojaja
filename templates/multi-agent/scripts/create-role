@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+project_root="$(cd "$repo_root/.." && pwd)"
+lock_script="$repo_root/scripts/with_lock.sh"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  .multi-agent/scripts/create-role [--target codex|claude|cursor|generic] <role> [title]
+
+Creates:
+  .multi-agent/roles/<role>.md
+  .multi-agent/comms/inbox/<role>.md
+  .multi-agent/comms/cursors/<role>.cursor
+  .multi-agent/comms/status/<role>.md
+  .multi-agent/worklog/<role>.md
+
+This is a user-side project setup tool. Do not give this command to runtime agents as part of their normal operating toolset.
+USAGE
+}
+
+validate_role_name() {
+  local role="$1"
+  if [[ ! "$role" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "Invalid role: $role" >&2
+    echo "Use a simple role id such as PM, TechLead, backend, qa-automation, or ux_research." >&2
+    exit 2
+  fi
+}
+
+target="generic"
+
+if [ "${1:-}" = "--target" ]; then
+  if [ "$#" -lt 3 ]; then
+    usage
+    exit 2
+  fi
+  target="$2"
+  shift 2
+fi
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  usage
+  exit 2
+fi
+
+role="$1"
+title="${2:-$role Agent}"
+
+validate_role_name "$role"
+
+"$lock_script" bash -c '
+  role="$1"
+  title="$2"
+  role_file="$3"
+  inbox_file="$4"
+  worklog_file="$5"
+  cursor_file="$6"
+  status_file="$7"
+
+  if [ -e "$role_file" ] || [ -e "$inbox_file" ] || [ -e "$worklog_file" ] || [ -e "$cursor_file" ] || [ -e "$status_file" ]; then
+    echo "Role already exists or is partially created: $role" >&2
+    echo "Check roles/$role.md, comms/inbox/$role.md, comms/cursors/$role.cursor, comms/status/$role.md, and worklog/$role.md." >&2
+    exit 1
+  fi
+
+  {
+    printf "# %s\n\n" "$title"
+    printf "## Role\n\n"
+    printf "TBD\n\n"
+    printf "## Responsibilities\n\n"
+    printf -- "- TBD\n\n"
+    printf "## Writable Scope\n\n"
+    printf -- "- Files explicitly assigned in state/task_board.md.\n"
+    printf -- "- worklog/%s.md.\n"
+    printf -- "- %s RFC comment files under rfcs/*/comments/%s.md.\n\n" "$role" "$role" "$role"
+    printf "## Must Not Edit\n\n"
+    printf -- "- Other agents worklogs.\n"
+    printf -- "- Shared state files unless this role is assigned ownership or explicit approval.\n\n"
+    printf "## Startup Checklist\n\n"
+    printf "Read:\n\n"
+    printf -- "- protocol/PROTOCOL.md\n"
+    printf -- "- roles/%s.md\n" "$role"
+    printf -- "- state/project_state.md\n"
+    printf -- "- state/task_board.md\n"
+    printf -- "- state/decisions.md\n"
+    printf -- "- state/risks.md\n"
+    printf -- "- comms/inbox/%s.md\n" "$role"
+    printf -- "- worklog/%s.md\n\n" "$role"
+    printf "## Reporting\n\n"
+    printf "After meaningful progress, report to roles defined by the active project protocol.\n"
+  } > "$role_file"
+
+  {
+    printf "# %s Inbox\n\n" "$role"
+    printf "Append messages for %s here using .multi-agent/scripts/agentctl report <from> %s \"message\".\n" "$role" "$role"
+  } > "$inbox_file"
+
+  {
+    printf "# %s Worklog\n\n" "$role"
+    printf "No entries yet.\n"
+  } > "$worklog_file"
+
+  mkdir -p "$(dirname "$cursor_file")"
+  printf "0\n" > "$cursor_file"
+
+  mkdir -p "$(dirname "$status_file")"
+  {
+    printf "# %s Status\n\n" "$role"
+    printf "State: offline\n"
+    printf "Updated: TBD\n"
+    printf "LatestEvent: 0\n"
+    printf "Note: Initial status.\n"
+  } > "$status_file"
+' _ "$role" "$title" "$repo_root/roles/$role.md" "$repo_root/comms/inbox/$role.md" "$repo_root/worklog/$role.md" "$repo_root/comms/cursors/$role.cursor" "$repo_root/comms/status/$role.md"
+
+echo "Created role: $role"
+
+"$repo_root/scripts/start-role" --target "$target" "$role"

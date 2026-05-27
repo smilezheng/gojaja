@@ -1,0 +1,16 @@
+{
+  "name": "multi-agent-coordination",
+  "version": "0.1.0",
+  "description": "Agent-agnostic file-system coordination layer for Codex, Claude Code, Cursor, and other file-capable agents.",
+  "bin": {
+    "multi-agent": "./bin/multi-agent.js",
+    "multi-agent-coordination": "./bin/multi-agent.js"
+  },
+  "files": [
+    "bin/",
+    "templates/",
+    "skills/multi-agent-runtime/"
+  ],
+  "license": "MIT",
+  "type": "commonjs"
+}

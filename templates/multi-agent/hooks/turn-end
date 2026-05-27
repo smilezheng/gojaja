@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 3 ]; then
+  echo "Usage: .multi-agent/hooks/turn-end <role> [idle-minutes] [--wait|--no-wait]" >&2
+  exit 2
+fi
+
+"$root/scripts/agentctl" hook turn-end "$1" "${2:-10}" "${3:---wait}"

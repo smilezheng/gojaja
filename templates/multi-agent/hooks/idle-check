@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: .multi-agent/hooks/idle-check <role>" >&2
+  exit 2
+fi
+
+"$root/scripts/agentctl" idle-check "$1"
