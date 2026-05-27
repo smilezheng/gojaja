@@ -26,10 +26,8 @@ breaking change to a path, file name, or JSON shape requires bumping
     risks.yaml
   rfcs/RFC-NNNN-<slug>/                ← one directory per RFC
     proposal.yaml
-    proposal.md                         ← rendered view
     comments/<role>.json
-    decision.json
-    decision.md                         ← rendered view
+    decision.json                       ← present once a decider has acted
   worklog/<role>/<ulid>.md             ← one entry file per worklog entry
   comms/
     events/<ulid>.json                  ← immutable event stream
@@ -40,9 +38,12 @@ breaking change to a path, file name, or JSON shape requires bumping
   locks/<key>.lock                     ← short-lived file lock records
 ```
 
-What `LocalFsStore.initialise` creates today is a strict subset of the
-above: every directory above, plus the `VERSION` file. Empty files
-(`task_board.yaml` etc.) appear when the relevant feature lands.
+What `LocalFsStore.initialise` creates today: every directory listed
+above, plus `VERSION`, a seeded `config.yaml` with an empty `roles` map,
+and a seeded `state/task_board.yaml` with `nextId: 0`. The other state
+files (`project_state.md`, `architecture.md`, `decisions.md`,
+`risks.yaml`) are listed here as the conventional locations the project
+will populate over time; they are not created up front.
 
 ## `VERSION`
 
@@ -79,9 +80,9 @@ Field rules:
 
 - `schemaVersion` must match the on-disk `VERSION` file.
 - `roles` is `Record<RoleId, RoleConfig>`.
-- `RoleConfig.owns` is **enforced at write time** as of PR7. Entries
-  match an exact relative path OR a directory prefix (entries ending
-  with `/` cover the entire subtree).
+- `RoleConfig.owns` is **enforced at write time**. Entries match an
+  exact relative path OR a directory prefix (entries ending with `/`
+  cover the entire subtree).
 - `RoleConfig.mustNotEdit` is also enforced: a path that appears in
   this list is refused even if it ALSO appears in `owns`. Defence in
   depth.
@@ -170,21 +171,21 @@ Fields:
 
 Event types currently emitted:
 
-| Type                  | Emitted by                          | Notes                                              |
-| --------------------- | ----------------------------------- | -------------------------------------------------- |
-| `REPORT`              | `agentctl report` (PR2)             | Directed message; also writes an inbox record.     |
-| `WORKLOG`             | `agentctl worklog` (PR2)            | Broadcast `to = "*"`.                              |
-| `TASK_CREATED`        | `agentctl task new` (PR5)           | Broadcast; `ref` = task id.                        |
-| `TASK_ASSIGNED`       | `agentctl task new/assign` (PR5)    | `to` = new owner; `ref` = task id.                 |
-| `TASK_STATUS_CHANGED` | `agentctl task status` (PR5)        | Broadcast; `ref` = task id.                        |
-| `RFC_CREATED`         | `agentctl rfc new` (PR6)            | `ref` = RFC id.                                    |
-| `RFC_COMMENT`         | `agentctl rfc comment` (PR6)        | `ref` = RFC id.                                    |
-| `RFC_DECIDED`         | `agentctl rfc decide` (PR6)         | `ref` = RFC id; final.                             |
-| `SESSION_CLAIMED`     | `Store.claimSession`                | First-time claim.                                  |
-| `SESSION_TAKEOVER`    | `Store.claimSession` (stale)        | After lease/PID-based break.                       |
-| `SESSION_RELEASED`    | `Store.releaseSession`              | Voluntary release.                                 |
-| `LOCK_BROKEN`         | `Store.withLock` (stale)            | `ref` = lock key.                                  |
-| `SYSTEM`              | misc system actions                 | Reserved for free-form internal events.            |
+| Type                  | Emitted by                       | Notes                                          |
+| --------------------- | -------------------------------- | ---------------------------------------------- |
+| `REPORT`              | `agentctl report`                | Directed message; `to` = recipient role.       |
+| `WORKLOG`             | `agentctl worklog`               | Broadcast (`to = "*"`).                        |
+| `TASK_CREATED`        | `agentctl task new`              | Broadcast; `ref` = task id.                    |
+| `TASK_ASSIGNED`       | `agentctl task new` / `assign`   | `to` = new owner; `ref` = task id.             |
+| `TASK_STATUS_CHANGED` | `agentctl task status`           | Broadcast; `ref` = task id.                    |
+| `RFC_CREATED`         | `agentctl rfc new`               | Broadcast; `ref` = RFC id.                     |
+| `RFC_COMMENT`         | `agentctl rfc comment`           | Broadcast; `ref` = RFC id.                     |
+| `RFC_DECIDED`         | `agentctl rfc decide` / `reject` | Broadcast; `ref` = RFC id; final.              |
+| `SESSION_CLAIMED`     | `Store.claimSession`             | First-time claim.                              |
+| `SESSION_TAKEOVER`    | `Store.claimSession` (stale)     | After lease / PID-based break.                 |
+| `SESSION_RELEASED`    | `Store.releaseSession`           | Voluntary release.                             |
+| `LOCK_BROKEN`         | `Store.withLock` (stale)         | `ref` = lock key.                              |
+| `SYSTEM`              | misc system actions              | Reserved for free-form internal events.        |
 
 Records are append-only at the directory level. There is no in-place
 modification; corrections are expressed as later events.
@@ -218,7 +219,7 @@ will be revisited; today's filter rule is the contract.
   Empty string before the role has ever acked.
 - `pendingManifest`: ULID of an outstanding `plan` manifest awaiting
   `ack`, or `null` if no plan is outstanding. Set by `plan`, cleared by
-  the corresponding `ack` (PR2).
+  the corresponding `ack`.
 - `updatedAt`: stamped by the store on every write.
 
 Invariants:
@@ -266,15 +267,15 @@ Invariants:
   recover. Fields read from `config.yaml`; empty lists are intentionally
   omitted to keep the manifest tight.
 
-The manifest also carries a `tasks` array (PR5): a list of
-`TaskSummary` records filtered to those where `owner == role` and
+The manifest also carries a `tasks` array: a list of `TaskSummary`
+records filtered to those where `owner == role` and
 `status ∈ {Ready, InProgress, Blocked, Review}`. Each summary carries
 only `id`, `title`, `status`, `priority`, and `blockedBy` (the subset
 of `dependsOn` that is not yet Done). The full task record is fetched
 on demand via `agentctl task show <id>`.
 
-Likewise, `rfcs` (PR6) carries `RfcSummary` entries for **open** RFCs
-that need this role's action:
+Likewise, `rfcs` carries `RfcSummary` entries for **open** RFCs that
+need this role's action:
 
 - `role: "voter"` when the role is in the proposal's `voters` list AND
   has not yet commented (commented voters fall out of the action list).
@@ -345,16 +346,20 @@ in the event stream.
 
 ## `worklog/<role>/<ulid>.md`
 
-One markdown file per worklog entry. Created via `agentctl worklog` (PR2).
+One markdown file per worklog entry. Created via `agentctl worklog`.
 Body format is human-prose; no enforced sections yet.
 
 ## `roles/<role>.md`
 
-Human-authored role contract. Created by `agentctl role create` (planned).
-The file structure follows the v0.1 template (Role / Responsibilities /
-Writable Scope / Must Not Edit / Startup Checklist / Reporting). The
-framework does **not** parse this file at runtime; it is for the agent to
-read. Runtime ownership enforcement comes from `config.yaml`.
+Human-readable role contract. Created by `agentctl role create`; the
+generated template lives in
+[`src/core/role-template.ts`](../src/core/role-template.ts) and has
+these sections: title, role id, Role (description), Responsibilities,
+Scope and reporting, Startup checklist. Machine-readable scope
+(`owns` / `reportsTo` / `mustNotEdit`) is intentionally NOT duplicated
+here — it lives only in `config.yaml`, to avoid drift between two
+sources of truth. This file is for humans and agents to read; the
+framework does not parse it at runtime.
 
 ## `rfcs/RFC-NNNN-<slug>/`
 

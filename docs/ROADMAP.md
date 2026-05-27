@@ -156,6 +156,7 @@ After PR10 we tag `v2.0.0`.
 
 ## Sequencing notes
 
-PRs 2–4 unblock real multi-agent use; we should expect the protocol to
-churn while these land. PRs 5–8 harden the layer for production use.
-Anything past `v2.0.0` only ships after the chaos suite is green.
+PR1–PR7 + PR8a establish the protocol surface (events, sessions,
+plan/ack, tasks, RFCs, ownership, handbook). PR8–PR10 harden the layer
+for everyday use without changing the protocol. Anything past `v2.0.0`
+only ships after the chaos suite (PR10) is green.

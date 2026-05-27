@@ -4,8 +4,9 @@ Status: living document; reflects the current implementation. Bump
 together with code changes.
 
 Cross-references: [SCHEMA](./SCHEMA.md) — on-disk file formats.
-[PROTOCOL](./PROTOCOL.md) — agent-facing contract. [ROADMAP](./ROADMAP.md) —
-what is implemented vs deferred.
+[PROTOCOL](./PROTOCOL.md) — agent-facing contract.
+[HANDBOOK](./HANDBOOK.md) — policy layer (when to use which tool).
+[ROADMAP](./ROADMAP.md) — what is implemented vs deferred.
 
 ## What this layer is for
 
@@ -20,7 +21,9 @@ Concretely the layer provides:
 
 1. A typed event stream that every role can subscribe to via a per-role
    cursor.
-2. Per-role inboxes for directed messages.
+2. A per-role inbox view derived from that stream, filtered to messages
+   addressed to the role (no separate inbox files; see [the queue
+   discussion below](#why-directory-as-queue-not-a-shared-append-log)).
 3. Atomic shared state files (project goal, task board, decisions, risks).
 4. RFCs for blocking cross-role decisions, with explicit leader sign-off.
 5. Session leases so two windows cannot silently claim the same role.
