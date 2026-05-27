@@ -1,5 +1,7 @@
 # multi-agent-coordination
 
+**Languages:** English · [简体中文](./README.zh-CN.md)
+
 > Let several LLM-agent windows (Codex / Claude Code / Cursor / any
 > shell-capable agent) **collaborate on one project** as a team —
 > without a server, just files.
