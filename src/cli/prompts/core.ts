@@ -1,3 +1,10 @@
+import { COLLABORATION_HANDBOOK } from "./handbook";
+
+export interface RuntimeBodyOptions {
+  /** Append the collaboration handbook (heuristics for "when to use what"). */
+  withHandbook?: boolean;
+}
+
 /**
  * The shared "agent runtime loop" content. Every host target wraps this
  * with host-specific frontmatter / activation glue.
@@ -13,7 +20,11 @@
  *      lives in the host's persistent area) and run `agentctl plan` to
  *      reconstitute its identity and unread work.
  */
-export function runtimeLoopBody(projectRoot: string): string {
+export function runtimeLoopBody(
+  projectRoot: string,
+  opts: RuntimeBodyOptions = { withHandbook: true },
+): string {
+  const handbook = opts.withHandbook === false ? "" : `\n\n${COLLABORATION_HANDBOOK}`;
   return `You are participating in a multi-agent coordination layer rooted at:
 
   ${projectRoot}
@@ -62,9 +73,9 @@ unread work.
 - Never claim to have done something without producing an event for it.
 - If you lose context or are unsure of your identity, run
   \`agentctl plan\` first. Its output re-anchors you.
-- If you are blocked by a cross-role decision, do not guess. Use the
-  RFC mechanism (commands land in a later release).
-`;
+- If you are blocked by a cross-role decision, do not guess. Open an
+  RFC (\`agentctl rfc new\`) and let the designated decider close it.
+${handbook}`;
 }
 
 /**

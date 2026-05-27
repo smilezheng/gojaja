@@ -12,6 +12,63 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 - PR8: installer / upgrade / reset, AGENTS.md bridge versioned block.
 
+## [2.0.0-alpha.7] — 2026-05-27
+
+### Added (PR8a — collaboration handbook)
+
+Up to PR7 the framework taught agents the **mechanism** (which command,
+what events). This release adds the **policy** layer: a compact, role-
+neutral handbook that tells the agent **when** to choose which tool.
+
+- New `src/cli/prompts/handbook.ts` exporting `COLLABORATION_HANDBOOK`
+  (~7 KB of UTF-8 markdown). Sections:
+  - Core stance.
+  - Turn shape (the canonical per-turn order).
+  - When to write a worklog (do / don't).
+  - When to send a report (do / don't).
+  - When to open an RFC instead of a report.
+  - Disagreement (with assignments, accepted RFCs, other reports).
+  - When to push upstream (concrete 2-turn trigger).
+  - When to escalate up (by problem nature, not by role name).
+  - When to bounce to the user — whitelist of 5 scenarios, plus a
+    list of common temptations that are NOT the user's job.
+  - Task lifecycle micro-rules (Backlog/InProgress/Done discipline,
+    acceptance-ambiguity rule).
+  - Idle / lifecycle (wait vs release; stale-manifest re-plan rule).
+  - Build / test breakage (halt + report, never push on top).
+  - Hard "don't"s.
+- Wired into the runtime body so every host artifact carries it by
+  default:
+  - `agentctl prompt <role> --target codex|claude|cursor|generic`
+    output bodies include the handbook.
+  - `--write` persists it into `.cursor/rules/multi-agent-runtime.mdc`,
+    `~/.codex/skills/multi-agent-runtime/SKILL.md`, and the marker
+    block inside `<project>/CLAUDE.md`.
+- New flag `agentctl prompt --no-handbook` for projects with their own
+  behavioural standards or unusually tight context budgets. Dropping
+  the handbook shrinks each artifact by ~3 KB.
+- New `docs/HANDBOOK.md` documenting the policy layer and the
+  authoring principles future edits must follow.
+- 6 new vitest cases (`tests/handbook.test.ts`); 121/121 total. The
+  test suite asserts that key trigger phrases survive future edits
+  (`Blocked on T-XXXX (no movement 2t)`, `exit code 9 (FORBIDDEN)`,
+  `Do NOT release the role`, `Don't hand-edit anything under
+  .multi-agent`, ...), that the handbook is role-neutral (no PM / TL /
+  Backend / QA / DevOps mentions), and that the total size stays under
+  the 8 KB budget.
+
+### Rationale
+
+Without a policy layer, agents tend to (a) over-communicate
+(worklog-spam, RFCs for trivial questions) and (b) over-defer to the
+human user. The handbook gives the LLM concrete, observable triggers
+("blocked for 2 turns", "exit 9 FORBIDDEN", "stale manifest 5+ turns
+old") so behaviour stops depending on which model is in the window.
+
+Loaded **once per session** into the host's persistent area, so the
+context cost is paid once and survives chat compression — it is never
+shipped per turn the way `manifest.roleReminder` is.
+
 ## [2.0.0-alpha.6] — 2026-05-27
 
 ### Added (PR7 — ownership enforcement)

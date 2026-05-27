@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { activationSnippet, runtimeLoopBody } from "./core";
+import { activationSnippet, runtimeLoopBody, type RuntimeBodyOptions } from "./core";
 import type { PromptArtifact } from "./types";
 
 function codexHome(): string {
@@ -11,7 +11,7 @@ function skillDir(): string {
   return path.join(codexHome(), "skills", "multi-agent-runtime");
 }
 
-function skillMarkdown(projectRoot: string): string {
+function skillMarkdown(projectRoot: string, opts: RuntimeBodyOptions): string {
   return [
     "---",
     "name: multi-agent-runtime",
@@ -24,7 +24,7 @@ function skillMarkdown(projectRoot: string): string {
     "project-local `.multi-agent` coordination layer. Use it for the full",
     "runtime loop until the user ends the conversation.",
     "",
-    runtimeLoopBody(projectRoot),
+    runtimeLoopBody(projectRoot, opts),
   ].join("\n");
 }
 
@@ -41,8 +41,13 @@ function openaiYaml(): string {
   ].join("\n");
 }
 
-export function buildCodexArtifact(role: string, projectRoot: string): PromptArtifact {
+export function buildCodexArtifact(
+  role: string,
+  projectRoot: string,
+  opts: RuntimeBodyOptions = {},
+): PromptArtifact {
   const dir = skillDir();
+  const skill = skillMarkdown(projectRoot, opts);
   const body = [
     "# Codex skill: multi-agent-runtime",
     "",
@@ -56,13 +61,13 @@ export function buildCodexArtifact(role: string, projectRoot: string): PromptArt
     "",
     "---",
     "",
-    skillMarkdown(projectRoot),
+    skill,
   ].join("\n");
   return {
     body,
     files: [
-      { path: path.join(dir, "SKILL.md"),               content: skillMarkdown(projectRoot), mode: "replace" },
-      { path: path.join(dir, "agents", "openai.yaml"), content: openaiYaml(),               mode: "replace" },
+      { path: path.join(dir, "SKILL.md"),              content: skill,       mode: "replace" },
+      { path: path.join(dir, "agents", "openai.yaml"), content: openaiYaml(), mode: "replace" },
     ],
     activation:
       `Use $multi-agent-runtime.\n` +

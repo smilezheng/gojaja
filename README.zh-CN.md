@@ -51,7 +51,7 @@ CrewAI 之类托管的多 agent 框架，那本项目解决的不是你的问题
 
 ## 当前状态
 
-**v2.0.0-alpha.6**。已经实现并由 115 个测试覆盖：
+**v2.0.0-alpha.7**。已经实现并由 121 个测试覆盖：
 
 - 存储核心（事件、游标、会话、per-resource 锁）。
 - 每回合 agent 循环：`claim` / `plan` / `ack` / `report` / `worklog` /
@@ -67,6 +67,10 @@ CrewAI 之类托管的多 agent 框架，那本项目解决的不是你的问题
 - 可写域强制：`config.yaml:roles[<role>].owns` / `mustNotEdit` 已经是
   写入运行时的强制门，agentctl 拒绝越权写。新增 `agentctl write-state`
   统一写入入口。
+- 协作 handbook：每条 `agentctl prompt --write` 出来的提示词工件里都
+  自带一份精简的"策略层"——告诉 agent **什么时候**该用哪个工具
+  （worklog / report / RFC / 升级 / 抛给用户）。详见
+  [docs/HANDBOOK.md](./docs/HANDBOOK.md)。用 `--no-handbook` 关掉。
 
 还在排队的：安装器/升级、`doctor`——详见
 [docs/ROADMAP](./docs/ROADMAP.md)。
@@ -305,6 +309,7 @@ agentctl wait --idle 1                     # 1 分钟后返回 IDLE
 | [docs/DESIGN.md](./docs/DESIGN.md) | 想理解**为什么**协作层做成这个样子 |
 | [docs/SCHEMA.md](./docs/SCHEMA.md) | 需要 `.multi-agent/` 下每个文件/JSON 的精确布局 |
 | [docs/PROTOCOL.md](./docs/PROTOCOL.md) | 你要让一个 agent 对接到 `agentctl` |
+| [docs/HANDBOOK.md](./docs/HANDBOOK.md) | 想看协作策略（worklog / report / RFC / 升级规则） |
 | [docs/ROADMAP.md](./docs/ROADMAP.md) | 想知道下一步要发什么 |
 | [CHANGELOG.md](./CHANGELOG.md) | 想看 release notes |
 | [AGENTS.md](./AGENTS.md) | 你正在编辑本仓库（人或 agent） |

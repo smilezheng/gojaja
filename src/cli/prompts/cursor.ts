@@ -1,12 +1,12 @@
 import * as path from "node:path";
-import { activationSnippet, runtimeLoopBody } from "./core";
+import { activationSnippet, runtimeLoopBody, type RuntimeBodyOptions } from "./core";
 import type { PromptArtifact } from "./types";
 
 function ruleFile(projectRoot: string): string {
   return path.join(projectRoot, ".cursor", "rules", "multi-agent-runtime.mdc");
 }
 
-function ruleContent(projectRoot: string): string {
+function ruleContent(projectRoot: string, opts: RuntimeBodyOptions): string {
   return [
     "---",
     'description: "Runtime loop for an agent window assigned to a role in this project\'s .multi-agent layer."',
@@ -19,12 +19,17 @@ function ruleContent(projectRoot: string): string {
     "has `MA_SESSION` exported, you are the agent for the role bound to",
     "that session; follow the runtime loop below for every turn.",
     "",
-    runtimeLoopBody(projectRoot),
+    runtimeLoopBody(projectRoot, opts),
   ].join("\n");
 }
 
-export function buildCursorArtifact(role: string, projectRoot: string): PromptArtifact {
+export function buildCursorArtifact(
+  role: string,
+  projectRoot: string,
+  opts: RuntimeBodyOptions = {},
+): PromptArtifact {
   const target = ruleFile(projectRoot);
+  const content = ruleContent(projectRoot, opts);
   const body = [
     `# Cursor project rule: ${target}`,
     "",
@@ -35,11 +40,11 @@ export function buildCursorArtifact(role: string, projectRoot: string): PromptAr
     "",
     "---",
     "",
-    ruleContent(projectRoot),
+    content,
   ].join("\n");
   return {
     body,
-    files: [{ path: target, content: ruleContent(projectRoot), mode: "replace" }],
+    files: [{ path: target, content, mode: "replace" }],
     activation: activationSnippet(role, projectRoot),
   };
 }

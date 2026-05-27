@@ -1,7 +1,11 @@
-import { activationSnippet, runtimeLoopBody } from "./core";
+import { activationSnippet, runtimeLoopBody, type RuntimeBodyOptions } from "./core";
 import type { PromptArtifact } from "./types";
 
-export function buildGenericArtifact(role: string, projectRoot: string): PromptArtifact {
+export function buildGenericArtifact(
+  role: string,
+  projectRoot: string,
+  opts: RuntimeBodyOptions = {},
+): PromptArtifact {
   const body = [
     "# Generic agent prompt",
     "",
@@ -10,7 +14,7 @@ export function buildGenericArtifact(role: string, projectRoot: string): PromptA
     "",
     "----- BEGIN -----",
     "",
-    runtimeLoopBody(projectRoot),
+    runtimeLoopBody(projectRoot, opts),
     "",
     activationSnippet(role, projectRoot),
     "----- END -----",

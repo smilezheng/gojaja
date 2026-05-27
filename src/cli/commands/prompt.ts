@@ -19,6 +19,10 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
   }
   const write = boolFlag(args.flags, "write");
   const json = boolFlag(args.flags, "json");
+  // --no-handbook drops the collaboration handbook from the artifact for
+  // projects with their own behavioural standards or unusually tight
+  // context budgets. Default: include.
+  const withHandbook = !boolFlag(args.flags, "no-handbook");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
 
   // Validate the role exists. We could skip this for `generic`, but
@@ -31,7 +35,7 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
     );
   }
 
-  const artifact = buildArtifact(target, role, root);
+  const artifact = buildArtifact(target, role, root, { withHandbook });
 
   if (write && target === "generic") {
     throw new UsageError("--write is not supported for --target generic (no persistence location).");

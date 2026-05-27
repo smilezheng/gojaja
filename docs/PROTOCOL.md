@@ -2,6 +2,8 @@
 
 Cross-references: [DESIGN](./DESIGN.md) — why the protocol is shaped this
 way. [SCHEMA](./SCHEMA.md) — files referenced here.
+[HANDBOOK](./HANDBOOK.md) — when (policy) to use each tool documented
+below.
 
 This document is the contract between an LLM agent window and the
 coordination layer. The wire-level invariants here are what `agentctl`

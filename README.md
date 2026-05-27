@@ -54,7 +54,7 @@ file-only_ agents safe to combine.
 
 ## Status
 
-**v2.0.0-alpha.6.** Implemented and covered by 115 tests:
+**v2.0.0-alpha.7.** Implemented and covered by 121 tests:
 
 - Storage core (events, cursors, sessions, per-resource locks).
 - Per-turn agent loop: `claim` / `plan` / `ack` / `report` / `worklog`
@@ -72,6 +72,11 @@ file-only_ agents safe to combine.
 - Ownership enforcement: `config.yaml:roles[<role>].owns` / `mustNotEdit`
   are now runtime gates for state writes and task mutations, plus a new
   `agentctl write-state` command.
+- Collaboration handbook: every `agentctl prompt --write` artifact ships
+  with a compact policy layer telling the agent **when** to use which
+  tool (worklog vs report vs RFC, when to escalate, when to bounce to
+  the user). See [docs/HANDBOOK.md](./docs/HANDBOOK.md). Drop it with
+  `--no-handbook`.
 
 Still to come: installer / upgrade, doctor — see
 [docs/ROADMAP](./docs/ROADMAP.md).
@@ -321,6 +326,7 @@ Full plan: [docs/ROADMAP.md](./docs/ROADMAP.md).
 | [docs/DESIGN.md](./docs/DESIGN.md) | You want to know _why_ the layer is shaped this way. |
 | [docs/SCHEMA.md](./docs/SCHEMA.md) | You need the exact file/JSON layout under `.multi-agent/`. |
 | [docs/PROTOCOL.md](./docs/PROTOCOL.md) | You are wiring an agent to talk to `agentctl`. |
+| [docs/HANDBOOK.md](./docs/HANDBOOK.md) | You want the collaboration policy (worklog vs report vs RFC, escalation rules). |
 | [docs/ROADMAP.md](./docs/ROADMAP.md) | You want to know what is shipping next. |
 | [CHANGELOG.md](./CHANGELOG.md) | You want release notes. |
 | [AGENTS.md](./AGENTS.md) | You are editing this repo (human or agent). |

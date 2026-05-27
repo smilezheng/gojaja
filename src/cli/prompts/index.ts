@@ -5,22 +5,25 @@ import { atomicWriteFile, exists } from "../../core/atomic";
 import { UsageError } from "../../core/errors";
 import { buildClaudeArtifact } from "./claude";
 import { buildCodexArtifact } from "./codex";
+import type { RuntimeBodyOptions } from "./core";
 import { buildCursorArtifact } from "./cursor";
 import { buildGenericArtifact } from "./generic";
 import type { PromptArtifact, Target } from "./types";
 
 export type { PromptArtifact, Target };
+export type { RuntimeBodyOptions } from "./core";
 
 export function buildArtifact(
   target: Target,
   role: string,
   projectRoot: string,
+  opts: RuntimeBodyOptions = {},
 ): PromptArtifact {
   switch (target) {
-    case "codex":   return buildCodexArtifact(role, projectRoot);
-    case "claude":  return buildClaudeArtifact(role, projectRoot);
-    case "cursor":  return buildCursorArtifact(role, projectRoot);
-    case "generic": return buildGenericArtifact(role, projectRoot);
+    case "codex":   return buildCodexArtifact(role, projectRoot, opts);
+    case "claude":  return buildClaudeArtifact(role, projectRoot, opts);
+    case "cursor":  return buildCursorArtifact(role, projectRoot, opts);
+    case "generic": return buildGenericArtifact(role, projectRoot, opts);
   }
 }
 

@@ -95,6 +95,18 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     (a role may always update its own task's status).
   - New `ForbiddenError` class with stable exit code 9.
 
+- **PR8a — collaboration handbook.**
+  - New `src/cli/prompts/handbook.ts` exporting a ~7 KB UTF-8
+    `COLLABORATION_HANDBOOK` string. Role-neutral; concrete triggers;
+    mostly "don'ts".
+  - Default-injected into every `agentctl prompt --target X --write`
+    artifact (Cursor rules, Codex skill, Claude CLAUDE.md block, generic
+    stdout). `--no-handbook` opts out.
+  - Covers: turn shape, worklog rules, report vs RFC, disagreement,
+    push-upstream / escalation, user-vs-agent escalation whitelist,
+    task lifecycle micro-rules, idle/stale-manifest handling, build/test
+    breakage, hard "don't"s. See [HANDBOOK.md](./HANDBOOK.md).
+
 ### Planned, in priority order
 
 - **PR8 — installer & upgrade.**
