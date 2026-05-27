@@ -2,317 +2,235 @@
 
 **语言**：[English](./README.md) · 简体中文
 
-> 让多个 LLM agent 窗口（Codex / Claude Code / Cursor / 任何能跑 shell
-> 的 agent）以**团队的方式协作完成同一个项目**——不需要服务器，只用文件。
+> 一个本地 CLI 工具，让多个 AI agent 窗口在同一个项目里像团队一样协作——不需要服务器，不需要数据库，只用仓库里的文件。
 
-你打开四个 IDE 窗口，让它们都指向同一个 git 仓库，再告诉每个窗口扮演的
-角色：
+---
+
+## 它解决什么问题
+
+你打开 Cursor 写前端，Claude Code 写后端，Codex 扮演 PM。它们都在看同一份代码，但它们互相不知道对方在做什么。结果就是：重复劳动、决策冲突，没有任何记录说明当初为什么这么做。
+
+这个工具给每个 agent 分配一个**角色**（PM、技术 Leader、Backend、QA……），一个私有收件箱，和一块共享任务板。Agent 通过一个本地 CLI `agentctl` 相互通信。每一条消息、每一个决策、每一次状态变化，都以普通文件的形式保存下来，可以用 `git diff` 查看。
 
 ```
 ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│  Codex      │  │  Claude     │  │  Cursor     │  │  Cursor     │
-│  role: PM   │  │  role: TL   │  │  role: BE   │  │  role: QA   │
+│  Cursor     │  │  Claude     │  │  Codex      │  │  Cursor     │
+│  角色: PM   │  │  角色: TL   │  │  角色: BE   │  │  角色: QA   │
 └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
        │                │                │                │
-       └────────┬───────┴────────┬───────┴────────────────┘
-                ▼                ▼
-           ┌──────────────────────────────────────┐
-           │  .multi-agent/   （随项目提交到 git）  │
-           │    events  │  inbox  │  rfcs         │
-           │    state   │  worklog │  sessions    │
-           └──────────────────────────────────────┘
+       └────────────────┴────────────────┴────────────────┘
+                                 ▼
+              .multi-agent/   ← 纯文本，随项目提交到 git
+              ├── state/        共享项目状态
+              ├── comms/        agent 之间的消息和事件
+              ├── rfcs/         提案和决策
+              └── worklog/      每个 agent 的工作记录
 ```
 
-PM agent 发起一个 RFC，TL agent 评论，决策落地后 Backend agent 开始
-实现，QA agent 读 worklog 并起 defect 报告。每一次跨窗口的消息都经过
-一个本地 CLI——`agentctl`——它保证原子写、事件有序、不丢消息，并在 git
-里留下一份可 diff 的决策与协作记录。
-
 ---
 
-## 什么时候该用它
+## 适合谁用
 
-你符合下面任何一条就值得看：
+满足下面任何一条就值得试试：
 
-- 你已经在同一个项目里**开了多个 LLM agent 窗口**，它们互相踩对方、
-  或者重复做同样的事。
-- 你想要一份**可审计的过程档案**——谁提议的、谁拍板的、为什么——而且
-  希望它就是 git 里的普通文件。
-- 你希望 agent **角色化**（PM、技术 leader、Backend、QA……），并且让
-  跨角色决策按正常流程走。
-- 你想要这套机制**不依赖服务器、不需要 API key、不要数据库**——只用
-  仓库里的文件。
+- 你在同一个项目里**开了两个以上的 AI agent 窗口**，它们会互相踩对方或重复工作。
+- 你想保留一份**决策记录**——谁提的议、谁批准的、为什么——而且希望这份记录就是 git 里的普通文件。
+- 你想让 agent 有**明确的角色分工**，跨角色的决策走正规流程，而不是各自为政。
+- 你希望这一切**不依赖任何外部服务**——不需要 API key，不需要账号，不需要联网。
 
-如果你只跑一个 agent，或者你的 agent 已经在用 LangGraph / AutoGen /
-CrewAI 之类托管的多 agent 框架，那本项目解决的不是你的问题。本项目针
-对的是：**只能用 shell + 文件交流的 agent，怎么安全地拼在一起**。
-
----
-
-## 当前状态
-
-**v2.0.0-alpha.7**。已经实现并由 121 个测试覆盖：
-
-- 存储核心（事件、游标、会话、per-resource 锁）。
-- 每回合 agent 循环：`claim` / `plan` / `ack` / `report` / `worklog` /
-  `release` / `wait`。每次 `plan` 返回的 manifest 都自带一个精简的
-  `roleReminder`——上下文被压缩的 agent 只要再跑一次 `plan` 就能找回
-  完整身份。
-- 配置 CLI：`role create / list / show`、`prompt --target codex|claude|cursor|generic --write`。
-- 任务板：`task new / assign / status / list / show`；manifest 自动
-  携带这个角色的活跃任务。
-- RFC：`rfc new / comment / decide / reject / list / show`。状态机
-  `open -> accepted | rejected`；只有 `deciders` 名单里的角色能 decide
-  /reject；不做自动计票。Manifest 自动携带需要本角色处理的开放 RFC。
-- 可写域强制：`config.yaml:roles[<role>].owns` / `mustNotEdit` 已经是
-  写入运行时的强制门，agentctl 拒绝越权写。新增 `agentctl write-state`
-  统一写入入口。
-- 协作 handbook：每条 `agentctl prompt --write` 出来的提示词工件里都
-  自带一份精简的"策略层"——告诉 agent **什么时候**该用哪个工具
-  （worklog / report / RFC / 升级 / 抛给用户）。详见
-  [docs/HANDBOOK.md](./docs/HANDBOOK.md)。用 `--no-handbook` 关掉。
-
-还在排队的：安装器/升级、`doctor`——详见
-[docs/ROADMAP](./docs/ROADMAP.md)。
-
-跟进进度请关注 `v2` 分支。
+如果你只用一个 agent，或者你已经在用 LangGraph / AutoGen / CrewAI 这类托管的多 agent 平台，那这个工具解决的不是你的问题。
 
 ---
 
 ## 安装
 
-需要 Node.js 20 或更新版本。
+需要 **Node.js 20 或更新版本**。
 
 ```bash
-# 全局安装，提供 agentctl 命令：
 npm install -g multi-agent-coordination
-
-# 或者用 npx 按需运行：
-npx multi-agent-coordination --help
 ```
 
-alpha 阶段你也可以直接 clone 本仓库，见
-[本地开发](#本地开发)。
+alpha 阶段也可以直接 clone 仓库自己构建，见[本地开发](#本地开发)。
 
 ---
 
-## 快速上手
+## 配置（每个项目做一次，总共四步）
 
-用户**只做 1-4 这四步**，全部是一次性的。之后你只需要打开 agent
-窗口、粘上激活提示词；剩下的命令 agent 自己每回合调。
+配置完成后你只需要和 agent 正常聊天。下面的命令是你在自己终端里跑的，不是 agent 跑的。
 
-### 1. 在项目里初始化
+### 第一步 — 初始化
 
 ```bash
 cd /path/to/your/project
 agentctl init
-# Initialised multi-agent layer (v2.0.0) at /path/to/your/project/.multi-agent
 ```
 
-`.multi-agent/` 全是纯文本 + JSON，**可以直接提交到 git**。完整
-schema：[docs/SCHEMA.md](./docs/SCHEMA.md)。
+会在项目里创建一个 `.multi-agent/` 目录，存放所有协作状态。这个目录提交到 git 完全没问题。
 
-### 2. 创建你需要的角色
+### 第二步 — 创建角色
 
 ```bash
-# owns 从 PR7 起是写入时的强制门——给 PM/TL 设好它们需要的可写域。
-agentctl role create PM "Product Manager" \
-                   --description "Owns scope and acceptance" \
-                   --owns "state/project_state.md,state/task_board.yaml"
-agentctl role create TL "Tech Lead" \
-                   --description "Owns architecture and integration order" \
-                   --owns "state/architecture.md"
+agentctl role create PM  "Product Manager"  --owns "state/project_state.md,state/task_board.yaml"
+agentctl role create TL  "Tech Lead"        --owns "state/architecture.md"
 agentctl role create Backend "Backend Engineer"
-agentctl role create QA "Quality Assurance"
+agentctl role create QA  "Quality Assurance"
 
 agentctl role list
-# PM           Product Manager
-# TL           Tech Lead
-# Backend      Backend Engineer
-# QA           Quality Assurance
+# PM       Product Manager
+# TL       Tech Lead
+# Backend  Backend Engineer
+# QA       Quality Assurance
 ```
 
-每条 `role create` 同时写 `.multi-agent/config.yaml`（机器源）和
-`.multi-agent/roles/<id>.md`（人看的契约）。编辑 `config.yaml` 来
-设置 `owns` / `reportsTo` / `mustNotEdit`。
+`--owns` 参数控制每个角色允许修改哪些文件。通过 `agentctl` 操作的 agent 无法写入它权限之外的内容。
 
-### 3. 为每种 agent host 安装一次 runtime 工件
+### 第三步 — 为你使用的 agent 工具安装运行时
 
-对你**要用的每种 host**跑一次 `prompt --write` 就够了。工件是角色无
-关的，不用按角色重复跑。
+你用哪种 agent 工具就跑对应那条命令，每种工具跑一次就够。这会在该工具的配置目录里写入一份永久指令，告诉 agent 如何协作。
 
 ```bash
 # 如果你用 Cursor：
 agentctl prompt PM --target cursor --write
-# → 写出 .cursor/rules/multi-agent-runtime.mdc（alwaysApply: true）
+# 写入 .cursor/rules/multi-agent-runtime.mdc
 
 # 如果你用 Claude Code：
 agentctl prompt PM --target claude --write
-# → 在 CLAUDE.md 里 upsert 一个标记块
+# 追加一个标记块到 CLAUDE.md
 
 # 如果你用 Codex CLI：
 agentctl prompt PM --target codex --write
-# → 写出 ~/.codex/skills/multi-agent-runtime/{SKILL.md, agents/openai.yaml}
+# 写入 ~/.codex/skills/multi-agent-runtime/
 
-# 任何能跑 shell 的其它 agent：
+# 其他任何能跑 shell 的 agent：
 agentctl prompt PM --target generic
-# → 打印完整提示词，你手动粘
+# 打印完整提示词，你手动粘贴
 ```
 
-`prompt` 还会在最后打印一段**激活提示词**。把它粘到对应 agent
-窗口的聊天里，agent 就会绑定到这个角色。
+`prompt` 最后还会打印一段**激活提示词**，稍后粘到 agent 聊天窗口里就能给它分配角色。
 
-### 4. 一个角色一个 agent 窗口
+### 第四步 — 每个角色开一个 agent 窗口
 
-举例：PM 用 Cursor，Backend 用 Codex：
+- 在这个项目里打开一个 Cursor 窗口。协作规则会自动加载。把 `agentctl prompt PM --target cursor` 打印的激活提示词粘到聊天里。
+- 打开一个 Claude Code 会话，把 `agentctl prompt TL --target claude` 的激活提示词粘进去。
+- 其他角色同理。
 
-- 在该项目里开一个 Cursor 窗口。runtime rule 已经自动加载。把
-  `agentctl prompt PM --target cursor` 打印的激活提示词粘到聊天
-  里。Agent 会自动跑 `agentctl claim PM`、export `MA_SESSION`、
-  然后进入运行循环。
-- 在该项目里开一个 Codex shell。粘
-  `agentctl prompt Backend --target codex` 的激活提示词。Agent 触发
-  `$multi-agent-runtime` skill 做同样的事。
+到这里配置就全部完成了。之后你只需要和 agent 自然聊天。
 
-到这里全部安装完了。从这一刻起**用户只需要和 agent 自然聊天**；
-agentctl 是它们的工具。
+---
 
-### Agent 每个回合自己跑什么
+## Agent 运行时在做什么
 
-详见 [docs/PROTOCOL.md](./docs/PROTOCOL.md)。简版：
+每个 agent 在每次回应开始时都会：
 
-```bash
-agentctl plan                          # JSON：未读工作 + ackToken
-                                       # 还带 roleReminder（id/title/owns/...）
-                                       # 和 tasks（这个角色的活跃任务）
-# ... agent 处理完事件 / 任务，可能调：
-agentctl report      --to <role> --message "<text>"
-agentctl worklog     --message "<text>"
-agentctl task status <task-id> InProgress
-# ... 然后：
-agentctl ack  --token <ackToken>       # 把游标精确推到 manifest 当时快照
-agentctl wait                          # 阻塞睡眠（不烧 token）
-```
+1. 检查收件箱里来自其他 agent 的新消息。
+2. 从共享任务板上读取自己的活跃任务。
+3. 读取需要它发表意见或做决定的提案（RFC）。
+4. 做实际工作，然后发消息、更新任务状态、记录进展。
+5. 进入低消耗的待机状态，等待下一条消息。
 
-### 额外：手动跑一遍完整 demo
+这一切都是 agent 用 `agentctl` 命令自动完成的，不需要你管。
 
-可以在两个 shell 里手动驱动整个流程，更直观。
+### 手动跑一遍看看效果
 
-**Shell A（PM）：**
+你可以在自己终端里模拟这个流程，直观感受一下：
+
+**窗口 A — 扮演 PM：**
 
 ```bash
 agentctl claim PM
-export MA_SESSION=<粘 claim 返回的 session id>
-agentctl task new --title "Implement /login API" --owner Backend --priority P1 \
-                  --acceptance "POST /login returns JWT, rate-limited 10/min"
-agentctl report  --to TL --message "Goals locked in for Q3"
-agentctl worklog --message "Drafted acceptance for T-0001"
+export MA_SESSION=<claim 打印出来的 session id>
+
+# 创建一个任务并分配出去
+agentctl task new --title "开发 /login 接口" --owner Backend --priority P1
+
+# 给 TL 发消息
+agentctl report --to TL --message "Auth 范围确认，Backend 可以开始了。"
 ```
 
-**Shell B（Backend）：**
+**窗口 B — 扮演 Backend：**
 
 ```bash
 agentctl claim Backend
-export MA_SESSION=<粘 session id>
-agentctl plan                              # 看到 PM 的事件 + tasks=[T-0001]
-agentctl task status T-0001 InProgress     # 广播 TASK_STATUS_CHANGED
-# ... 真去仓库里写代码 ...
+export MA_SESSION=<session id>
+
+# 查看所有等待处理的事项
+agentctl plan
+
+# 随着工作推进更新任务状态
+agentctl task status T-0001 InProgress
+# ... 真去写代码 ...
 agentctl task status T-0001 Review
-agentctl worklog --message "T-0001 ready for review, see commit abc123"
-agentctl ack --token <plan 输出的 ackToken>
-agentctl wait --idle 1                     # 1 分钟后返回 IDLE
+agentctl worklog --message "T-0001 完成，见 commit abc123"
+
+# 确认已处理完这批事项
+agentctl ack --token <plan 输出的 token>
+
+# 进入待机
+agentctl wait
 ```
 
 ---
 
-## 60 秒理解核心理念
+## 跨角色决策怎么做（RFC）
 
-- **角色是永久的，agent 不是**。`PM` 这种角色长期存在于仓库里。任何
-  LLM 窗口都可以临时**租用（claim）**一个角色去扮演它。
-- **所有写入都过 CLI**。Agent 永远不用 `cat`/`sed`/`echo` 直接动
-  `.multi-agent/`。它们调用 `agentctl`，由 CLI 原子写 JSON、发事件。
-  这是多窗口并发安全的关键。
-- **事件是不可变 JSON 文件**。一条事件 = 一个文件，文件名是按时间
-  排序的 ULID。没有共享日志文件，就没有撕裂读、没有转义 bug、没有
-  全局互斥锁。
-- **游标只能凭 token 推进**。每个 agent 先用 `plan` 拿到"未读清单"
-  和一个 token，处理完再用 `ack --token` 推进游标。游标永远不会
-  跨过它没见过的事件——彻底解决经典的"ack 撞上并发写"丢消息问题。
-- **RFC 是意见收集 + leader 拍板**。任何角色都可以给 RFC 留意见，
-  但只有在 RFC 的 `deciders` 列表里的角色能调 `rfc decide` /
-  `rfc reject` 推进状态。没有自动计票。下一次 `plan` 自动把这条
-  RFC 列在 `manifest.rfcs` 里，并标明本角色是 `voter` 还是 `decider`。
+当一个决定会影响多个角色——比如改架构、调整功能范围、在两个方案中选一个——agent 会发起一个 RFC（提案），而不是自己单方面决定。
 
-完整架构论证：[docs/DESIGN.md](./docs/DESIGN.md)。
+```bash
+# 任何 agent 都可以发起提案
+agentctl rfc new switch-to-postgres \
+  --title "把主数据库从 SQLite 换成 Postgres" \
+  --options "A:立即迁移,B:维持现状" \
+  --voters "Backend,DevOps" \
+  --deciders "TL"
 
----
+# 其他 agent 发表意见
+agentctl rfc comment RFC-0001 --option A --rationale "迁移方案可行，风险可控。"
 
-## 能力边界
+# 只有被指定为 decider 的角色才能关闭提案
+agentctl rfc decide RFC-0001 --option A --rationale "同意，开始迁移。"
+```
 
-明确"做什么"和"不做什么"。
-
-**它做这些：**
-
-- 在**单机、单个 git 仓库**里协调任意数量的 agent 窗口。
-- 中途崩溃可恢复：角色被另一个窗口接管后，能确定地拿到上一次未确认
-  的 manifest 继续处理。
-- 每一类错误都有稳定退出码——脚本和 agent 可以按 `2`（用法错误）、
-  `3`（未初始化）、`6`（锁超时）等分支处理。
-- 适配**任何能跑 shell 命令并读 JSON 的 agent runtime**。核心代码里
-  没有任何 Codex/Cursor 特有逻辑。
-
-**它暂时不做这些：**
-
-- **不跨机器**。锁和 rename 语义假设单主机。放在 NFS / Dropbox /
-  iCloud 上会让 stale 锁检测静默失效。HTTP 传输层在 v2.x 路线图里。
-- **不调 LLM**。这是协作层，不是 agent 框架。LLM 调用由你的现有
-  工具（Codex / Claude Code / Cursor）负责。
-- **不跑守护进程**。每条命令都是短生命周期进程。（可选的
-  `agentctl watch` 用于清理过期 session，在 v2.x。）
-- **没法防住所有手工绕过**。`config.yaml:owns` 在 `agentctl` 写命令里
-  强制（PR7），所以 agent 通过 CLI 不会越权。但拥有 shell 权限的人仍
-  能直接 `vim` 修改 state 文件；本框架不是沙箱。
-- **暂不支持 Windows**。代码依赖 POSIX 语义（rename onto open file、
-  `process.kill(pid, 0)`）。Windows 在 v2.x 路线图里。
-- **不替代 git**。审计就以纯文件形式躺在仓库里，靠 git 做 review 和
-  回滚。
-
-如果上面有项是 deal-breaker，请看
-[docs/ROADMAP.md](./docs/ROADMAP.md)——大部分已经在排期。
+每个 agent 下一次调用 `agentctl plan` 时，会自动看到哪些提案需要它处理。不需要任何人手动追踪。
 
 ---
 
-## 路线图概览
+## 它做不了什么
 
-| 里程碑 | 内容 | 状态 |
-| --- | --- | --- |
-| PR1  | 存储核心：锁、事件、游标、会话 | **完成** |
-| PR2  | `claim` / `plan` / `ack` / `report` / `worklog` | **完成** |
-| PR3  | `role create / list / show`、`prompt --target … --write`、`wait` | **完成** |
-| PR4  | manifest 里的 `roleReminder`，让被压缩上下文的 agent 重新锚定身份 | **完成** |
-| PR5  | 任务板（`state/task_board.yaml`、`agentctl task *`） | **完成** |
-| PR6  | RFC 状态机（意见 + leader 决定） | **完成** |
-| PR7  | `config.yaml` 驱动的角色可写域强制 | **完成** |
-| PR8  | 安装器、`upgrade`、`reset`、AGENTS.md 注入 | 即将开始 |
-| PR9  | `agentctl doctor`、历史回放、事件归档 | 计划中 |
-| PR10 | 混沌 / 并发压测套件 | 计划中 |
-| v2.x | HTTP 传输、watcher daemon、Windows、NFS | 推迟 |
+- **不支持多台机器协作。** 所有内容在一台电脑上运行。多机支持在未来版本的规划里。
+- **不调用 LLM。** 这是协作层，不是 AI 框架。AI 调用由你的工具（Cursor、Claude Code、Codex）负责。
+- **没有后台常驻进程。** 每条 `agentctl` 命令都是即跑即退。
+- **无法阻止直接编辑文件。** 通过 `agentctl` 操作的 agent 无法越权写文件，但有终端权限的人仍然可以直接用编辑器改状态文件，这个工具不是沙箱。
+- **暂不支持 Windows。** 目前只支持 Linux 和 macOS。
 
-完整路线图：[docs/ROADMAP.md](./docs/ROADMAP.md)。
+---
+
+## 进度
+
+| 功能 | 状态 |
+| --- | --- |
+| 存储层、事件、会话、权限控制 | 已完成 |
+| Agent 通信命令（`claim`、`plan`、`ack`、`report`、`worklog`、`wait`） | 已完成 |
+| 角色配置和提示词生成（`role`、`prompt`） | 已完成 |
+| 任务板（`task new/assign/status/list/show`） | 已完成 |
+| 提案与决策（`rfc new/comment/decide/reject`） | 已完成 |
+| 协作手册（内置的 agent 行为指引） | 已完成 |
+| 升级和重置命令 | 即将开始 |
+| 健康检查和历史查询（`doctor`、`history`） | 计划中 |
+| 多机支持（HTTP 传输） | 未来版本 |
+
+完整规划：[docs/ROADMAP.md](./docs/ROADMAP.md)
 
 ---
 
 ## 文档
 
-| 文档 | 什么时候看 |
+| | |
 | --- | --- |
-| [docs/DESIGN.md](./docs/DESIGN.md) | 想理解**为什么**协作层做成这个样子 |
-| [docs/SCHEMA.md](./docs/SCHEMA.md) | 需要 `.multi-agent/` 下每个文件/JSON 的精确布局 |
-| [docs/PROTOCOL.md](./docs/PROTOCOL.md) | 你要让一个 agent 对接到 `agentctl` |
-| [docs/HANDBOOK.md](./docs/HANDBOOK.md) | 想看协作策略（worklog / report / RFC / 升级规则） |
-| [docs/ROADMAP.md](./docs/ROADMAP.md) | 想知道下一步要发什么 |
-| [CHANGELOG.md](./CHANGELOG.md) | 想看 release notes |
-| [AGENTS.md](./AGENTS.md) | 你正在编辑本仓库（人或 agent） |
+| [docs/PROTOCOL.md](./docs/PROTOCOL.md) | Agent 完整运行流程——每条命令是什么、什么时候用 |
+| [docs/HANDBOOK.md](./docs/HANDBOOK.md) | 行为判断指南——什么时候写 worklog、发 report、开 RFC、上报给用户 |
+| [docs/SCHEMA.md](./docs/SCHEMA.md) | `.multi-agent/` 下每个文件的内容格式 |
+| [docs/DESIGN.md](./docs/DESIGN.md) | 为什么这样设计 |
+| [CHANGELOG.md](./CHANGELOG.md) | 版本记录 |
 
 ---
 
@@ -323,15 +241,14 @@ git clone <本仓库>
 cd codex-agent
 npm install
 npm run build
-npm test                # 19 个 vitest 用例，约 1.3 秒
+npm test
 ./bin/agentctl --help
 ```
 
-代码组织、约定、"不要把 v0.1 加回来"的护栏在
-[AGENTS.md](./AGENTS.md)。
+代码结构和贡献规范见 [AGENTS.md](./AGENTS.md)。
 
 ---
 
 ## License
 
-MIT.
+MIT

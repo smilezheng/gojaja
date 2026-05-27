@@ -2,334 +2,235 @@
 
 **Languages:** English · [简体中文](./README.zh-CN.md)
 
-> Let several LLM-agent windows (Codex / Claude Code / Cursor / any
-> shell-capable agent) **collaborate on one project** as a team —
-> without a server, just files.
+> A local CLI tool that lets multiple AI agent windows work together on the same project — without a server, without a database, just files in your repo.
 
-You open four IDE windows, point each at the same git repo, and tell
-each one which role it plays:
+---
+
+## The problem it solves
+
+You open Cursor for frontend work, Claude Code for backend, Codex for a PM role. They all read the same codebase but they don't talk to each other. They duplicate work, make conflicting decisions, and there's no record of what was agreed.
+
+This tool gives each agent a **role** (PM, Tech Lead, Backend, QA…), a private inbox, and a shared task board. Agents communicate through a local CLI called `agentctl`. Every message, decision, and status change is saved as a plain file you can `git diff`.
 
 ```
 ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│  Codex      │  │  Claude     │  │  Cursor     │  │  Cursor     │
+│  Cursor     │  │  Claude     │  │  Codex      │  │  Cursor     │
 │  role: PM   │  │  role: TL   │  │  role: BE   │  │  role: QA   │
 └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
        │                │                │                │
-       └────────┬───────┴────────┬───────┴────────────────┘
-                ▼                ▼
-           ┌──────────────────────────────────────┐
-           │  .multi-agent/   (committed to git)  │
-           │    events  │  inbox  │  rfcs         │
-           │    state   │  worklog │  sessions    │
-           └──────────────────────────────────────┘
+       └────────────────┴────────────────┴────────────────┘
+                                 ▼
+              .multi-agent/   ← plain files, committed to git
+              ├── state/        shared project state
+              ├── comms/        events and messages between agents
+              ├── rfcs/         proposals and decisions
+              └── worklog/      each agent's activity log
 ```
 
-The PM agent files an RFC, the TL agent comments, the Backend agent
-implements once a decision lands, the QA agent reads the worklog and
-opens defect reports. Every cross-window message goes through one local
-CLI — `agentctl` — so you get atomic writes, ordered events, no lost
-messages, and a git-diff-able paper trail of every decision.
-
 ---
 
-## When to use this
+## Who this is for
 
-Pick this up if you:
+Use it if:
 
-- Run **multiple LLM agent windows** in the same project and they keep
-  stepping on each other or duplicating work.
-- Want a **paper trail** of who proposed what, who decided, and why —
-  reviewable as plain files in git.
-- Need agents to be **role-aware** (PM, tech lead, backend, QA, …) and
-  to escalate cross-role decisions properly.
-- Want this to work **without a server, without an API key, without a
-  database** — just files in your repo.
+- You run **two or more AI agent windows** in the same project and they keep stepping on each other.
+- You want a **record of decisions** — who proposed what, who approved, why — visible as normal files in git.
+- You want agents to have **defined roles and responsibilities**, and to escalate cross-role decisions through a proper process.
+- You want all of this to work **without any external service** — no API key, no account, no cloud.
 
-Skip this if you only have one agent, or if your agents already talk to
-each other through a hosted multi-agent framework (LangGraph, AutoGen,
-CrewAI, …). This package solves a different problem: making _shell-only,
-file-only_ agents safe to combine.
-
----
-
-## Status
-
-**v2.0.0-alpha.7.** Implemented and covered by 121 tests:
-
-- Storage core (events, cursors, sessions, per-resource locks).
-- Per-turn agent loop: `claim` / `plan` / `ack` / `report` / `worklog`
-  / `release` / `wait`. Each `plan` returns a manifest embedding a
-  compact `roleReminder` so a context-compressed agent re-anchors
-  identity by re-running `plan` once.
-- Setup CLI: `role create / list / show`,
-  `prompt --target codex|claude|cursor|generic --write`.
-- Task board: `task new / assign / status / list / show` with manifests
-  automatically carrying the role's active tasks.
-- RFCs: `rfc new / comment / decide / reject / list / show`. Status
-  machine `open -> accepted | rejected`; deciders gate enforced; no
-  automatic tally. Manifest carries open RFCs needing this role's
-  action.
-- Ownership enforcement: `config.yaml:roles[<role>].owns` / `mustNotEdit`
-  are now runtime gates for state writes and task mutations, plus a new
-  `agentctl write-state` command.
-- Collaboration handbook: every `agentctl prompt --write` artifact ships
-  with a compact policy layer telling the agent **when** to use which
-  tool (worklog vs report vs RFC, when to escalate, when to bounce to
-  the user). See [docs/HANDBOOK.md](./docs/HANDBOOK.md). Drop it with
-  `--no-handbook`.
-
-Still to come: installer / upgrade, doctor — see
-[docs/ROADMAP](./docs/ROADMAP.md).
-
-If you want to follow along, watch the `v2` branch.
+Skip it if you only run one agent at a time, or if you're already using a hosted multi-agent platform (LangGraph, AutoGen, CrewAI). Those solve a different coordination problem.
 
 ---
 
 ## Install
 
-Requires Node.js 20 or newer.
+Requires **Node.js 20+**.
 
 ```bash
-# Install globally for the agentctl command:
 npm install -g multi-agent-coordination
-
-# …or run on demand with npx:
-npx multi-agent-coordination --help
 ```
 
-(During alpha you can clone this repo instead — see
-[Develop locally](#develop-locally).)
+During alpha, you can also clone the repo and build locally — see [Develop locally](#develop-locally).
 
 ---
 
-## Quickstart
+## Setup (four steps, done once per project)
 
-The user does steps 1–4 **once** per project. After that, the user only
-opens agent windows and drops in the activation snippets; the agents
-themselves call the rest of the CLI on every turn.
+After setup, you only chat with the agents. The CLI commands below are for your terminal, not for the agents.
 
-### 1. Initialise the project
+### Step 1 — Initialise
 
 ```bash
 cd /path/to/your/project
 agentctl init
-# Initialised multi-agent layer (v2.0.0) at /path/to/your/project/.multi-agent
 ```
 
-The created `.multi-agent/` tree is plain text + JSON, safe to commit
-to git. Full schema: [docs/SCHEMA.md](./docs/SCHEMA.md).
+This creates a `.multi-agent/` folder with all the coordination state. It's safe to commit to git.
 
-### 2. Create the roles you want
+### Step 2 — Create roles
 
 ```bash
-# Owns are runtime-enforced as of PR7 — give PM/TL the scopes they need.
-agentctl role create PM "Product Manager" \
-                   --description "Owns scope and acceptance" \
-                   --owns "state/project_state.md,state/task_board.yaml"
-agentctl role create TL "Tech Lead" \
-                   --description "Owns architecture and integration order" \
-                   --owns "state/architecture.md"
+agentctl role create PM  "Product Manager"  --owns "state/project_state.md,state/task_board.yaml"
+agentctl role create TL  "Tech Lead"        --owns "state/architecture.md"
 agentctl role create Backend "Backend Engineer"
-agentctl role create QA "Quality Assurance"
+agentctl role create QA  "Quality Assurance"
 
 agentctl role list
-# PM           Product Manager
-# TL           Tech Lead
-# Backend      Backend Engineer
-# QA           Quality Assurance
+# PM       Product Manager
+# TL       Tech Lead
+# Backend  Backend Engineer
+# QA       Quality Assurance
 ```
 
-Each `role create` writes both `.multi-agent/config.yaml` (machine
-truth) and `.multi-agent/roles/<id>.md` (human contract). Edit
-`config.yaml` to set `owns`, `reportsTo`, `mustNotEdit`.
+The `--owns` flag controls which files each role is allowed to write. Agents calling the CLI cannot write outside their assigned scope.
 
-### 3. Install the runtime artifact for each agent host
+### Step 3 — Install the runtime for your agent tool
 
-For every agent host you plan to use, run `prompt --write` once. The
-artifact is role-agnostic; you do not run this per role.
+Run this once for each type of agent tool you use. It writes a persistent instruction file that tells the agent how to coordinate.
 
 ```bash
 # If you use Cursor:
 agentctl prompt PM --target cursor --write
-# → writes .cursor/rules/multi-agent-runtime.mdc (alwaysApply: true)
+# writes .cursor/rules/multi-agent-runtime.mdc
 
 # If you use Claude Code:
 agentctl prompt PM --target claude --write
-# → upserts a marker block inside CLAUDE.md
+# appends a block to CLAUDE.md
 
 # If you use Codex CLI:
 agentctl prompt PM --target codex --write
-# → writes ~/.codex/skills/multi-agent-runtime/{SKILL.md, agents/openai.yaml}
+# writes ~/.codex/skills/multi-agent-runtime/
 
-# For any other shell-capable agent:
+# Any other shell-capable agent:
 agentctl prompt PM --target generic
-# → prints the full prompt for you to paste manually
+# prints instructions for you to paste manually
 ```
 
-`prompt` also prints a short **activation snippet** at the end. You
-paste that snippet into each agent window's chat to bind it to a role.
+`prompt` also prints a short **activation snippet** — a few lines you'll paste into each agent window's chat to assign it a role.
 
-### 4. Open one agent window per role
+### Step 4 — Open one agent window per role
 
-For example, if PM is a Cursor window and Backend is a Codex window:
+- Open a Cursor window in this project. The coordination rules load automatically. Paste the activation snippet from `agentctl prompt PM --target cursor` into the chat.
+- Open a Claude Code session. Paste the snippet from `agentctl prompt TL --target claude`.
+- Do the same for each role you want to staff.
 
-- Open a Cursor window in this project. The runtime rule loads
-  automatically. Paste the activation snippet from
-  `agentctl prompt PM --target cursor`. The agent will then run
-  `agentctl claim PM`, export `MA_SESSION`, and enter its loop.
-- Open a Codex shell in this project. Paste the activation snippet from
-  `agentctl prompt Backend --target codex`. The agent activates the
-  `$multi-agent-runtime` skill and does the same.
+That's it. From this point, just chat with the agents normally.
 
-That is the full setup. From here on **the user only chats with the
-agents**; the CLI is theirs.
+---
 
-### What the agent does every turn
+## What happens when agents are running
 
-Documented in [docs/PROTOCOL.md](./docs/PROTOCOL.md). The short version:
+Each agent, at the start of every response:
 
-```bash
-agentctl plan                          # JSON manifest: unread work + ackToken
-                                       # also carries roleReminder (id, title,
-                                       # owns, etc.) and tasks (active items
-                                       # owned by this role)
-# ... agent processes events / tasks, may call:
-agentctl report      --to <role> --message "<text>"
-agentctl worklog     --message "<text>"
-agentctl task status <task-id> InProgress
-# ... then:
-agentctl ack  --token <ackToken>       # advance cursor exactly to the snapshot
-agentctl wait                          # block-sleep without burning tokens
-```
+1. Checks its inbox for new messages from other agents.
+2. Reads its active tasks from the shared task board.
+3. Reads any open proposals (RFCs) it needs to comment on or decide.
+4. Does its work, then sends messages, updates task statuses, and logs progress.
+5. Goes into a low-cost standby until the next message arrives.
 
-### Bonus: a small end-to-end demo
+You don't manage any of this — the agents handle it themselves using `agentctl` commands.
 
-You can drive the loop by hand in two shells to feel out the protocol.
+### Try it manually
 
-**Shell A (PM):**
+You can drive the whole flow by hand to see how it works:
+
+**Window A — acting as PM:**
 
 ```bash
 agentctl claim PM
-export MA_SESSION=<paste session id from claim>
-agentctl task new --title "Implement /login API" --owner Backend --priority P1 \
-                  --acceptance "POST /login returns JWT, rate-limited 10/min"
-agentctl report  --to TL --message "Goals locked in for Q3"
-agentctl worklog --message "Drafted acceptance for T-0001"
+export MA_SESSION=<session id printed by claim>
+
+# Create a task and assign it
+agentctl task new --title "Build /login endpoint" --owner Backend --priority P1
+
+# Send a message to TL
+agentctl report --to TL --message "Auth scope confirmed. Backend is unblocked."
 ```
 
-**Shell B (Backend):**
+**Window B — acting as Backend:**
 
 ```bash
 agentctl claim Backend
-export MA_SESSION=<paste session id>
-agentctl plan                              # sees the PM events + tasks=[T-0001]
-agentctl task status T-0001 InProgress     # broadcast TASK_STATUS_CHANGED
-# ... do real work in the repo, then:
+export MA_SESSION=<session id>
+
+# See everything waiting for you
+agentctl plan
+
+# Update the task as you work
+agentctl task status T-0001 InProgress
+# ... write the code ...
 agentctl task status T-0001 Review
-agentctl worklog --message "T-0001 ready for review, see commit abc123"
-agentctl ack --token <ackToken from plan>
-agentctl wait --idle 1                     # IDLE after a 1-minute sleep
+agentctl worklog --message "T-0001 done, see commit abc123"
+
+# Confirm you've read and processed everything
+agentctl ack --token <token from plan>
+
+# Go standby
+agentctl wait
 ```
 
 ---
 
-## Core ideas in 60 seconds
+## How agents make shared decisions (RFCs)
 
-- **Roles, not agents.** A role like `PM` is permanent and lives in
-  the repo. Any LLM window can be assigned to play it by holding a
-  fresh _session lease_.
-- **One CLI mediates everything.** Agents never touch `.multi-agent/`
-  with raw `cat`/`sed`/`echo`. They call `agentctl`, which atomically
-  writes JSON and emits events. This is what makes the coordination
-  layer safe across concurrent windows.
-- **Events are immutable JSON files.** One event = one file in
-  `comms/events/`, named by a sortable ULID. No shared log file means
-  no torn reads, no escaping bugs, no global mutex.
-- **Cursors advance only by token.** Each agent calls `plan` to get a
-  manifest of what is unread, then `ack --token` to advance. The
-  cursor cannot skip past anything the agent did not see — fixing the
-  classic "ack races a concurrent write" footgun.
-- **RFCs gather opinions, a leader decides.** Any role can comment on
-  an RFC; only roles listed in `deciders` can call `rfc decide` /
-  `rfc reject` to transition the RFC. No automatic tallies. The next
-  `plan` for each affected role shows the RFC under `manifest.rfcs`
-  with its expected involvement (`voter` or `decider`).
+When a decision affects multiple roles — changing the architecture, adjusting scope, picking between two approaches — an agent opens an RFC instead of just acting unilaterally.
 
-Full architectural reasoning: [docs/DESIGN.md](./docs/DESIGN.md).
+```bash
+# Any agent can open a proposal
+agentctl rfc new switch-to-postgres \
+  --title "Move primary store from SQLite to Postgres" \
+  --options "A:Migrate now,B:Stay on SQLite" \
+  --voters "Backend,DevOps" \
+  --deciders "TL"
+
+# Other agents comment
+agentctl rfc comment RFC-0001 --option A --rationale "Migration is straightforward."
+
+# Only the designated decider can close it
+agentctl rfc decide RFC-0001 --option A --rationale "Agreed. Proceed with migration."
+```
+
+Each agent's next `agentctl plan` automatically shows which RFCs need their attention. No one has to track it manually.
 
 ---
 
-## Capability boundaries
+## What it doesn't do
 
-What this layer does, and the things it intentionally does not do.
-
-**It does:**
-
-- Coordinate any number of agent windows in **one git repository on one
-  machine**.
-- Survive crashes mid-turn: the next window for a role can pick up the
-  outstanding manifest deterministically.
-- Provide stable exit codes for every error class — scripts and agents
-  can branch on `2` (usage), `3` (not initialised), `6` (lock timeout),
-  etc.
-- Work with **any agent runtime that can run a shell command and read
-  JSON**. There is nothing Codex- or Cursor-specific in the core.
-
-**It does not:**
-
-- **Run on multiple machines.** The locking and rename semantics assume
-  one host. NFS / Dropbox / iCloud will silently break lock detection.
-  HTTP transport is on the roadmap (v2.x).
-- **Call LLMs.** This is a coordination layer, not an agent framework.
-  Your existing tool (Codex / Claude Code / Cursor) does the LLM calls.
-- **Run a daemon.** Every command is a short-lived process. (An
-  optional `agentctl watch` for stale-session cleanup is v2.x.)
-- **Cover every possible filesystem hand-edit.** `config.yaml:owns` is
-  enforced by `agentctl` write commands (PR7), so an agent calling the
-  CLI cannot write outside its scope. But anyone with shell access can
-  still `vim` a state file directly; the framework is not a sandbox.
-- **Support Windows out of the box yet.** Code targets POSIX semantics
-  (rename onto open file, `process.kill(pid, 0)`). Windows is on the
-  v2.x roadmap.
-- **Replace git.** Audit lives inside the repo as plain files so you
-  use git to review and revert.
-
-If any of these are a deal-breaker, see
-[docs/ROADMAP.md](./docs/ROADMAP.md) — most are scheduled.
+- **Doesn't work across multiple machines.** Everything runs on one computer. Multi-machine support is planned for a future version.
+- **Doesn't call LLMs.** It's a coordination layer. Your existing tool (Cursor, Claude Code, Codex) handles the AI part.
+- **Doesn't run a background server.** Every `agentctl` command starts and exits immediately.
+- **Doesn't prevent direct file edits.** Agents using `agentctl` can't write outside their assigned scope, but anyone with a terminal and a text editor can still edit files directly.
+- **Doesn't run on Windows yet.** Linux and macOS only for now.
 
 ---
 
-## Roadmap highlights
+## Roadmap
 
-| Milestone | What lands | Status |
-| --- | --- | --- |
-| PR1  | Storage core, locks, events, cursors, sessions | **Done** |
-| PR2  | `claim` / `plan` / `ack` / `report` / `worklog` | **Done** |
-| PR3  | `role create / list / show`, `prompt --target … --write`, `wait` | **Done** |
-| PR4  | Manifest `roleReminder` for context-compressed agents | **Done** |
-| PR5  | Task board (`state/task_board.yaml`, `agentctl task *`) | **Done** |
-| PR6  | RFC state machine (comments + leader decides) | **Done** |
-| PR7  | `config.yaml`-driven role ownership enforcement | **Done** |
-| PR8  | `agentctl upgrade` / `reset`, schema migrations | Next up |
-| PR9  | `agentctl doctor`, history, event archival | Planned |
-| PR10 | Chaos / concurrency soak suite | Planned |
-| v2.x | HTTP transport, watcher daemon, Windows, NFS | Deferred |
+| What | Status |
+| --- | --- |
+| Storage, events, sessions, per-role permissions | Done |
+| Agent communication commands (`claim`, `plan`, `ack`, `report`, `worklog`, `wait`) | Done |
+| Role setup and prompt generation (`role`, `prompt`) | Done |
+| Task board (`task new/assign/status/list/show`) | Done |
+| Proposals and decisions (`rfc new/comment/decide/reject`) | Done |
+| Collaboration handbook (built-in guidance for agents on when to use which command) | Done |
+| Upgrade and reset commands | Up next |
+| Health check and event history (`doctor`, `history`) | Planned |
+| Multi-machine support via HTTP | Future |
 
-Full plan: [docs/ROADMAP.md](./docs/ROADMAP.md).
+Full details: [docs/ROADMAP.md](./docs/ROADMAP.md)
 
 ---
 
 ## Documentation
 
-| Document | Read this when … |
+| | |
 | --- | --- |
-| [docs/DESIGN.md](./docs/DESIGN.md) | You want to know _why_ the layer is shaped this way. |
-| [docs/SCHEMA.md](./docs/SCHEMA.md) | You need the exact file/JSON layout under `.multi-agent/`. |
-| [docs/PROTOCOL.md](./docs/PROTOCOL.md) | You are wiring an agent to talk to `agentctl`. |
-| [docs/HANDBOOK.md](./docs/HANDBOOK.md) | You want the collaboration policy (worklog vs report vs RFC, escalation rules). |
-| [docs/ROADMAP.md](./docs/ROADMAP.md) | You want to know what is shipping next. |
-| [CHANGELOG.md](./CHANGELOG.md) | You want release notes. |
-| [AGENTS.md](./AGENTS.md) | You are editing this repo (human or agent). |
+| [docs/PROTOCOL.md](./docs/PROTOCOL.md) | The full agent loop — every command the agent uses and when |
+| [docs/HANDBOOK.md](./docs/HANDBOOK.md) | Judgement calls — when to worklog vs report vs open an RFC, when to ask the user |
+| [docs/SCHEMA.md](./docs/SCHEMA.md) | What every file under `.multi-agent/` contains |
+| [docs/DESIGN.md](./docs/DESIGN.md) | Why things are designed the way they are |
+| [CHANGELOG.md](./CHANGELOG.md) | Release history |
 
 ---
 
@@ -340,15 +241,14 @@ git clone <this repo>
 cd codex-agent
 npm install
 npm run build
-npm test                # 19 vitest cases, ~1.3 s
+npm test
 ./bin/agentctl --help
 ```
 
-The package layout, coding conventions, and "do not reintroduce v0.1"
-guardrails are in [AGENTS.md](./AGENTS.md).
+See [AGENTS.md](./AGENTS.md) for the code layout and contribution conventions.
 
 ---
 
 ## License
 
-MIT.
+MIT
