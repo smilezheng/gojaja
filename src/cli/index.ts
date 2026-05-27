@@ -13,6 +13,7 @@ import { runTask } from "./commands/task";
 import { runVersion } from "./commands/version";
 import { runWait } from "./commands/wait";
 import { runWorklog } from "./commands/worklog";
+import { runWriteState } from "./commands/write-state";
 import { HELP_TEXT } from "./help";
 
 async function dispatch(): Promise<number> {
@@ -56,6 +57,8 @@ async function dispatch(): Promise<number> {
       return runPrompt(args);
     case "wait":
       return runWait(args);
+    case "write-state":
+      return runWriteState(args);
     default:
       throw new UsageError(`Unknown command: ${args.command}`);
   }

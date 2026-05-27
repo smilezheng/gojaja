@@ -79,9 +79,12 @@ Field rules:
 
 - `schemaVersion` must match the on-disk `VERSION` file.
 - `roles` is `Record<RoleId, RoleConfig>`.
-- `RoleConfig.owns` and `mustNotEdit` are advisory in v2.0.0-alpha.2;
-  enforcement at write time arrives in a later PR. They are still
-  authoritative for the role contract.
+- `RoleConfig.owns` is **enforced at write time** as of PR7. Entries
+  match an exact relative path OR a directory prefix (entries ending
+  with `/` cover the entire subtree).
+- `RoleConfig.mustNotEdit` is also enforced: a path that appears in
+  this list is refused even if it ALSO appears in `owns`. Defence in
+  depth.
 - `reportsTo` is advisory; not enforced.
 
 Created and mutated only through `agentctl role create` (and future

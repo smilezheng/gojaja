@@ -3,6 +3,7 @@ import * as path from "node:path";
 import * as yaml from "js-yaml";
 import {
   AlreadyInitializedError,
+  ForbiddenError,
   NotInitializedError,
   StateCorruptionError,
   UnknownRoleError,
@@ -72,6 +73,21 @@ function formatTaskId(n: number): string {
 
 function formatRfcId(n: number): string {
   return `RFC-${String(n).padStart(4, "0")}`;
+}
+
+/**
+ * Match an `owns` / `mustNotEdit` entry against a target relative path.
+ *
+ * - Exact equality matches a single file.
+ * - An entry ending in `/` matches any path that is a strict child of
+ *   that directory.
+ * - Trailing slashes are normalised so `state/` and `state` both work as
+ *   directory entries.
+ */
+function pathMatches(entry: string, target: string): boolean {
+  const e = entry.replace(/\/+$/, "");
+  if (e === target) return true;
+  return target.startsWith(`${e}/`);
 }
 
 /**
@@ -655,6 +671,72 @@ export class LocalFsStore implements Store {
     return { path: target, writtenAt };
   }
 
+  // ---- ownership ----------------------------------------------------------
+
+  /**
+   * Verify the `actor` has permission to write to `relPath`. `"SYSTEM"`
+   * bypasses the check by design (humans running the CLI manually).
+   *
+   * Rules:
+   *   - relPath must be a valid path inside the layer (no .. escapes).
+   *   - if relPath is in `mustNotEdit` for the actor, refuse (defence in
+   *     depth even if owns also contained it).
+   *   - else relPath must appear in `config.yaml:roles[actor].owns`. An
+   *     entry matches when it equals relPath OR is a directory prefix
+   *     of relPath (entries ending with `/` are explicit directories).
+   */
+  private async requireOwnership(
+    actor: RoleId | "SYSTEM",
+    relPath: string,
+  ): Promise<void> {
+    if (actor === "SYSTEM") return;
+    validateRoleId(actor);
+    // Force a path-traversal check on relPath even though it's a
+    // framework-internal constant in most call sites — defence in depth.
+    this.abs(relPath);
+
+    const config = await this.readConfig();
+    const cfg = config.roles[actor];
+    if (!cfg) {
+      throw new ForbiddenError(
+        `Role '${actor}' is not registered in config.yaml; ` +
+          `cannot write '${relPath}'.`,
+      );
+    }
+    if (cfg.mustNotEdit.some((p) => pathMatches(p, relPath))) {
+      throw new ForbiddenError(
+        `Role '${actor}' is forbidden by mustNotEdit from writing '${relPath}'.`,
+      );
+    }
+    if (!cfg.owns.some((p) => pathMatches(p, relPath))) {
+      throw new ForbiddenError(
+        `Role '${actor}' does not own '${relPath}'. ` +
+          `Add it to config.yaml:roles.${actor}.owns, or get an authorised role to do this write.`,
+      );
+    }
+  }
+
+  async writeStateFile(input: {
+    actor: RoleId | "SYSTEM";
+    relPath: string;
+    content: string;
+  }): Promise<{ relPath: string; absolutePath: string }> {
+    if (typeof input.relPath !== "string" || input.relPath.length === 0) {
+      throw new UsageError("--file must be a non-empty relative path.");
+    }
+    // writeStateFile can only target paths under the `state/` subtree,
+    // by convention. Other writes have dedicated commands.
+    if (!input.relPath.startsWith(`${Paths.stateDir}/`)) {
+      throw new UsageError(
+        `write-state can only write under ${Paths.stateDir}/. Got '${input.relPath}'.`,
+      );
+    }
+    await this.requireOwnership(input.actor, input.relPath);
+    const absolutePath = this.abs(input.relPath);
+    await atomicWriteFile(absolutePath, input.content);
+    return { relPath: input.relPath, absolutePath };
+  }
+
   // ---- task board ---------------------------------------------------------
 
   async readTaskBoard(): Promise<TaskBoard> {
@@ -717,6 +799,8 @@ export class LocalFsStore implements Store {
     const dependsOn = (input.dependsOn ?? []).map((d) => String(d));
     const acceptance = input.acceptance ?? "";
 
+    await this.requireOwnership(input.actor, Paths.taskBoardFile);
+
     return this.withLock("task-board", async () => {
       const board = await this.readTaskBoard();
       const idNumber = board.nextId + 1;
@@ -762,6 +846,7 @@ export class LocalFsStore implements Store {
     actor: RoleId | "SYSTEM";
   }): Promise<Task> {
     validateRoleId(input.newOwner);
+    await this.requireOwnership(input.actor, Paths.taskBoardFile);
     return this.withLock("task-board", async () => {
       const board = await this.readTaskBoard();
       const task = board.tasks[input.taskId];
@@ -799,6 +884,13 @@ export class LocalFsStore implements Store {
       const task = board.tasks[input.taskId];
       if (!task) {
         throw new UsageError(`Unknown task '${input.taskId}'.`);
+      }
+      // Either the actor owns the task board, or the actor IS this task's
+      // owner. The owner-exception lets agents update their own status
+      // without requiring blanket task_board write access.
+      const isTaskOwner = input.actor !== "SYSTEM" && task.owner === input.actor;
+      if (!isTaskOwner) {
+        await this.requireOwnership(input.actor, Paths.taskBoardFile);
       }
       const previousStatus = task.status;
       if (previousStatus === input.newStatus) return task;

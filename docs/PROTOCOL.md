@@ -138,6 +138,42 @@ ack — see the regression test
 - Designed to be small and frequent; reserve large narratives for
   reports or RFC comments.
 
+## Ownership-gated writes
+
+`config.yaml:roles[<role>].owns` is the runtime authorization gate for
+state-mutating commands. Two rules:
+
+1. A path appears in the actor's `owns` list — exact match OR directory
+   prefix (entries ending in `/` cover the subtree). Matched ⇒ allowed.
+2. If the path also appears in `mustNotEdit`, the write is refused
+   regardless of `owns`. Defence in depth.
+
+Commands gated:
+
+- `agentctl task new` / `agentctl task assign` — require the actor to
+  own `state/task_board.yaml`. SYSTEM bypasses (so a human running the
+  CLI outside any session can still bootstrap the board).
+- `agentctl task status <task-id> <status>` — same gate, but a **task
+  owner exception** also applies: a role may always move its OWN task's
+  status. This lets engineering roles update progress without
+  blanket task-board write access.
+- `agentctl write-state --file <state/path>` — generic state writer
+  gated by `owns`; `--file` must live under `state/`.
+
+`ForbiddenError` exits 9 (distinct from `UsageError`'s exit 2 so a
+caller can distinguish "you said it wrong" from "you are not allowed").
+
+### `agentctl write-state --file <state/path> [--content <text>]`
+
+- `--file` must be a relative path under `state/`. Path-traversal
+  refused via the standard `resolveInside` check.
+- Content comes from `--content <text>` if given, otherwise from stdin.
+- Identity: agents authenticate via `MA_SESSION` as usual; humans
+  running the CLI without a session write as `"SYSTEM"` and bypass the
+  gate.
+- Writes are atomic (write tmp + rename), so a reader is never exposed
+  to partial content.
+
 ## Task board
 
 Tasks are the unit of "what should this role be working on right now".

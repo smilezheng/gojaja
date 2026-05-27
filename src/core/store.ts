@@ -300,4 +300,24 @@ export interface Store {
 
   /** Enumerate RFCs, oldest first. Optionally filter by status. */
   listRfcs(filter?: { status?: RfcStatus }): Promise<RfcProposal[]>;
+
+  // ---- ownership-gated writes --------------------------------------------
+
+  /**
+   * Atomically write a file under the layer root, gated by the actor's
+   * `config.yaml:roles[actor].owns`. The path must be relative, must
+   * resolve inside `.multi-agent/` (no `..` escapes), and must appear in
+   * the actor's `owns` list. If the same path also appears in the actor's
+   * `mustNotEdit` list, the write is refused regardless of `owns` (defence
+   * in depth).
+   *
+   * `actor` can be a role id or `"SYSTEM"`. `"SYSTEM"` bypasses the gate
+   * — the human running the CLI by hand should still be able to repair
+   * state files. Doctor (PR9) will flag SYSTEM writes as needing audit.
+   */
+  writeStateFile(input: {
+    actor: RoleId | "SYSTEM";
+    relPath: string;
+    content: string;
+  }): Promise<{ relPath: string; absolutePath: string }>;
 }

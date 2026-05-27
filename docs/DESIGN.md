@@ -244,6 +244,7 @@ agents can branch deterministically.
 | `LockTimeoutError`       |    6 | Lock acquire exceeded `timeoutMs`.                 |
 | `PathValidationError`    |    7 | Path escapes layer root or is malformed.           |
 | `StateCorruptionError`   |    8 | On-disk record fails its expected shape.           |
+| `ForbiddenError`         |    9 | Authenticated caller lacks the configured permission. |
 | _internal_error_         |   99 | Unexpected exception (bug).                        |
 
 Exit codes never overlap with successful informational outcomes. In

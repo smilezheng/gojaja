@@ -70,3 +70,14 @@ export class StateCorruptionError extends AgentctlError {
     super("STATE_CORRUPT", message, 8);
   }
 }
+
+/**
+ * Raised when a caller is authenticated but lacks the configured
+ * permission to perform a write. Distinct from UsageError so scripts and
+ * agents can distinguish "you said it wrong" from "you are not allowed".
+ */
+export class ForbiddenError extends AgentctlError {
+  constructor(message: string) {
+    super("FORBIDDEN", message, 9);
+  }
+}

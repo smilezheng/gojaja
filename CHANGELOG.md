@@ -10,8 +10,51 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 ### Planned next
 
-- PR7: ownership enforcement (config.yaml `owns` becomes a runtime gate
-  for state writes and task mutations).
+- PR8: installer / upgrade / reset, AGENTS.md bridge versioned block.
+
+## [2.0.0-alpha.6] — 2026-05-27
+
+### Added (PR7 — ownership enforcement)
+
+- `config.yaml:roles[<role>].owns` and `mustNotEdit` are now **runtime
+  gates** for state-mutating commands, not just documentation.
+- New `ForbiddenError` class (exit code 9), distinct from `UsageError`
+  (exit 2), so callers can branch on "you are not allowed" vs "you said
+  it wrong".
+- New `Store.writeStateFile({ actor, relPath, content })`:
+  - `relPath` must live under `state/`.
+  - Atomic write (write tmp + rename); reader never sees partial.
+  - Gated by `owns` (exact path OR directory-prefix match for entries
+    ending in `/`).
+  - Refused if the path also appears in `mustNotEdit` (defence in
+    depth, even if `owns` also contains it).
+  - `actor === "SYSTEM"` bypasses the gate so the human running the
+    CLI manually can bootstrap or repair state.
+- Task mutations are now gated:
+  - `createTask` and `assignTask` require ownership of
+    `state/task_board.yaml`.
+  - `setTaskStatus` has a **task-owner exception**: a role may always
+    update its OWN task's status, even without blanket task-board
+    ownership. This lets engineering roles (Backend, QA, ...) report
+    progress without being granted PM-level scope.
+- New CLI `agentctl write-state --file <state/path> [--content <text>]`:
+  - Content comes from `--content` if given, otherwise from stdin.
+  - Identity from `MA_SESSION` (or `"SYSTEM"` if unset).
+- 14 new vitest cases (`tests/ownership.test.ts`): writeStateFile
+  allow/deny per role, mustNotEdit override, SYSTEM bypass, refusal
+  outside `state/`, path-traversal refusal, directory-prefix matching,
+  unknown actor refusal, task createTask/assignTask gating, task-owner
+  exception, refusal for unrelated roles on status changes.
+- 81 -> 115 tests total.
+
+### Hardened
+
+- `withFileLock`'s `detectStale` and `releaseIfOwned` now tolerate
+  partial reads of the lock file (the lock is written non-atomically
+  via `O_EXCL + write + close`, so a concurrent reader can briefly
+  observe an empty/half-written file). Parse failures are treated as
+  "record not yet observable" — never a reason to break a lock. Removes
+  a latent flake under high test concurrency.
 
 ## [2.0.0-alpha.5] — 2026-05-27
 

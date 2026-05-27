@@ -54,6 +54,13 @@ Keepalive (requires MA_SESSION):
                                               writes a .wait sentinel and
                                               returns immediately.
 
+Ownership-gated writes:
+  write-state --file <state/path> [--content <text>]
+                                              Write atomically into the
+                                              layer, gated by the actor's
+                                              config.yaml owns. Content
+                                              comes from --content or stdin.
+
 Global options:
   --root <path>                               Override project root.
   --json                                      Force JSON output.

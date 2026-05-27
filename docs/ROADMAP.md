@@ -84,12 +84,18 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     RFC closes).
   - Event types: `RFC_CREATED`, `RFC_COMMENT`, `RFC_DECIDED`.
 
-### Planned, in priority order
-
 - **PR7 — ownership enforcement.**
-  - `config.yaml` schema validated at startup.
-  - `agentctl write-state --file <path>` gated by
-    `config.yaml:roles[caller].owns`.
+  - `config.yaml:roles[<role>].owns` and `mustNotEdit` become runtime
+    gates for state writes and task mutations.
+  - `agentctl write-state --file <state/path>` writes atomically into
+    the state subtree, gated by ownership; `SYSTEM` (no MA_SESSION)
+    bypasses for human bootstrap.
+  - `agentctl task new` / `task assign` require ownership of
+    `state/task_board.yaml`. `task status` has a task-owner exception
+    (a role may always update its own task's status).
+  - New `ForbiddenError` class with stable exit code 9.
+
+### Planned, in priority order
 
 - **PR8 — installer & upgrade.**
   - `agentctl upgrade` driving `src/migrations/<from>-<to>.ts`.

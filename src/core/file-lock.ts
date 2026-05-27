@@ -103,7 +103,13 @@ export async function withFileLock<T>(
 }
 
 async function releaseIfOwned(lockPath: string, ownerId: string): Promise<void> {
-  const current = await readJsonFileOrNull<LockRecord>(lockPath);
+  let current: LockRecord | null = null;
+  try {
+    current = await readJsonFileOrNull<LockRecord>(lockPath);
+  } catch (err) {
+    if (!(err instanceof SyntaxError)) throw err;
+    // Partial write observed; treat as "not ours" and don't unlink.
+  }
   if (current && current.owner === ownerId) {
     await safeUnlink(lockPath);
   }
@@ -112,7 +118,18 @@ async function releaseIfOwned(lockPath: string, ownerId: string): Promise<void> 
 }
 
 async function detectStale(lockPath: string): Promise<LockRecord | null> {
-  const current = await readJsonFileOrNull<LockRecord>(lockPath);
+  // The lock file is written non-atomically (open + write + close, no
+  // rename). A concurrent reader can therefore observe an empty or
+  // partial file. Tolerate parse failures by treating the lock as
+  // "currently held but contents not yet observable" — never break a
+  // half-written lock; let the next poll see the complete record.
+  let current: LockRecord | null = null;
+  try {
+    current = await readJsonFileOrNull<LockRecord>(lockPath);
+  } catch (err) {
+    if (err instanceof SyntaxError) return null;
+    throw err;
+  }
   if (!current) return null;
   if (current.leaseExpiresAt <= Date.now()) return current;
   if (current.host === hostId() && !pidAlive(current.pid)) return current;

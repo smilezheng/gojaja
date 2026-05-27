@@ -8,7 +8,12 @@ async function freshStore() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-task-"));
   const store = new LocalFsStore(root);
   await store.initialise("2.0.0-test");
-  await store.createRole({ id: "PM", title: "Product Manager" });
+  // PM owns the task board; Backend/QA do not, but they are still able to
+  // update their own task's status thanks to the task-owner exception.
+  await store.createRole({
+    id: "PM", title: "Product Manager",
+    owns: ["state/task_board.yaml"],
+  });
   await store.createRole({ id: "Backend", title: "Backend Engineer" });
   await store.createRole({ id: "QA", title: "Quality Assurance" });
   return { root, store };

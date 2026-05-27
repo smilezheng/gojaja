@@ -51,7 +51,7 @@ CrewAI 之类托管的多 agent 框架，那本项目解决的不是你的问题
 
 ## 当前状态
 
-**v2.0.0-alpha.5**。已经实现并由 101 个测试覆盖：
+**v2.0.0-alpha.6**。已经实现并由 115 个测试覆盖：
 
 - 存储核心（事件、游标、会话、per-resource 锁）。
 - 每回合 agent 循环：`claim` / `plan` / `ack` / `report` / `worklog` /
@@ -64,8 +64,11 @@ CrewAI 之类托管的多 agent 框架，那本项目解决的不是你的问题
 - RFC：`rfc new / comment / decide / reject / list / show`。状态机
   `open -> accepted | rejected`；只有 `deciders` 名单里的角色能 decide
   /reject；不做自动计票。Manifest 自动携带需要本角色处理的开放 RFC。
+- 可写域强制：`config.yaml:roles[<role>].owns` / `mustNotEdit` 已经是
+  写入运行时的强制门，agentctl 拒绝越权写。新增 `agentctl write-state`
+  统一写入入口。
 
-还在排队的：可写域强制、`doctor`——详见
+还在排队的：安装器/升级、`doctor`——详见
 [docs/ROADMAP](./docs/ROADMAP.md)。
 
 跟进进度请关注 `v2` 分支。
@@ -108,8 +111,13 @@ schema：[docs/SCHEMA.md](./docs/SCHEMA.md)。
 ### 2. 创建你需要的角色
 
 ```bash
-agentctl role create PM "Product Manager"   --description "Owns scope and acceptance"
-agentctl role create TL "Tech Lead"         --description "Owns architecture and integration order"
+# owns 从 PR7 起是写入时的强制门——给 PM/TL 设好它们需要的可写域。
+agentctl role create PM "Product Manager" \
+                   --description "Owns scope and acceptance" \
+                   --owns "state/project_state.md,state/task_board.yaml"
+agentctl role create TL "Tech Lead" \
+                   --description "Owns architecture and integration order" \
+                   --owns "state/architecture.md"
 agentctl role create Backend "Backend Engineer"
 agentctl role create QA "Quality Assurance"
 
@@ -257,8 +265,9 @@ agentctl wait --idle 1                     # 1 分钟后返回 IDLE
   工具（Codex / Claude Code / Cursor）负责。
 - **不跑守护进程**。每条命令都是短生命周期进程。（可选的
   `agentctl watch` 用于清理过期 session，在 v2.x。）
-- **OS 级还没强制角色可写域**。契约已经在 `config.yaml` 里（PR3 引入），
-  但写入校验在 PR7 才上线；在那之前 agent 需要自觉遵守。
+- **没法防住所有手工绕过**。`config.yaml:owns` 在 `agentctl` 写命令里
+  强制（PR7），所以 agent 通过 CLI 不会越权。但拥有 shell 权限的人仍
+  能直接 `vim` 修改 state 文件；本框架不是沙箱。
 - **暂不支持 Windows**。代码依赖 POSIX 语义（rename onto open file、
   `process.kill(pid, 0)`）。Windows 在 v2.x 路线图里。
 - **不替代 git**。审计就以纯文件形式躺在仓库里，靠 git 做 review 和
@@ -279,8 +288,8 @@ agentctl wait --idle 1                     # 1 分钟后返回 IDLE
 | PR4  | manifest 里的 `roleReminder`，让被压缩上下文的 agent 重新锚定身份 | **完成** |
 | PR5  | 任务板（`state/task_board.yaml`、`agentctl task *`） | **完成** |
 | PR6  | RFC 状态机（意见 + leader 决定） | **完成** |
-| PR7  | `config.yaml` 驱动的角色可写域强制 | 计划中 |
-| PR8  | 安装器、`upgrade`、`reset`、AGENTS.md 注入 | 计划中 |
+| PR7  | `config.yaml` 驱动的角色可写域强制 | **完成** |
+| PR8  | 安装器、`upgrade`、`reset`、AGENTS.md 注入 | 即将开始 |
 | PR9  | `agentctl doctor`、历史回放、事件归档 | 计划中 |
 | PR10 | 混沌 / 并发压测套件 | 计划中 |
 | v2.x | HTTP 传输、watcher daemon、Windows、NFS | 推迟 |

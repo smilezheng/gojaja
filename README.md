@@ -54,7 +54,7 @@ file-only_ agents safe to combine.
 
 ## Status
 
-**v2.0.0-alpha.5.** Implemented and covered by 101 tests:
+**v2.0.0-alpha.6.** Implemented and covered by 115 tests:
 
 - Storage core (events, cursors, sessions, per-resource locks).
 - Per-turn agent loop: `claim` / `plan` / `ack` / `report` / `worklog`
@@ -69,8 +69,11 @@ file-only_ agents safe to combine.
   machine `open -> accepted | rejected`; deciders gate enforced; no
   automatic tally. Manifest carries open RFCs needing this role's
   action.
+- Ownership enforcement: `config.yaml:roles[<role>].owns` / `mustNotEdit`
+  are now runtime gates for state writes and task mutations, plus a new
+  `agentctl write-state` command.
 
-Still to come: ownership enforcement, doctor — see
+Still to come: installer / upgrade, doctor — see
 [docs/ROADMAP](./docs/ROADMAP.md).
 
 If you want to follow along, watch the `v2` branch.
@@ -114,8 +117,13 @@ to git. Full schema: [docs/SCHEMA.md](./docs/SCHEMA.md).
 ### 2. Create the roles you want
 
 ```bash
-agentctl role create PM "Product Manager"   --description "Owns scope and acceptance"
-agentctl role create TL "Tech Lead"         --description "Owns architecture and integration order"
+# Owns are runtime-enforced as of PR7 — give PM/TL the scopes they need.
+agentctl role create PM "Product Manager" \
+                   --description "Owns scope and acceptance" \
+                   --owns "state/project_state.md,state/task_board.yaml"
+agentctl role create TL "Tech Lead" \
+                   --description "Owns architecture and integration order" \
+                   --owns "state/architecture.md"
 agentctl role create Backend "Backend Engineer"
 agentctl role create QA "Quality Assurance"
 
@@ -271,9 +279,10 @@ What this layer does, and the things it intentionally does not do.
   Your existing tool (Codex / Claude Code / Cursor) does the LLM calls.
 - **Run a daemon.** Every command is a short-lived process. (An
   optional `agentctl watch` for stale-session cleanup is v2.x.)
-- **Enforce role write-scope at the OS level today.** The contract is
-  already in `config.yaml` (introduced in PR3), but write-time
-  enforcement lands in PR7; until then, agents are expected to follow it.
+- **Cover every possible filesystem hand-edit.** `config.yaml:owns` is
+  enforced by `agentctl` write commands (PR7), so an agent calling the
+  CLI cannot write outside its scope. But anyone with shell access can
+  still `vim` a state file directly; the framework is not a sandbox.
 - **Support Windows out of the box yet.** Code targets POSIX semantics
   (rename onto open file, `process.kill(pid, 0)`). Windows is on the
   v2.x roadmap.
@@ -295,8 +304,8 @@ If any of these are a deal-breaker, see
 | PR4  | Manifest `roleReminder` for context-compressed agents | **Done** |
 | PR5  | Task board (`state/task_board.yaml`, `agentctl task *`) | **Done** |
 | PR6  | RFC state machine (comments + leader decides) | **Done** |
-| PR7  | `config.yaml`-driven role ownership enforcement | Planned |
-| PR8  | `agentctl upgrade` / `reset`, schema migrations | Planned |
+| PR7  | `config.yaml`-driven role ownership enforcement | **Done** |
+| PR8  | `agentctl upgrade` / `reset`, schema migrations | Next up |
 | PR9  | `agentctl doctor`, history, event archival | Planned |
 | PR10 | Chaos / concurrency soak suite | Planned |
 | v2.x | HTTP transport, watcher daemon, Windows, NFS | Deferred |
