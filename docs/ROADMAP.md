@@ -87,9 +87,10 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
 - **PR7 — ownership enforcement.**
   - `config.yaml:roles[<role>].owns` and `mustNotEdit` become runtime
     gates for state writes and task mutations.
-  - `agentctl write-state --file <state/path>` writes atomically into
-    the state subtree, gated by ownership; `SYSTEM` (no MA_SESSION)
-    bypasses for human bootstrap.
+  - `agentctl state edit --file <state/path>` (renamed from
+    `agentctl write-state` in PR8f-C) writes atomically into the state
+    subtree, gated by ownership; `SYSTEM` (no MA_SESSION) bypasses for
+    human bootstrap.
   - `agentctl task new` / `task assign` require ownership of
     `state/task_board.yaml`. `task status` has a task-owner exception
     (a role may always update its own task's status).
@@ -188,12 +189,23 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - `agentctl init` seeds a TBD skeleton at `state/project_state.md`
     so the file always exists; the handbook nudges agents to ask the
     user to fill TBD sections before judging Done.
-  - `agentctl write-state` gains `--append` and `--replace`/`--with`/
-    `--batch` modes alongside the existing `--content` (overwrite).
-    Default replace refuses 0 or N>1 matches; `--batch` allows N>1.
-    All modes still flow through ownership / mustNotEdit / path
-    canonical-form gates and remain atomic.
+  - `agentctl write-state` (later renamed to `agentctl state edit` in
+    PR8f-C) gains `--append` and `--replace`/`--with`/`--batch` modes
+    alongside the existing `--content` (overwrite). Default replace
+    refuses 0 or N>1 matches; `--batch` allows N>1. All modes still
+    flow through ownership / mustNotEdit / path canonical-form gates
+    and remain atomic.
   - Suite 198 -> 214.
+
+- **PR8f-C — rename write-state, sync help, roleReminder hint.**
+  - `agentctl write-state` renamed to `agentctl state edit` (hard
+    cut; alpha-stage, no backward alias). Subcommand-group style now
+    consistent with `task / role / rfc`.
+  - `agentctl -h` rewrites the state-editing section to list all
+    three modes with copy-pasteable invocations.
+  - `manifest.roleReminder.protocol` adds a `agentctl role show
+    <you>` hint so agents who lose context are routed to recover
+    their own contract every turn (within the 300-byte budget).
 
 ### Planned, in priority order
 
@@ -257,10 +269,9 @@ After PR10 we tag `v2.0.0`.
 
 PR1–PR7 + PR8a establish the protocol surface (events, sessions,
 plan/ack, tasks, RFCs, ownership, handbook). PR7a / PR8b / PR8c / PR8d /
-PR8e / PR8f-A / PR8f-B are correctness + UX hardening that introduce no
-breaking protocol changes (PR8f-B widens `writeStateFile` and adds a
-seeded project_state skeleton — backward-compatible for existing
-projects re-initialised on a fresh root). PR8g–PR10 harden the layer
-for everyday use; PR8g is the only remaining schema-affecting PR
-before `v2.0.0`. Anything past `v2.0.0` only ships after the chaos
+PR8e / PR8f-A / PR8f-B / PR8f-C are correctness + UX hardening: the
+only "breaking" surface change is PR8f-C renaming `agentctl write-state`
+to `agentctl state edit` (alpha stage; no users yet). PR8g–PR10 harden
+the layer for everyday use; PR8g is the only remaining schema-affecting
+PR before `v2.0.0`. Anything past `v2.0.0` only ships after the chaos
 suite (PR10) is green.

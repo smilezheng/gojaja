@@ -3,11 +3,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalFsStore } from "../src/core/local-fs-store";
-import { runWriteState } from "../src/cli/commands/write-state";
+import { runState } from "../src/cli/commands/state";
 import type { ParsedArgs } from "../src/cli/argv";
 
 async function freshProject() {
-  const projectRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-write-state-"));
+  const projectRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-state-edit-"));
   const root = path.join(projectRoot, ".multi-agent");
   const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
@@ -25,7 +25,7 @@ async function freshProject() {
 }
 
 function args(flags: Record<string, string | boolean>): ParsedArgs {
-  return { command: "write-state", positional: [], flags };
+  return { command: "state", positional: ["edit"], flags };
 }
 
 describe("Store.writeStateFile — append mode (PR8f-B)", () => {
@@ -34,8 +34,6 @@ describe("Store.writeStateFile — append mode (PR8f-B)", () => {
   afterEach(async () => { await fsp.rm(ctx.projectRoot, { recursive: true, force: true }); });
 
   it("appends text to an existing file without touching the prior content", async () => {
-    // Seed a known file (project_state.md was initialised with a
-    // skeleton; we overwrite to known content for a clean baseline).
     await ctx.store.writeStateFile({
       actor: "SYSTEM",
       relPath: "state/project_state.md",
@@ -56,7 +54,6 @@ describe("Store.writeStateFile — append mode (PR8f-B)", () => {
   });
 
   it("appending to an absent file creates it with just the appended bytes", async () => {
-    // decisions.md is in PM's owns but the skeleton doesn't create it.
     const result = await ctx.store.writeStateFile({
       actor: "PM",
       relPath: "state/decisions.md",
@@ -181,8 +178,6 @@ describe("Store.writeStateFile — replace mode (PR8f-B)", () => {
   });
 
   it("ownership gate still applies: PM cannot replace in TL-owned architecture.md", async () => {
-    // SYSTEM seeds a baseline so the gate fires on content match, not
-    // on file-not-found.
     await ctx.store.writeStateFile({
       actor: "SYSTEM",
       relPath: "state/architecture.md",
@@ -214,14 +209,42 @@ function captureStdout(): Captured {
   return cap;
 }
 
-describe("agentctl write-state CLI — flag-exclusion matrix (PR8f-B)", () => {
+describe("agentctl state (CLI dispatcher, PR8f-C)", () => {
+  let ctx: { projectRoot: string; root: string; store: LocalFsStore };
+  beforeEach(async () => { ctx = await freshProject(); });
+  afterEach(async () => { await fsp.rm(ctx.projectRoot, { recursive: true, force: true }); });
+
+  it("rejects an unknown subcommand with a USAGE listing the valid ones", async () => {
+    // Future-proofing: when we add more subcommands (e.g. show), this
+    // gate prevents typos from silently being misinterpreted.
+    await expect(
+      runState({
+        command: "state",
+        positional: ["bogus"],
+        flags: { file: "state/x.md", root: ctx.projectRoot },
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("rejects a missing subcommand with the same usage hint", async () => {
+    await expect(
+      runState({
+        command: "state",
+        positional: [],
+        flags: { file: "state/x.md", root: ctx.projectRoot },
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+});
+
+describe("agentctl state edit CLI — flag-exclusion matrix (PR8f-B)", () => {
   let ctx: { projectRoot: string; root: string; store: LocalFsStore };
   beforeEach(async () => { ctx = await freshProject(); });
   afterEach(async () => { await fsp.rm(ctx.projectRoot, { recursive: true, force: true }); });
 
   it("rejects --content together with --append", async () => {
     await expect(
-      runWriteState(args({
+      runState(args({
         file: "state/project_state.md",
         content: "x",
         append: "y",
@@ -232,7 +255,7 @@ describe("agentctl write-state CLI — flag-exclusion matrix (PR8f-B)", () => {
 
   it("rejects --replace without --with", async () => {
     await expect(
-      runWriteState(args({
+      runState(args({
         file: "state/project_state.md",
         replace: "x",
         root: ctx.projectRoot,
@@ -242,7 +265,7 @@ describe("agentctl write-state CLI — flag-exclusion matrix (PR8f-B)", () => {
 
   it("rejects --with without --replace", async () => {
     await expect(
-      runWriteState(args({
+      runState(args({
         file: "state/project_state.md",
         with: "y",
         root: ctx.projectRoot,
@@ -252,7 +275,7 @@ describe("agentctl write-state CLI — flag-exclusion matrix (PR8f-B)", () => {
 
   it("rejects --batch outside of --replace", async () => {
     await expect(
-      runWriteState(args({
+      runState(args({
         file: "state/project_state.md",
         append: "x",
         batch: true,
@@ -263,7 +286,7 @@ describe("agentctl write-state CLI — flag-exclusion matrix (PR8f-B)", () => {
 
   it("rejects --content together with --replace", async () => {
     await expect(
-      runWriteState(args({
+      runState(args({
         file: "state/project_state.md",
         content: "x",
         replace: "a",
@@ -274,7 +297,6 @@ describe("agentctl write-state CLI — flag-exclusion matrix (PR8f-B)", () => {
   });
 
   it("human output names the mode (Wrote / Appended / Replaced)", async () => {
-    // Seed.
     await ctx.store.writeStateFile({
       actor: "SYSTEM",
       relPath: "state/project_state.md",
@@ -282,7 +304,7 @@ describe("agentctl write-state CLI — flag-exclusion matrix (PR8f-B)", () => {
     });
     const cap = captureStdout();
     try {
-      await runWriteState(args({
+      await runState(args({
         file: "state/project_state.md",
         replace: "world",
         with: "moon",

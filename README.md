@@ -41,7 +41,7 @@ This is the most common confusion. Here is the boundary, once.
 | Upgrade the tool, re-run `prompt --write --force-rewrite`, restart windows | You | When you bump the CLI version |
 | `agentctl claim / plan / ack / wait / report / worklog / task ... / rfc ...` | The agent | Every turn, automatically |
 | Write code, write docs, run tests | The agent | When you give it a task |
-| `agentctl write-state` to project files inside its `owns` | The agent | When the role's contract says so |
+| `agentctl state edit` to project files inside its `owns` (overwrite / append / replace modes) | The agent | When the role's contract says so |
 
 If you find yourself running `agentctl plan` or `claim` by hand, you are probably driving the flow manually for debugging. That's fine — see [Driving it by hand](#driving-it-by-hand-for-debugging) below.
 

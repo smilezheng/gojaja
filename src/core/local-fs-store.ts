@@ -1061,7 +1061,7 @@ export class LocalFsStore implements Store {
     // by convention. Other writes have dedicated commands.
     if (!input.relPath.startsWith(`${Paths.stateDir}/`)) {
       throw new UsageError(
-        `write-state can only write under ${Paths.stateDir}/. Got '${input.relPath}'.`,
+        `state edit can only write under ${Paths.stateDir}/. Got '${input.relPath}'.`,
       );
     }
     await this.requireOwnership(input.actor, input.relPath);

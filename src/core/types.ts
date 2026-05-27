@@ -78,7 +78,9 @@ export interface RoleReminder {
  * every manifest and we do not want to inflate agent prompts.
  */
 export const PROTOCOL_ONE_LINER =
-  "Loop: plan -> ack --token <t> -> wait. All writes via agentctl; never hand-edit .multi-agent/.";
+  "Loop: plan -> ack <t> -> wait. " +
+  "Lost your role? Run `agentctl role show <you>`. " +
+  "Writes via agentctl only; never hand-edit .multi-agent/.";
 
 /**
  * Snapshot of work pending for a role, produced by `plan` and consumed by
@@ -131,7 +133,7 @@ export interface WorklogPayload {
 
 /**
  * Per-role configuration. The single source of truth for ownership,
- * reporting structure, and any field that later commands (write-state,
+ * reporting structure, and any field that later commands (state edit,
  * role reminder, RFC voter lists) consume programmatically. The markdown
  * file under `roles/<id>.md` is for humans and the agent prompt; this
  * structured record is for the machine.

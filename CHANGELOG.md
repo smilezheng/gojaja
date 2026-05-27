@@ -15,6 +15,44 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   schema-version compatibility check; role-level RFC `decisionScopes`
   is a candidate).
 
+## [2.0.0-alpha.14] — 2026-05-27
+
+### Rename write-state, surface mode flags in -h, roleReminder hint (PR8f-C)
+
+Three small follow-ups to PR8f-B. No new behaviour beyond the rename.
+
+- **`agentctl write-state` is renamed to `agentctl state edit`.** The
+  old name was misleading once append/replace modes landed in PR8f-B
+  — "write" reads as overwrite-only. The new name uses the
+  subcommand-group style consistent with `task <new|assign|...>`,
+  `role <create|list|...>`, `rfc <new|comment|...>`. Hard rename
+  (alpha-stage; no backward-compatible alias): the old command name
+  is gone and existing scripts must update. The Store-level interface
+  `writeStateFile` is untouched (still the implementation hook).
+- **`agentctl -h` now lists all three modes** for `state edit` with
+  copy-pasteable invocations and the `--batch` semantics. The
+  previous help text only showed `--content`, which was correct
+  before PR8f-B but stale after it.
+- **`manifest.roleReminder.protocol` carries a `role show` hint.**
+  Compressed wording so the JSON-serialised reminder stays under the
+  300-byte budget: now reads
+  ``Loop: plan -> ack <t> -> wait. Lost your role? Run `agentctl
+  role show <you>`. Writes via agentctl only; never hand-edit
+  .multi-agent/.`` — the new sentence routes any agent that has lost
+  its self-understanding to the right CLI command, every turn.
+
+Tests:
+- `tests/state-edit.test.ts` replaces `tests/write-state.test.ts`
+  (same coverage; updated imports + positional args + 2 new
+  dispatcher tests for unknown / missing subcommand).
+- `tests/plan-ack.test.ts` adds an assertion that
+  `roleReminder.protocol` contains `agentctl role show`.
+
+Docs:
+- README.md / README.zh-CN.md cheatsheet rows.
+- docs/PROTOCOL.md `state edit` section (renamed in place).
+- docs/ROADMAP.md PR7 entry notes the rename.
+
 ## [2.0.0-alpha.13] — 2026-05-27
 
 ### init seeds project_state.md; write-state gains replace/append (PR8f-B)

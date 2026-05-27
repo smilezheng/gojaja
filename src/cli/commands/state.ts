@@ -3,6 +3,30 @@ import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveActor } from "../identity";
 
+/**
+ * `agentctl state <subcommand>` — operations on `state/*` files.
+ *
+ * Subcommands:
+ *   edit    Edit a state file: overwrite / append / replace modes.
+ *
+ * Other subcommands (list / show / ...) are reserved for future use.
+ * This file replaces the previous `agentctl write-state` command name,
+ * which had become misleading once append/replace modes were added —
+ * "write" reads like overwrite-only.
+ */
+export async function runState(args: ParsedArgs): Promise<number> {
+  const sub = args.positional[0];
+  switch (sub) {
+    case "edit":
+      return runStateEdit(args);
+    default:
+      throw new UsageError(
+        "Usage: agentctl state <edit> [flags]\n" +
+          "  agentctl state edit --file state/<path> [--content <text> | --append <text> | --replace <old> --with <new> [--batch]]",
+      );
+  }
+}
+
 async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) return "";
   return new Promise((resolve, reject) => {
@@ -17,7 +41,7 @@ async function readStdin(): Promise<string> {
 }
 
 /**
- * `agentctl write-state --file state/<path> ...`
+ * `agentctl state edit --file state/<path> ...`
  *
  * Three mutually-exclusive write modes:
  *
@@ -36,7 +60,7 @@ async function readStdin(): Promise<string> {
  * Ownership / mustNotEdit / path canonical-form gates apply to all
  * three modes.
  */
-export async function runWriteState(args: ParsedArgs): Promise<number> {
+async function runStateEdit(args: ParsedArgs): Promise<number> {
   const relPath = requireString(args.flags, "file");
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());

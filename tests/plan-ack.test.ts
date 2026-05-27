@@ -270,6 +270,11 @@ describe("Store.openOrCreatePlan", () => {
     expect(m1.roleReminder.protocol).toMatch(/plan/);
     expect(m1.roleReminder.protocol).toMatch(/ack/);
     expect(m1.roleReminder.protocol).toMatch(/never hand-edit/);
+    // PR8f-C: roleReminder reminds the agent how to recover its own
+    // contract if it has lost context. Cheaper than re-pasting the
+    // activation snippet, and routes the agent through the right
+    // CLI command.
+    expect(m1.roleReminder.protocol).toMatch(/agentctl role show/);
     // Empty fields must NOT be serialised — keep manifests tight.
     expect(m1.roleReminder.owns).toBeUndefined();
     expect(m1.roleReminder.mustNotEdit).toBeUndefined();

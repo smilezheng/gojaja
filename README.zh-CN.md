@@ -41,7 +41,7 @@
 | 升级工具、重跑 `prompt --write --force-rewrite`、重启窗口 | 你 | CLI 版本变动时 |
 | `agentctl claim / plan / ack / wait / report / worklog / task ... / rfc ...` | agent | 每个 turn 自动跑 |
 | 写代码、写文档、跑测试 | agent | 你布置任务后 |
-| 用 `agentctl write-state` 写在 `owns` 范围内的项目文件 | agent | 角色契约规定的范畴内 |
+| 用 `agentctl state edit` 写在 `owns` 范围内的项目文件（支持 overwrite / append / replace 三模式） | agent | 角色契约规定的范畴内 |
 
 如果你发现自己在手动跑 `agentctl plan` 或 `claim`，多半是在排错——参考下面的[手动跑一遍](#手动跑一遍排错用)。
 

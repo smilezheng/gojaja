@@ -131,10 +131,23 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
   rfc list    [--status open|accepted|rejected|superseded]
   rfc show    <rfc-id>
 
-Ownership-gated writes:
-  write-state --file state/<path> [--content <text>]
-      Atomic write into the layer, gated by the actor's config.yaml
-      owns and mustNotEdit. Content from --content or stdin.
+Shared-state editing (ownership-gated; --file must live under state/):
+  state edit --file state/<path> [mode flags] [--json]
+      Three mutually-exclusive modes; the default is overwrite.
+
+      Overwrite the whole file (default):
+        state edit --file state/foo.md --content '<text>'
+        state edit --file state/foo.md              (content from stdin)
+      Append to the end of the file:
+        state edit --file state/foo.md --append '<text>'
+      Literal find-and-replace:
+        state edit --file state/foo.md --replace '<old>' --with '<new>'
+        state edit --file state/foo.md --replace '<old>' --with '<new>' --batch
+
+      Replace refuses 0 or N>1 matches by default — pass --batch to
+      replace all occurrences. --with "" deletes the matched text.
+      No regex anywhere; old/new are literal strings.
+      All modes are atomic and respect config.yaml's owns / mustNotEdit.
 
 Keepalive (agent, requires MA_SESSION):
   wait [<role>] [--idle <minutes>] [--mode block|exit]

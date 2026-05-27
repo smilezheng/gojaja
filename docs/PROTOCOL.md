@@ -167,27 +167,29 @@ Commands gated:
   owner exception** also applies: a role may always move its OWN task's
   status. This lets engineering roles update progress without
   blanket task-board write access.
-- `agentctl write-state --file <state/path>` — generic state writer
-  gated by `owns`; `--file` must live under `state/`.
+- `agentctl state edit --file <state/path>` — generic state editor
+  gated by `owns`; `--file` must live under `state/`. Renamed from
+  `agentctl write-state` in PR8f-C; see the `state edit` section below
+  for the full mode specification.
 
 `ForbiddenError` exits 9 (distinct from `UsageError`'s exit 2 so a
 caller can distinguish "you said it wrong" from "you are not allowed").
 
-### `agentctl write-state --file <state/path> [mode flags]`
+### `agentctl state edit --file <state/path> [mode flags]`
 
 Mode flags (mutually exclusive — pick exactly one; default is overwrite):
 
 ```
 # overwrite (default): replace the whole file
-agentctl write-state --file state/foo.md --content '<text>'
-agentctl write-state --file state/foo.md            # content from stdin
+agentctl state edit --file state/foo.md --content '<text>'
+agentctl state edit --file state/foo.md            # content from stdin
 
 # append: add to the end of the file
-agentctl write-state --file state/foo.md --append '<text>'
+agentctl state edit --file state/foo.md --append '<text>'
 
 # replace: literal-string find and replace
-agentctl write-state --file state/foo.md --replace '<old>' --with '<new>'
-agentctl write-state --file state/foo.md --replace '<old>' --with '<new>' --batch
+agentctl state edit --file state/foo.md --replace '<old>' --with '<new>'
+agentctl state edit --file state/foo.md --replace '<old>' --with '<new>' --batch
 ```
 
 Common rules:
