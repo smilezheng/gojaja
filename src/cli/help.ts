@@ -26,6 +26,15 @@ Task board (PM/TL or any role with appropriate scope):
   task list [--owner <role>] [--status <s>]
   task show <task-id>
 
+RFCs (open a proposal, gather opinions, a decider chooses):
+  rfc new <slug> --title <text> --deciders <r1,...> --options <A:summary,B:summary>
+                 [--voters <r1,...>] [--deadline <iso>]
+  rfc comment <rfc-id> --rationale <text> [--option <opt>]
+  rfc decide  <rfc-id> --option <opt> --rationale <text>
+  rfc reject  <rfc-id> --rationale <text>
+  rfc list    [--status open|accepted|rejected|superseded]
+  rfc show    <rfc-id>
+
 Session lifecycle (run once per agent window, then export MA_SESSION):
   claim <role> [--ttl <s>] [--force]
   release [<role>]
@@ -53,5 +62,5 @@ Information:
   version                                     CLI and schema version.
   help                                        Show this help.
 
-Not yet implemented (see docs/ROADMAP.md): rfc *, doctor, upgrade.
+Not yet implemented (see docs/ROADMAP.md): doctor, upgrade.
 `;

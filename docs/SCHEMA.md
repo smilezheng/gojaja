@@ -270,7 +270,17 @@ only `id`, `title`, `status`, `priority`, and `blockedBy` (the subset
 of `dependsOn` that is not yet Done). The full task record is fetched
 on demand via `agentctl task show <id>`.
 
-`rfcsPendingAction` is reserved for PR6.
+Likewise, `rfcs` (PR6) carries `RfcSummary` entries for **open** RFCs
+that need this role's action:
+
+- `role: "voter"` when the role is in the proposal's `voters` list AND
+  has not yet commented (commented voters fall out of the action list).
+- `role: "decider"` when the role is in `deciders`, until the RFC is
+  closed (decided or rejected).
+
+Each summary keeps just `id`, `title`, `status`, `role`, and
+`commented` (a boolean). Full proposal + comments + decision are fetched
+via `agentctl rfc show <id>`.
 
 ## `comms/sessions/<role>.json`
 
@@ -343,15 +353,13 @@ Writable Scope / Must Not Edit / Startup Checklist / Reporting). The
 framework does **not** parse this file at runtime; it is for the agent to
 read. Runtime ownership enforcement comes from `config.yaml`.
 
-## `rfcs/RFC-NNNN-<slug>/` (planned, PR4)
+## `rfcs/RFC-NNNN-<slug>/`
 
 ```
 rfcs/RFC-0001-switch-to-postgres/
   proposal.yaml      ← structured; source of truth
-  proposal.md        ← human view, regenerated from yaml
   comments/<role>.json
-  decision.json      ← absent until the leader decides
-  decision.md        ← regenerated from decision.json
+  decision.json      ← absent until the leader decides or rejects
 ```
 
 `proposal.yaml`:
@@ -360,41 +368,69 @@ rfcs/RFC-0001-switch-to-postgres/
 id: RFC-0001
 slug: switch-to-postgres
 title: Switch primary store to Postgres
-status: open          # draft | open | accepted | rejected | superseded
-voters: [PM, TL, Backend, DevOps]
-deciders: [TL]
+status: open                              # open | accepted | rejected | superseded
+voters: [PM, TL, Backend, DevOps]         # advisory: who SHOULD comment
+deciders: [TL]                            # enforced: who CAN decide / reject
 options:
   - id: A
-    summary: ...
+    summary: Use Postgres
   - id: B
-    summary: ...
-deadline: 2026-06-01T00:00:00Z
+    summary: Stay on SQLite
+deadline: 2026-06-01T00:00:00.000Z        # informational
+createdAt: 2026-05-27T05:23:00.000Z
+createdBy: PM
 ```
+
+Status state machine (enforced):
+
+```
+        open ──decide──▶ accepted
+         │
+         └──reject──▶ rejected
+```
+
+Both terminal in v2. `superseded` is reserved for a future v2.x command.
+Auto-tally based on comments is **not** implemented and is a design
+non-goal — the deciders are responsible for choosing.
 
 `comments/<role>.json`:
 
 ```jsonc
 {
+  "rfcId": "RFC-0001",
   "role": "Backend",
   "ts": "...",
-  "preferred": "A",
-  "rationale": "Migrations are tractable; sharding plan ready.",
-  "concerns": ["Operational ramp"]
+  "preferred": "A",             // option id; may be empty for "no preference"
+  "rationale": "Migrations are tractable; sharding plan ready."
 }
 ```
+
+Hand-edits are tolerated; normal mutation goes through
+`agentctl rfc comment`, which also emits `RFC_COMMENT`. A second call from
+the same role overwrites the file. Comments on closed RFCs are refused.
 
 `decision.json`:
 
 ```jsonc
 {
-  "id": "RFC-0001",
+  "rfcId": "RFC-0001",
   "decidedBy": "TL",
   "ts": "...",
-  "chosenOption": "A",
-  "rationale": "...",
-  "followUpTasks": ["T-0042", "T-0043"]
+  "outcome": "accepted",        // "accepted" | "rejected"
+  "chosenOption": "A",          // null when outcome=rejected
+  "rationale": "..."
 }
 ```
+
+Field rules:
+
+- `slug` must match `^[a-z0-9][a-z0-9-]{0,63}$`. Slug reuse across RFCs is
+  refused.
+- `options` requires at least one entry, with unique ids.
+- `deciders` requires at least one role. `agentctl rfc decide/reject`
+  refuses callers outside that list.
+- The sequential id counter lives in `config.yaml` under `rfcCounter`
+  (so deleting an RFC dir does NOT recycle its id).
 
 ## `audit.log` (planned)
 

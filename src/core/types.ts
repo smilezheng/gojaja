@@ -109,6 +109,12 @@ export interface Manifest {
    * `agentctl task show <id>` for the full record.
    */
   tasks: TaskSummary[];
+  /**
+   * Open RFCs that need this role's action. Includes:
+   *   - voter: role is in `voters` and has not commented yet,
+   *   - decider: role is in `deciders`, until the RFC is closed.
+   */
+  rfcs: RfcSummary[];
 }
 
 /** Payload shape for type=REPORT events. */
@@ -142,6 +148,12 @@ export interface RoleConfig {
 export interface ProjectConfig {
   schemaVersion: string;
   roles: Record<RoleId, RoleConfig>;
+  /**
+   * Auto-allocator for RFC ids. Persisted in config.yaml (alongside roles)
+   * because RFC dirs live under `rfcs/` and the file-system itself is not
+   * a reliable counter (deleted RFC ids would be reused otherwise).
+   */
+  rfcCounter?: number;
 }
 
 /**
@@ -235,6 +247,98 @@ export interface TaskStatusChangedPayload {
   taskId: string;
   previousStatus: TaskStatus;
   newStatus: TaskStatus;
+}
+
+/**
+ * RFC lifecycle. Intentionally minimal:
+ *
+ *   open        -> accepted | rejected
+ *   accepted    -> (terminal in v2; superseded via a future v2.x command)
+ *   rejected    -> (terminal)
+ *
+ * The state machine is enforced; transitions outside this graph are
+ * refused. We deliberately do NOT auto-compute acceptance from comments:
+ * `decide` and `reject` are explicit acts by a role in the deciders list.
+ */
+export type RfcStatus = "open" | "accepted" | "rejected" | "superseded";
+
+export interface RfcOption {
+  /** Short id like "A" / "B" / "stay-on-sqlite". */
+  id: string;
+  summary: string;
+}
+
+export interface RfcProposal {
+  id: string;
+  slug: string;
+  title: string;
+  status: RfcStatus;
+  /** Roles that SHOULD comment. Advisory; non-voters may still comment. */
+  voters: RoleId[];
+  /** Roles that MAY call `rfc decide` or `rfc reject`. Enforced. */
+  deciders: RoleId[];
+  options: RfcOption[];
+  /** Informational; the framework does not auto-expire RFCs. */
+  deadline: string | null;
+  createdAt: string;
+  /** Role or "SYSTEM" — recorded as the event's `from`. */
+  createdBy: RoleId | "SYSTEM";
+}
+
+export interface RfcComment {
+  rfcId: string;
+  role: RoleId;
+  ts: string;
+  /** Preferred option id. May be empty if the commenter has no preference. */
+  preferred: string;
+  rationale: string;
+}
+
+export interface RfcDecision {
+  rfcId: string;
+  /** Role of the decider. */
+  decidedBy: RoleId;
+  ts: string;
+  /** "accepted" | "rejected"; superseded handled via separate command. */
+  outcome: "accepted" | "rejected";
+  /** Chosen option id when accepted; null when rejected. */
+  chosenOption: string | null;
+  rationale: string;
+}
+
+/** Payload shape for RFC_CREATED events. */
+export interface RfcCreatedPayload {
+  rfcId: string;
+  title: string;
+  voters: RoleId[];
+  deciders: RoleId[];
+}
+
+/** Payload shape for RFC_COMMENT events. */
+export interface RfcCommentPayload {
+  rfcId: string;
+  role: RoleId;
+  preferred: string;
+  rationale: string;
+}
+
+/** Payload shape for RFC_DECIDED events. */
+export interface RfcDecidedPayload {
+  rfcId: string;
+  decidedBy: RoleId;
+  outcome: "accepted" | "rejected";
+  chosenOption: string | null;
+  rationale: string;
+}
+
+export interface RfcSummary {
+  id: string;
+  title: string;
+  status: RfcStatus;
+  /** This role's expected involvement; precomputed to avoid client logic. */
+  role: "voter" | "decider";
+  /** Whether the role has already left a comment. */
+  commented: boolean;
 }
 
 /** Role lease metadata. */

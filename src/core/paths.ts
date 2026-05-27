@@ -63,6 +63,22 @@ export function waitSentinelPath(role: string): string {
   return path.posix.join(Paths.pendingDir, role, ".wait");
 }
 
+export function rfcDir(rfcId: string, slug: string): string {
+  return path.posix.join(Paths.rfcsDir, `${rfcId}-${slug}`);
+}
+
+export function rfcProposalPath(rfcId: string, slug: string): string {
+  return path.posix.join(rfcDir(rfcId, slug), "proposal.yaml");
+}
+
+export function rfcCommentPath(rfcId: string, slug: string, role: string): string {
+  return path.posix.join(rfcDir(rfcId, slug), "comments", `${role}.json`);
+}
+
+export function rfcDecisionPath(rfcId: string, slug: string): string {
+  return path.posix.join(rfcDir(rfcId, slug), "decision.json");
+}
+
 /**
  * Resolve a relative path against a root, refusing anything that escapes the
  * root via `..` or absolute components. All command-layer path construction

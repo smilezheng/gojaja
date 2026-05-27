@@ -23,11 +23,15 @@ import {
   Paths,
   manifestPath,
   resolveInside,
+  rfcCommentPath,
+  rfcDecisionPath,
+  rfcDir,
+  rfcProposalPath,
   rolePaths,
   waitSentinelPath,
   worklogEntryPath,
 } from "./paths";
-import { validateRoleId } from "./role-id";
+import { validateRoleId, validateSlug } from "./role-id";
 import { renderRoleMarkdown } from "./role-template";
 import type { Store } from "./store";
 import {
@@ -38,6 +42,12 @@ import {
   type Event,
   type Manifest,
   type ProjectConfig,
+  type RfcComment,
+  type RfcDecision,
+  type RfcOption,
+  type RfcProposal,
+  type RfcStatus,
+  type RfcSummary,
   type RoleConfig,
   type RoleId,
   type RoleReminder,
@@ -58,6 +68,10 @@ function freshTaskBoard(schemaVersion: string): TaskBoard {
 
 function formatTaskId(n: number): string {
   return `T-${String(n).padStart(4, "0")}`;
+}
+
+function formatRfcId(n: number): string {
+  return `RFC-${String(n).padStart(4, "0")}`;
 }
 
 /**
@@ -419,6 +433,7 @@ export class LocalFsStore implements Store {
       const ackToken = newId();
       const board = await this.readTaskBoard();
       const tasks = this.taskSummariesForRole(board, role);
+      const rfcs = await this.rfcSummariesForRole(role);
       const manifest: Manifest = {
         ackToken,
         role,
@@ -428,6 +443,7 @@ export class LocalFsStore implements Store {
         events: filtered,
         roleReminder: await this.buildRoleReminder(role),
         tasks,
+        rfcs,
       };
       await atomicWriteJson(this.abs(manifestPath(role, ackToken)), manifest);
       const updated: CursorState = {
@@ -828,6 +844,354 @@ export class LocalFsStore implements Store {
         return !d || d.status !== "Done";
       }),
     }));
+  }
+
+  // ---- RFCs ---------------------------------------------------------------
+
+  async createRfc(input: {
+    slug: string;
+    title: string;
+    voters: RoleId[];
+    deciders: RoleId[];
+    options: RfcOption[];
+    deadline?: string | null;
+    createdBy: RoleId | "SYSTEM";
+  }): Promise<RfcProposal> {
+    validateSlug(input.slug);
+    const title = String(input.title ?? "").trim();
+    if (title.length === 0) throw new UsageError("RFC title must be non-empty.");
+    if (!Array.isArray(input.options) || input.options.length < 1) {
+      throw new UsageError("RFC must have at least one option.");
+    }
+    const optionIds = new Set<string>();
+    for (const o of input.options) {
+      if (!o.id || typeof o.id !== "string") {
+        throw new UsageError("Each RFC option needs a non-empty id.");
+      }
+      if (optionIds.has(o.id)) {
+        throw new UsageError(`Duplicate RFC option id '${o.id}'.`);
+      }
+      optionIds.add(o.id);
+    }
+    const voters = input.voters.map((r) => validateRoleId(r));
+    const deciders = input.deciders.map((r) => validateRoleId(r));
+    if (deciders.length === 0) {
+      throw new UsageError("RFC must have at least one decider.");
+    }
+
+    return this.withLock("rfcs", async () => {
+      const config = await this.readConfig();
+      const idNumber = (config.rfcCounter ?? 0) + 1;
+      const id = formatRfcId(idNumber);
+
+      // Refuse if any directory already exists for this id or this slug.
+      // We do not allow slug reuse across RFCs to keep `rfc show <slug>`
+      // unambiguous if we add it later.
+      const dirsBeforeAlloc = await this.listRfcDirNames();
+      for (const d of dirsBeforeAlloc) {
+        if (d.startsWith(`${id}-`)) {
+          throw new StateCorruptionError(
+            `RFC dir ${d} already exists for id ${id}.`,
+          );
+        }
+        if (d.endsWith(`-${input.slug}`)) {
+          throw new UsageError(`Slug '${input.slug}' is already used by ${d}.`);
+        }
+      }
+
+      const proposal: RfcProposal = {
+        id,
+        slug: input.slug,
+        title,
+        status: "open",
+        voters,
+        deciders,
+        options: input.options.map((o) => ({ id: o.id, summary: o.summary ?? "" })),
+        deadline: input.deadline ?? null,
+        createdAt: new Date().toISOString(),
+        createdBy: input.createdBy,
+      };
+      const dir = this.abs(rfcDir(id, input.slug));
+      await fsp.mkdir(path.join(dir, "comments"), { recursive: true });
+      await atomicWriteFile(
+        this.abs(rfcProposalPath(id, input.slug)),
+        yaml.dump(proposal, { lineWidth: 100, noRefs: true }),
+      );
+      await this.writeConfig({ ...config, rfcCounter: idNumber });
+      await this.recordEventInternal({
+        type: "RFC_CREATED",
+        from: input.createdBy,
+        to: "*",
+        ref: id,
+        payload: { rfcId: id, title, voters, deciders },
+      });
+      return proposal;
+    });
+  }
+
+  async commentRfc(input: {
+    rfcId: string;
+    role: RoleId;
+    preferred: string;
+    rationale: string;
+  }): Promise<RfcComment> {
+    validateRoleId(input.role);
+    const preferred = String(input.preferred ?? "").trim();
+    const rationale = String(input.rationale ?? "").trim();
+    if (rationale.length === 0) {
+      throw new UsageError("RFC comment rationale must be non-empty.");
+    }
+
+    return this.withLock(`rfc-${input.rfcId}`, async () => {
+      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      if (proposal.status !== "open") {
+        throw new UsageError(
+          `RFC ${input.rfcId} is ${proposal.status}; cannot comment on a closed RFC.`,
+        );
+      }
+      if (preferred.length > 0 && !proposal.options.find((o) => o.id === preferred)) {
+        throw new UsageError(
+          `RFC ${input.rfcId} has no option '${preferred}'. Options: ${proposal.options.map((o) => o.id).join(", ")}.`,
+        );
+      }
+      const comment: RfcComment = {
+        rfcId: proposal.id,
+        role: input.role,
+        ts: new Date().toISOString(),
+        preferred,
+        rationale,
+      };
+      await atomicWriteJson(
+        this.abs(rfcCommentPath(proposal.id, proposal.slug, input.role)),
+        comment,
+      );
+      await this.recordEventInternal({
+        type: "RFC_COMMENT",
+        from: input.role,
+        to: "*",
+        ref: proposal.id,
+        payload: { rfcId: proposal.id, role: input.role, preferred, rationale },
+      });
+      return comment;
+    });
+  }
+
+  async decideRfc(input: {
+    rfcId: string;
+    decidedBy: RoleId;
+    chosenOption: string;
+    rationale: string;
+  }): Promise<RfcDecision> {
+    return this.finaliseRfc({
+      rfcId: input.rfcId,
+      decidedBy: input.decidedBy,
+      outcome: "accepted",
+      chosenOption: input.chosenOption,
+      rationale: input.rationale,
+    });
+  }
+
+  async rejectRfc(input: {
+    rfcId: string;
+    decidedBy: RoleId;
+    rationale: string;
+  }): Promise<RfcDecision> {
+    return this.finaliseRfc({
+      rfcId: input.rfcId,
+      decidedBy: input.decidedBy,
+      outcome: "rejected",
+      chosenOption: null,
+      rationale: input.rationale,
+    });
+  }
+
+  private async finaliseRfc(args: {
+    rfcId: string;
+    decidedBy: RoleId;
+    outcome: "accepted" | "rejected";
+    chosenOption: string | null;
+    rationale: string;
+  }): Promise<RfcDecision> {
+    validateRoleId(args.decidedBy);
+    const rationale = String(args.rationale ?? "").trim();
+    if (rationale.length === 0) {
+      throw new UsageError("Decision rationale must be non-empty.");
+    }
+
+    return this.withLock(`rfc-${args.rfcId}`, async () => {
+      const { proposal } = await this.readRfcUnchecked(args.rfcId);
+      if (proposal.status !== "open") {
+        throw new UsageError(
+          `RFC ${args.rfcId} is already ${proposal.status}; cannot finalise again.`,
+        );
+      }
+      if (!proposal.deciders.includes(args.decidedBy)) {
+        throw new UsageError(
+          `Role '${args.decidedBy}' is not in deciders for ${args.rfcId} (deciders: ${proposal.deciders.join(", ") || "(none)"}).`,
+        );
+      }
+      if (args.outcome === "accepted") {
+        if (!args.chosenOption) {
+          throw new UsageError("`accept` requires a non-empty option id.");
+        }
+        if (!proposal.options.find((o) => o.id === args.chosenOption)) {
+          throw new UsageError(
+            `Option '${args.chosenOption}' is not in RFC ${args.rfcId}. Options: ${proposal.options.map((o) => o.id).join(", ")}.`,
+          );
+        }
+      }
+      const decision: RfcDecision = {
+        rfcId: proposal.id,
+        decidedBy: args.decidedBy,
+        ts: new Date().toISOString(),
+        outcome: args.outcome,
+        chosenOption: args.outcome === "accepted" ? args.chosenOption : null,
+        rationale,
+      };
+      await atomicWriteJson(
+        this.abs(rfcDecisionPath(proposal.id, proposal.slug)),
+        decision,
+      );
+      const updatedProposal: RfcProposal = {
+        ...proposal,
+        status: args.outcome === "accepted" ? "accepted" : "rejected",
+      };
+      await atomicWriteFile(
+        this.abs(rfcProposalPath(proposal.id, proposal.slug)),
+        yaml.dump(updatedProposal, { lineWidth: 100, noRefs: true }),
+      );
+      await this.recordEventInternal({
+        type: "RFC_DECIDED",
+        from: args.decidedBy,
+        to: "*",
+        ref: proposal.id,
+        payload: {
+          rfcId: proposal.id,
+          decidedBy: args.decidedBy,
+          outcome: args.outcome,
+          chosenOption: decision.chosenOption,
+          rationale,
+        },
+      });
+      return decision;
+    });
+  }
+
+  async readRfc(rfcId: string): Promise<{
+    proposal: RfcProposal;
+    comments: RfcComment[];
+    decision: RfcDecision | null;
+  }> {
+    return this.readRfcUnchecked(rfcId);
+  }
+
+  private async readRfcUnchecked(rfcId: string): Promise<{
+    proposal: RfcProposal;
+    comments: RfcComment[];
+    decision: RfcDecision | null;
+  }> {
+    if (!/^RFC-\d{4,}$/.test(rfcId)) {
+      throw new UsageError(`Invalid RFC id '${rfcId}'. Expected RFC-NNNN.`);
+    }
+    const dirName = (await this.listRfcDirNames()).find((d) =>
+      d.startsWith(`${rfcId}-`),
+    );
+    if (!dirName) {
+      throw new UsageError(`Unknown RFC '${rfcId}'.`);
+    }
+    const slug = dirName.slice(rfcId.length + 1);
+    const proposalRaw = await fsp.readFile(
+      this.abs(rfcProposalPath(rfcId, slug)),
+      "utf8",
+    );
+    let proposal: RfcProposal;
+    try {
+      proposal = yaml.load(proposalRaw) as RfcProposal;
+    } catch (err) {
+      throw new StateCorruptionError(
+        `proposal.yaml for ${rfcId} is not valid YAML: ${(err as Error).message}`,
+      );
+    }
+    const commentsDir = this.abs(path.posix.join(rfcDir(rfcId, slug), "comments"));
+    const comments: RfcComment[] = [];
+    try {
+      const names = await fsp.readdir(commentsDir);
+      for (const n of names) {
+        if (!n.endsWith(".json") || n.startsWith(".")) continue;
+        const c = await readJsonFileOrNull<RfcComment>(path.join(commentsDir, n));
+        if (c) comments.push(c);
+      }
+      comments.sort((a, b) => a.ts.localeCompare(b.ts));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    const decision = await readJsonFileOrNull<RfcDecision>(
+      this.abs(rfcDecisionPath(rfcId, slug)),
+    );
+    return { proposal, comments, decision };
+  }
+
+  async listRfcs(filter?: { status?: RfcStatus }): Promise<RfcProposal[]> {
+    const dirs = await this.listRfcDirNames();
+    const out: RfcProposal[] = [];
+    for (const d of dirs) {
+      const m = d.match(/^(RFC-\d{4,})-(.+)$/);
+      if (!m) continue;
+      const id = m[1];
+      const slug = m[2];
+      const raw = await fsp.readFile(
+        this.abs(rfcProposalPath(id, slug)),
+        "utf8",
+      );
+      let proposal: RfcProposal;
+      try {
+        proposal = yaml.load(raw) as RfcProposal;
+      } catch {
+        continue; // skip malformed
+      }
+      if (filter?.status && proposal.status !== filter.status) continue;
+      out.push(proposal);
+    }
+    out.sort((a, b) => a.id.localeCompare(b.id));
+    return out;
+  }
+
+  private async listRfcDirNames(): Promise<string[]> {
+    try {
+      const entries = await fsp.readdir(this.abs(Paths.rfcsDir), {
+        withFileTypes: true,
+      });
+      return entries
+        .filter((e) => e.isDirectory() && /^RFC-\d{4,}-/.test(e.name))
+        .map((e) => e.name)
+        .sort();
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw err;
+    }
+  }
+
+  private async rfcSummariesForRole(role: RoleId): Promise<RfcSummary[]> {
+    const open = await this.listRfcs({ status: "open" });
+    const out: RfcSummary[] = [];
+    for (const p of open) {
+      const isDecider = p.deciders.includes(role);
+      const isVoter = p.voters.includes(role);
+      if (!isDecider && !isVoter) continue;
+      let commented = false;
+      const commentFile = this.abs(rfcCommentPath(p.id, p.slug, role));
+      if (await exists(commentFile)) commented = true;
+      // Voters whose comment is already on file fall out of the action list.
+      if (isVoter && !isDecider && commented) continue;
+      out.push({
+        id: p.id,
+        title: p.title,
+        status: p.status,
+        role: isDecider ? "decider" : "voter",
+        commented,
+      });
+    }
+    return out;
   }
 
   // ---- helpers ------------------------------------------------------------

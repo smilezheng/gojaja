@@ -3,6 +3,11 @@ import type {
   Event,
   Manifest,
   ProjectConfig,
+  RfcComment,
+  RfcDecision,
+  RfcOption,
+  RfcProposal,
+  RfcStatus,
   RoleConfig,
   RoleId,
   SessionInfo,
@@ -233,4 +238,66 @@ export interface Store {
 
   /** Read a single task; throws UsageError if id unknown. */
   readTask(taskId: string): Promise<Task>;
+
+  // ---- RFCs ---------------------------------------------------------------
+
+  /**
+   * Create a new RFC. Allocates the next sequential `RFC-NNNN` id (under
+   * a `rfcs` lock; nextRfcId persisted in config.yaml). Validates slug.
+   * Refuses duplicate slugs (i.e. another RFC dir matching the same
+   * `RFC-XXXX-<slug>` suffix already exists). Emits `RFC_CREATED`.
+   */
+  createRfc(input: {
+    slug: string;
+    title: string;
+    voters: RoleId[];
+    deciders: RoleId[];
+    options: RfcOption[];
+    deadline?: string | null;
+    createdBy: RoleId | "SYSTEM";
+  }): Promise<RfcProposal>;
+
+  /**
+   * Add or overwrite a role's comment on an open RFC. Emits `RFC_COMMENT`.
+   * Refuses if the RFC is not in status `open`. The framework does NOT
+   * require the role to be in the voters list — non-voters may comment,
+   * since real teams often add cross-cutting context.
+   */
+  commentRfc(input: {
+    rfcId: string;
+    role: RoleId;
+    preferred: string;
+    rationale: string;
+  }): Promise<RfcComment>;
+
+  /**
+   * Decide an RFC (accept with a chosen option). The caller's role must
+   * be in the proposal's `deciders` list (ForbiddenError otherwise; that
+   * class arrives in PR7, but we already throw UsageError today).
+   * Refuses if the RFC is not `open` or the option id is unknown.
+   * Emits `RFC_DECIDED` with `outcome=accepted`.
+   */
+  decideRfc(input: {
+    rfcId: string;
+    decidedBy: RoleId;
+    chosenOption: string;
+    rationale: string;
+  }): Promise<RfcDecision>;
+
+  /** Reject an RFC. Same deciders gate. Emits `RFC_DECIDED` with `outcome=rejected`. */
+  rejectRfc(input: {
+    rfcId: string;
+    decidedBy: RoleId;
+    rationale: string;
+  }): Promise<RfcDecision>;
+
+  /** Read a proposal + (optionally) its comments and decision. */
+  readRfc(rfcId: string): Promise<{
+    proposal: RfcProposal;
+    comments: RfcComment[];
+    decision: RfcDecision | null;
+  }>;
+
+  /** Enumerate RFCs, oldest first. Optionally filter by status. */
+  listRfcs(filter?: { status?: RfcStatus }): Promise<RfcProposal[]>;
 }

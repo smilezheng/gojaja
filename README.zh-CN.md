@@ -51,7 +51,7 @@ CrewAI 之类托管的多 agent 框架，那本项目解决的不是你的问题
 
 ## 当前状态
 
-**v2.0.0-alpha.4**。已经实现并由 81 个测试覆盖：
+**v2.0.0-alpha.5**。已经实现并由 101 个测试覆盖：
 
 - 存储核心（事件、游标、会话、per-resource 锁）。
 - 每回合 agent 循环：`claim` / `plan` / `ack` / `report` / `worklog` /
@@ -61,8 +61,11 @@ CrewAI 之类托管的多 agent 框架，那本项目解决的不是你的问题
 - 配置 CLI：`role create / list / show`、`prompt --target codex|claude|cursor|generic --write`。
 - 任务板：`task new / assign / status / list / show`；manifest 自动
   携带这个角色的活跃任务。
+- RFC：`rfc new / comment / decide / reject / list / show`。状态机
+  `open -> accepted | rejected`；只有 `deciders` 名单里的角色能 decide
+  /reject；不做自动计票。Manifest 自动携带需要本角色处理的开放 RFC。
 
-还在排队的：RFC、可写域强制、`doctor`——详见
+还在排队的：可写域强制、`doctor`——详见
 [docs/ROADMAP](./docs/ROADMAP.md)。
 
 跟进进度请关注 `v2` 分支。
@@ -223,9 +226,10 @@ agentctl wait --idle 1                     # 1 分钟后返回 IDLE
 - **游标只能凭 token 推进**。每个 agent 先用 `plan` 拿到"未读清单"
   和一个 token，处理完再用 `ack --token` 推进游标。游标永远不会
   跨过它没见过的事件——彻底解决经典的"ack 撞上并发写"丢消息问题。
-- **RFC 是意见收集 + leader 拍板**。任何角色都能给 RFC 留意见，但
-  只有在 RFC 的 `deciders` 列表里的角色才能把状态推到
-  `accepted` / `rejected`。没有自动计票。
+- **RFC 是意见收集 + leader 拍板**。任何角色都可以给 RFC 留意见，
+  但只有在 RFC 的 `deciders` 列表里的角色能调 `rfc decide` /
+  `rfc reject` 推进状态。没有自动计票。下一次 `plan` 自动把这条
+  RFC 列在 `manifest.rfcs` 里，并标明本角色是 `voter` 还是 `decider`。
 
 完整架构论证：[docs/DESIGN.md](./docs/DESIGN.md)。
 
@@ -274,7 +278,7 @@ agentctl wait --idle 1                     # 1 分钟后返回 IDLE
 | PR3  | `role create / list / show`、`prompt --target … --write`、`wait` | **完成** |
 | PR4  | manifest 里的 `roleReminder`，让被压缩上下文的 agent 重新锚定身份 | **完成** |
 | PR5  | 任务板（`state/task_board.yaml`、`agentctl task *`） | **完成** |
-| PR6  | RFC 状态机（意见 + leader 决定） | 即将开始 |
+| PR6  | RFC 状态机（意见 + leader 决定） | **完成** |
 | PR7  | `config.yaml` 驱动的角色可写域强制 | 计划中 |
 | PR8  | 安装器、`upgrade`、`reset`、AGENTS.md 注入 | 计划中 |
 | PR9  | `agentctl doctor`、历史回放、事件归档 | 计划中 |

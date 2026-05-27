@@ -54,7 +54,7 @@ file-only_ agents safe to combine.
 
 ## Status
 
-**v2.0.0-alpha.4.** Implemented and covered by 81 tests:
+**v2.0.0-alpha.5.** Implemented and covered by 101 tests:
 
 - Storage core (events, cursors, sessions, per-resource locks).
 - Per-turn agent loop: `claim` / `plan` / `ack` / `report` / `worklog`
@@ -63,10 +63,14 @@ file-only_ agents safe to combine.
   identity by re-running `plan` once.
 - Setup CLI: `role create / list / show`,
   `prompt --target codex|claude|cursor|generic --write`.
-- Task board: `task new / assign / status / list / show` with
-  manifests automatically carrying the role's active tasks.
+- Task board: `task new / assign / status / list / show` with manifests
+  automatically carrying the role's active tasks.
+- RFCs: `rfc new / comment / decide / reject / list / show`. Status
+  machine `open -> accepted | rejected`; deciders gate enforced; no
+  automatic tally. Manifest carries open RFCs needing this role's
+  action.
 
-Still to come: RFCs, ownership enforcement, doctor — see
+Still to come: ownership enforcement, doctor — see
 [docs/ROADMAP](./docs/ROADMAP.md).
 
 If you want to follow along, watch the `v2` branch.
@@ -233,8 +237,10 @@ agentctl wait --idle 1                     # IDLE after a 1-minute sleep
   cursor cannot skip past anything the agent did not see — fixing the
   classic "ack races a concurrent write" footgun.
 - **RFCs gather opinions, a leader decides.** Any role can comment on
-  an RFC. Only roles listed in `deciders` can transition the RFC to
-  `accepted` / `rejected`. No automatic tallies.
+  an RFC; only roles listed in `deciders` can call `rfc decide` /
+  `rfc reject` to transition the RFC. No automatic tallies. The next
+  `plan` for each affected role shows the RFC under `manifest.rfcs`
+  with its expected involvement (`voter` or `decider`).
 
 Full architectural reasoning: [docs/DESIGN.md](./docs/DESIGN.md).
 
@@ -288,7 +294,7 @@ If any of these are a deal-breaker, see
 | PR3  | `role create / list / show`, `prompt --target … --write`, `wait` | **Done** |
 | PR4  | Manifest `roleReminder` for context-compressed agents | **Done** |
 | PR5  | Task board (`state/task_board.yaml`, `agentctl task *`) | **Done** |
-| PR6  | RFC state machine (comments + leader decides) | Next up |
+| PR6  | RFC state machine (comments + leader decides) | **Done** |
 | PR7  | `config.yaml`-driven role ownership enforcement | Planned |
 | PR8  | `agentctl upgrade` / `reset`, schema migrations | Planned |
 | PR9  | `agentctl doctor`, history, event archival | Planned |

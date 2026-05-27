@@ -10,7 +10,51 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 ### Planned next
 
-- PR6: RFC state machine (`rfc new / comment / decide / status`).
+- PR7: ownership enforcement (config.yaml `owns` becomes a runtime gate
+  for state writes and task mutations).
+
+## [2.0.0-alpha.5] — 2026-05-27
+
+### Added (PR6 — RFC state machine)
+
+- Per-RFC directory `.multi-agent/rfcs/RFC-NNNN-<slug>/` with
+  `proposal.yaml`, `comments/<role>.json`, and `decision.json` (created
+  on decide / reject).
+- New `agentctl rfc` command group:
+  - `rfc new <slug> --title <text> --deciders <r1,...>
+      --options <A:summary,B:summary> [--voters <r1,...>] [--deadline <iso>]`
+  - `rfc comment <rfc-id> --rationale <text> [--option <opt>]`
+  - `rfc decide <rfc-id> --option <opt> --rationale <text>`
+  - `rfc reject <rfc-id> --rationale <text>`
+  - `rfc list [--status open|accepted|rejected|superseded]`
+  - `rfc show <rfc-id>`
+- New `Store` methods: `createRfc`, `commentRfc`, `decideRfc`,
+  `rejectRfc`, `readRfc`, `listRfcs`.
+- New types: `RfcStatus`, `RfcOption`, `RfcProposal`, `RfcComment`,
+  `RfcDecision`, `RfcSummary`, plus payload types.
+- New event payloads emitted: `RFC_CREATED`, `RFC_COMMENT`,
+  `RFC_DECIDED`.
+- `ProjectConfig.rfcCounter` persists the auto-id allocator (so
+  deleting an RFC dir does not recycle its id).
+- Manifest carries a new `rfcs` array (`RfcSummary[]`): open RFCs
+  needing this role's action (voter that hasn't commented, or
+  decider until close). Fields are minimal (`id`, `title`, `status`,
+  `role: "voter" | "decider"`, `commented: boolean`); full proposal +
+  comments + decision come from `agentctl rfc show <id>`.
+- 20 new vitest cases (`tests/rfc.test.ts`); 81 -> 101 total.
+
+### Design choices for the RFC layer
+
+- **No automatic tally.** The deciders pick. `decide` does not read
+  comments and there is no "all voters must comment before decide" gate
+  — real teams have a tech lead who can call it whenever they think
+  enough input has been gathered.
+- **Status machine is small.** `open -> accepted | rejected`. Both
+  terminal in v2; `superseded` is reserved for v2.x.
+- **Non-voters may comment.** Voter list is advisory, not gated; real
+  teams often get useful cross-cutting input from outside the named set.
+- **Slug uniqueness enforced** across RFCs (refuses reuse), so any
+  later command that takes `<rfc-id-or-slug>` would be unambiguous.
 
 ## [2.0.0-alpha.4] — 2026-05-27
 

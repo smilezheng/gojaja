@@ -72,15 +72,19 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - New event types: `TASK_CREATED`, `TASK_ASSIGNED`,
     `TASK_STATUS_CHANGED`.
 
-### Planned, in priority order
-
 - **PR6 — RFC state machine.**
-  - `agentctl rfc new <slug>` with strict slug validation.
-  - `agentctl rfc comment <id> --option <id> --rationale <text>`.
-  - `agentctl rfc decide <id> --by <leader> --option <id> --rationale <text>`
-    with deciders allow-list.
-  - Auto-update of `state/decisions.md` when an RFC is accepted.
-  - Event types `RFC_CREATED`, `RFC_COMMENT`, `RFC_DECIDED`.
+  - Per-RFC directory `rfcs/RFC-NNNN-<slug>/` with `proposal.yaml`,
+    `comments/<role>.json`, and `decision.json`.
+  - `agentctl rfc new / comment / decide / reject / list / show`.
+  - Status machine `open -> accepted | rejected`, enforced; no
+    automatic tally — a role in the proposal's `deciders` list calls
+    `decide` or `reject`.
+  - `plan` manifest carries an `rfcs` array of open RFCs needing this
+    role's action (voter that has not commented, or decider until the
+    RFC closes).
+  - Event types: `RFC_CREATED`, `RFC_COMMENT`, `RFC_DECIDED`.
+
+### Planned, in priority order
 
 - **PR7 — ownership enforcement.**
   - `config.yaml` schema validated at startup.

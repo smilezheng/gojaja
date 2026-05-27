@@ -173,31 +173,51 @@ The full schema is documented in
   per-turn view of its tasks is `manifest.tasks`; explicit list/show
   are for ad-hoc inspection.
 
-## RFCs (planned PR6)
+## RFCs
 
 The goal is "every relevant role records an opinion; a designated leader
 picks; the decision is durable". There is no automatic tally.
 
-```
-agentctl rfc new <slug> --title <text> --voters <r1,r2,...> --deciders <r>
-agentctl rfc comment <id> --option <id> --rationale <text>
-agentctl rfc decide  <id> --by <role> --option <id> --rationale <text>
-agentctl rfc status  <id>
-```
+Full schema: [SCHEMA -> rfcs/](./SCHEMA.md#rfcsrfc-nnnn-slug).
 
-Rules:
+### `agentctl rfc new <slug> --title <text> --deciders <r1,...> --options <A:summary,B:summary> [--voters <r1,...>] [--deadline <iso>]`
 
-- `rfc decide` is the only command that can transition status to
-  `accepted` / `rejected`. The `--by` role must be in the proposal's
-  `deciders` list.
-- Comments are append-once per role; a second comment from the same role
-  overwrites the first (with the previous version preserved in the audit
-  log).
-- The proposal's `deadline` is informational; the framework does not
-  auto-decide on expiry.
-- Roles must not implement work assigned to an RFC while its status is
-  `open` or `draft`. This is enforced at the task-claim level (planned),
-  not in `agentctl rfc`.
+- Slug must match `^[a-z0-9][a-z0-9-]{0,63}$`; reuse across RFCs is refused.
+- The store assigns the next sequential `RFC-NNNN` id under a `rfcs` lock
+  (`rfcCounter` lives in `config.yaml`, so deleting an RFC dir does not
+  recycle its id).
+- Emits `RFC_CREATED` (broadcast).
+- The actor (`MA_SESSION` role, or `"SYSTEM"` if no session) is recorded
+  as the event's `from` and the proposal's `createdBy`.
+
+### `agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>]`
+
+- The role comes from `MA_SESSION`; the framework does not allow
+  ghost-commenting on behalf of another role.
+- Non-voters may comment — they often add cross-cutting context that the
+  named voters miss.
+- Refuses on closed RFCs and on unknown `--option`.
+- Overwriting a prior comment from the same role is allowed; the new
+  contents replace the old. The event stream still records both calls.
+- Emits `RFC_COMMENT` (broadcast).
+
+### `agentctl rfc decide <rfc-id> --option <opt> --rationale <text>`
+
+- Only callers whose role appears in the proposal's `deciders` list may
+  call this. The framework refuses everyone else.
+- Refuses on closed RFCs and unknown `--option`.
+- Status `open -> accepted`; writes `decision.json`; emits `RFC_DECIDED`
+  with `outcome="accepted"`.
+
+### `agentctl rfc reject <rfc-id> --rationale <text>`
+
+- Same deciders gate. Status `open -> rejected`; writes `decision.json`
+  with `outcome="rejected"` and `chosenOption=null`; emits `RFC_DECIDED`.
+
+### `agentctl rfc list [--status open|accepted|rejected|superseded]` and `agentctl rfc show <rfc-id>`
+
+- Read-only. The agent's per-turn view of RFCs is `manifest.rfcs`;
+  explicit list/show are for ad-hoc inspection.
 
 ## Wait / idle keepalive
 

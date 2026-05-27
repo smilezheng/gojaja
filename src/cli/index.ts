@@ -7,6 +7,7 @@ import { runPlan } from "./commands/plan";
 import { runPrompt } from "./commands/prompt";
 import { runRelease } from "./commands/release";
 import { runReport } from "./commands/report";
+import { runRfc } from "./commands/rfc";
 import { runRole } from "./commands/role";
 import { runTask } from "./commands/task";
 import { runVersion } from "./commands/version";
@@ -49,6 +50,8 @@ async function dispatch(): Promise<number> {
       return runRole(args);
     case "task":
       return runTask(args);
+    case "rfc":
+      return runRfc(args);
     case "prompt":
       return runPrompt(args);
     case "wait":

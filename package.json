@@ -1,6 +1,6 @@
 {
   "name": "multi-agent-coordination",
-  "version": "2.0.0-alpha.4",
+  "version": "2.0.0-alpha.5",
   "description": "Agent-agnostic file-system coordination layer for multi-LLM-agent collaboration.",
   "bin": {
     "agentctl": "./bin/agentctl",
