@@ -33,6 +33,10 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
     throw new UsageError(`Unknown --target '${target}'. Use codex, claude, cursor, or generic.`);
   }
   const write = boolFlag(args.flags, "write");
+  const forceRewrite = boolFlag(args.flags, "force-rewrite");
+  if (forceRewrite && !write) {
+    throw new UsageError("--force-rewrite requires --write.");
+  }
   const json = boolFlag(args.flags, "json");
   const withHandbook = !boolFlag(args.flags, "no-handbook");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
@@ -51,10 +55,10 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
     );
   }
 
-  const writeResults: Array<{ path: string; result: "wrote" | "skipped" }> = [];
+  const writeResults: Array<{ path: string; result: "wrote" | "unchanged" }> = [];
   if (write) {
     for (const f of artifact.files) {
-      const result = await writeArtifactFile(f);
+      const result = await writeArtifactFile(f, { force: forceRewrite });
       writeResults.push({ path: f.path, result });
     }
   }
@@ -65,6 +69,11 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
         target,
         wrote: writeResults,
         body: artifact.body,
+        // Hosts (Cursor / Claude Code / Codex) inject these rule
+        // files into the system prompt only when an agent window
+        // opens. Surface this as a structured field so scripted
+        // installers don't have to scrape stdout.
+        requiresWindowRestart: write && writeResults.some((r) => r.result === "wrote"),
       }) + "\n",
     );
     return 0;
@@ -76,7 +85,29 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
   if (write) {
     process.stdout.write("Files:\n");
     for (const r of writeResults) {
-      process.stdout.write(`  - ${r.result === "wrote" ? "WROTE   " : "SKIPPED "} ${r.path}\n`);
+      const label = r.result === "wrote" ? "WROTE    " : "UNCHANGED";
+      const suffix = r.result === "unchanged" ? "  (already up to date)" : "";
+      process.stdout.write(`  - ${label} ${r.path}${suffix}\n`);
+    }
+    const anyWrote = writeResults.some((r) => r.result === "wrote");
+    if (anyWrote) {
+      // Hosts only inject rule files into the system prompt at window
+      // open time. If the user already has an agent window open, the
+      // new content will NOT take effect there — they need to close
+      // and re-open that window. This is the most common first-run
+      // mistake; pay the caveat cost on every write.
+      process.stdout.write(
+        `\nIMPORTANT: ${describeHost(target)} injects these rule files into the\n` +
+          `agent's system prompt only when the agent window first opens.\n` +
+          `If you already have an agent window open for this project,\n` +
+          `restart it before chatting — the new rule will NOT take effect\n` +
+          `in an already-running window.\n`,
+      );
+    } else {
+      process.stdout.write(
+        `\nTip: if a file is "UNCHANGED" but you suspect drift,\n` +
+          `re-run with --write --force-rewrite to overwrite from template.\n`,
+      );
     }
     process.stdout.write(
       `\nNext: open one agent window per role and run\n` +
@@ -91,4 +122,13 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
     );
   }
   return 0;
+}
+
+function describeHost(target: Target): string {
+  switch (target) {
+    case "cursor": return "Cursor";
+    case "claude": return "Claude Code";
+    case "codex":  return "Codex CLI";
+    default:       return "The agent host";
+  }
 }

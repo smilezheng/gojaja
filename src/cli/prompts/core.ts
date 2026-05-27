@@ -48,6 +48,23 @@ The shared coordination state lives in \`.multi-agent/\` under that path,
 mediated by a CLI named \`agentctl\`. Treat the CLI — not chat — as the
 source of truth for who you are and what you should do.
 
+## When this section applies
+
+The protocol in this section governs your behaviour **only when this
+window has been bound to a role**, which is true if and only if at
+least one of the following holds:
+
+- The shell has \`MA_SESSION\` exported (you were claimed via
+  \`agentctl claim\` or \`eval "$(agentctl claim <role> --eval)"\`).
+- The user has explicitly told you in chat that you are playing the
+  \`<role>\` for this project (e.g. via an activation snippet from
+  \`agentctl activate\`).
+
+If neither holds, ignore the rest of this section and respond to the
+user normally. Do **not** speculatively run \`agentctl plan\`,
+\`agentctl claim\`, or any other \`agentctl\` command — the user may
+be using this window for unrelated work.
+
 ## Identity
 
 You play one role per window. The role is bound by the user when they

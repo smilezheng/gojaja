@@ -203,6 +203,21 @@ export interface Store {
   /** Read the markdown role contract; throws ENOENT-like UsageError. */
   readRoleFile(role: RoleId): Promise<string>;
 
+  /**
+   * Remove a role from `config.yaml`, delete its markdown contract,
+   * and invalidate any live session for it. Does NOT touch the task
+   * board (open assignments are left in place), worklogs, inbox, or
+   * the event stream — those are audit artifacts.
+   *
+   * Emits a `ROLE_DELETED` system event.
+   *
+   * @throws UsageError if `id` is not currently registered.
+   */
+  deleteRole(input: {
+    id: RoleId;
+    actor: RoleId | "SYSTEM";
+  }): Promise<{ role: RoleId; removedSessions: number }>;
+
   // ---- wait sentinel ------------------------------------------------------
 
   /**

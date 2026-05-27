@@ -10,9 +10,63 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 ### Planned next
 
-- PR8d: schema-level features deferred from PR8c (task `reviewers`
-  field, STATE_UPDATED event, dependsOn cycle detection,
+- PR8e: README rewrite around the user / agent boundary so first-run
+  readers know what they own vs what agents do.
+- PR8f: schema-level features deferred from PR8c (task `reviewers`
+  field, `STATE_UPDATED` event, `dependsOn` cycle detection,
   schema-version compatibility check).
+
+## [2.0.0-alpha.11] — 2026-05-27
+
+### Prompt UX hardening + role delete (PR8d)
+
+- **Runtime body adds an "only-if-activated" gate.** Previous wording
+  ("You play one role per window. Your role is bound by ...") assumed
+  every agent window that loaded the rule had been claimed for a role.
+  In practice users open agent windows for unrelated work too; without
+  a gate, those windows would reflexively run `agentctl plan` /
+  `claim` against random roles. New leading section limits the
+  protocol to windows where either `MA_SESSION` is exported or the
+  user has explicitly told the agent its role. Test in
+  [tests/handbook.test.ts](./tests/handbook.test.ts) asserts every
+  target body carries the gate.
+- **`prompt --write` now prints a window-restart caveat.** Cursor,
+  Claude Code, and Codex inject rule files into the agent's system
+  prompt only when the agent window opens. Running `prompt --write`
+  AFTER opening the window leaves the new rule with no effect there.
+  Successful writes now print a clearly-marked IMPORTANT block telling
+  the user to restart any open agent windows. JSON output carries the
+  same signal as `requiresWindowRestart: true`.
+- **"SKIPPED" renamed to "UNCHANGED (already up to date)".** The
+  byte-equal short-circuit fired with the message "SKIPPED", which
+  reads as "tool refused to do anything" when it actually means "tool
+  decided nothing needed to change". Wording is now explicit.
+  `writeArtifactFile` returns `"unchanged"` instead of `"skipped"`;
+  CLI surface follows.
+- **New `--force-rewrite` flag for `prompt --write`.** Bypasses the
+  byte-equal short-circuit so the operator can confirm the on-disk
+  file came from the current template (useful while debugging install
+  drift). Refuses without `--write` to keep semantics narrow.
+- **New `agentctl role delete <id>` command.** Removes the role from
+  `config.yaml`, deletes `roles/<id>.md`, deletes the live session
+  file (so any lingering `MA_SESSION` fails fast on the next command),
+  and emits a `ROLE_DELETED` system event. Open task assignments are
+  left in place — recreating the same role id reinherits them.
+  Restricted to `SYSTEM` (no `MA_SESSION` exported); CLI refuses if
+  the calling shell has a session exported, with a clear hint to
+  `unset MA_SESSION`. Nine tests in
+  [tests/role-delete.test.ts](./tests/role-delete.test.ts) cover
+  config / md / session cleanup, ROLE_DELETED audit, orphan-task
+  survival, non-SYSTEM rejection, MA_SESSION fail-fast after delete,
+  and concurrent `deleteRole` + `createRfc` under `config-yaml` lock.
+
+### Cross-cutting
+
+- New event type `ROLE_DELETED` (in `EventType` union).
+- `Store` interface gains `deleteRole(input)`.
+- `writeArtifactFile` accepts `{ force?: boolean }` for the
+  force-rewrite path.
+- Suite size 169 → 185.
 
 ## [2.0.0-alpha.10] — 2026-05-27
 

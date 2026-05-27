@@ -320,10 +320,60 @@ into that window's chat.
 | `cursor` | `<project>/.cursor/rules/multi-agent-runtime.mdc` with `alwaysApply: true` | User pastes the activation snippet into the chat |
 | `generic` | Nothing written | User pastes the full prompt body into the chat |
 
-Writing is idempotent — re-running `prompt --write` overwrites a
-prior artifact in place, and skips no-op rewrites. The CLI refuses
-to clobber an existing file that does not look like a previous artifact
-(heuristic: must contain the `agentctl plan` marker phrase).
+Writing is idempotent: re-running `prompt --write` overwrites a prior
+artifact in place; byte-equal re-runs report `UNCHANGED (already up to
+date)` and touch no files. Pass `--force-rewrite` to overwrite even
+when bytes match (useful after a CLI upgrade, to confirm the install
+came from the current template). The CLI refuses to clobber an
+existing file that does not look like a previous artifact (heuristic:
+must contain the `agentctl plan` marker phrase).
+
+**Window-restart caveat.** Cursor, Claude Code, and Codex inject these
+rule files into the agent's system prompt only when an agent window
+first opens. Running `prompt --write` AFTER opening an agent window
+leaves the freshly installed rule with no effect in that window — the
+user must close and re-open the window. The CLI prints an IMPORTANT
+notice on every successful write, and JSON output carries
+`requiresWindowRestart: true` for scripted installers.
+
+### Runtime body gate
+
+The installed artifact begins with an explicit gate:
+
+> The protocol governs your behaviour **only when this window has been
+> bound to a role**, which is true if and only if `MA_SESSION` is
+> exported in the shell, or the user has explicitly told you in chat
+> that you are playing the `<role>` for this project. Otherwise,
+> ignore the protocol and respond normally — do not speculatively run
+> `agentctl plan`, `claim`, or any other `agentctl` command.
+
+This is necessary because the rule file applies to every agent window
+in the project (including windows the user opens for unrelated work);
+without the gate, an unactivated window would reflexively start
+claiming roles on the user's behalf.
+
+## Role lifecycle (deletion)
+
+`agentctl role delete <id>`
+
+- Removes the role from `config.yaml`, deletes the `roles/<id>.md`
+  human contract, and unlinks the live session file under
+  `comms/sessions/<id>.json`.
+- Emits a `ROLE_DELETED` system event with payload
+  `{ roleId, removedSessions }`.
+- Does **not** touch `state/task_board.yaml`. Open task assignments
+  with `owner = <deleted id>` are left as orphans on purpose:
+  recreating a role with the same id reinherits them, which is usually
+  what the user wants when "deleting" was actually "renaming". To
+  reassign instead, the user runs
+  `agentctl task assign <task-id> --to <other-role>`.
+- Restricted to `SYSTEM`. The CLI refuses to run when `MA_SESSION` is
+  exported in the calling shell — role deletion is a project-governance
+  act, not something an agent should do on its own.
+- After deletion, any agent window that still has the deleted role's
+  `MA_SESSION` exported will fail with `USAGE` ("session not found")
+  on its next authenticated command. The user must `unset MA_SESSION`
+  or claim a new role in that window.
 
 ## Reporting format
 

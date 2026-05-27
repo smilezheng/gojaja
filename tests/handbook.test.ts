@@ -107,6 +107,28 @@ describe("COLLABORATION_HANDBOOK", () => {
 describe("buildRuntime handbook integration", () => {
   const PROJ = "/tmp/example-project";
 
+  it("PR8d gate: every target body announces 'applies only when this window has been bound to a role' and forbids speculative agentctl calls", () => {
+    // Without the gate, an unactivated chat window (user opened a fresh
+    // Cursor tab to ask an unrelated question, never ran `activate`)
+    // would still see the runtime body in its system prompt and could
+    // reflexively run `agentctl plan` / `claim`, claiming a role the
+    // user never intended. The gate localises the loop to actively
+    // bound windows only.
+    // Tolerate whitespace / newlines because the bold marker text wraps
+    // for readability — we care about the phrase being present, not its
+    // exact wrap column.
+    const GATE_RE = /only when this\s+window has been bound to a role/;
+    const FORBID_RE = /Do \*\*not\*\* speculatively run/;
+    for (const t of ["codex", "claude", "cursor", "generic"] as const) {
+      const a = buildRuntime(t, PROJ);
+      expect(a.body).toMatch(GATE_RE);
+      expect(a.body).toMatch(FORBID_RE);
+      if (t !== "generic") {
+        expect(a.files[0].content).toMatch(GATE_RE);
+      }
+    }
+  });
+
   it("default runtime artifact includes the handbook for every target", () => {
     for (const t of ["codex", "claude", "cursor", "generic"] as const) {
       const a = buildRuntime(t, PROJ);

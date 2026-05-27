@@ -67,9 +67,10 @@ function expandHome(p: string): string {
 
 const RUNTIME_MARKER = "agentctl plan";
 
-export async function writeArtifactFile(file: RuntimeArtifact["files"][number]): Promise<
-  "wrote" | "skipped"
-> {
+export async function writeArtifactFile(
+  file: RuntimeArtifact["files"][number],
+  opts: { force?: boolean } = {},
+): Promise<"wrote" | "unchanged"> {
   const target = expandHome(file.path);
   await fsp.mkdir(path.dirname(target), { recursive: true });
 
@@ -87,7 +88,7 @@ export async function writeArtifactFile(file: RuntimeArtifact["files"][number]):
       file.markerBegin,
       file.markerEnd,
     );
-    if (replaced === existing) return "skipped";
+    if (!opts.force && replaced === existing) return "unchanged";
     await atomicWriteFile(target, replaced);
     return "wrote";
   }
@@ -100,7 +101,10 @@ export async function writeArtifactFile(file: RuntimeArtifact["files"][number]):
           `Move or rename it, then re-run.`,
       );
     }
-    if (prior === file.content) return "skipped";
+    // Byte-equality short-circuit. `opts.force` bypasses it for the
+    // operator who wants to confirm the file is freshly written from
+    // the current template (e.g. while debugging drift).
+    if (!opts.force && prior === file.content) return "unchanged";
   }
   await atomicWriteFile(target, file.content);
   return "wrote";

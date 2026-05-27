@@ -211,7 +211,7 @@ describe("writeArtifactFile", () => {
     expect(after1).toContain(CLAUDE_MARKER_END);
 
     const second = await writeArtifactFile(a.files[0]);
-    expect(second).toBe("skipped");
+    expect(second).toBe("unchanged");
     const after2 = await fsp.readFile(target, "utf8");
     expect(after2).toBe(after1);
   });
@@ -229,6 +229,17 @@ describe("writeArtifactFile", () => {
   it("cursor --write is idempotent across re-runs", async () => {
     const a = buildRuntime("cursor", ctx.root);
     expect(await writeArtifactFile(a.files[0])).toBe("wrote");
-    expect(await writeArtifactFile(a.files[0])).toBe("skipped");
+    expect(await writeArtifactFile(a.files[0])).toBe("unchanged");
+  });
+
+  it("PR8d --force-rewrite bypasses the byte-equal short-circuit", async () => {
+    // Without force, byte-equal content is preserved (returns 'unchanged');
+    // with force, the file is overwritten even when bytes match — useful
+    // when the operator wants to confirm the install came from the
+    // current template (e.g. after upgrading the CLI).
+    const a = buildRuntime("cursor", ctx.root);
+    expect(await writeArtifactFile(a.files[0])).toBe("wrote");
+    expect(await writeArtifactFile(a.files[0])).toBe("unchanged");
+    expect(await writeArtifactFile(a.files[0], { force: true })).toBe("wrote");
   });
 });

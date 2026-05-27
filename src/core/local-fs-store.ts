@@ -804,6 +804,73 @@ export class LocalFsStore implements Store {
     }
   }
 
+  async deleteRole(input: {
+    id: RoleId;
+    actor: RoleId | "SYSTEM";
+  }): Promise<{ role: RoleId; removedSessions: number }> {
+    validateRoleId(input.id);
+    // Role deletion is a project-governance act, not a per-role
+    // operation. Restrict to SYSTEM (no MA_SESSION) so an agent that
+    // somehow acquired a session for any role cannot wipe another
+    // role out from under it. The user runs this from their shell.
+    if (input.actor !== "SYSTEM") {
+      throw new ForbiddenError(
+        `Role deletion is restricted to project owners (SYSTEM). ` +
+          `Run \`agentctl role delete ${input.id}\` from a shell without MA_SESSION set.`,
+      );
+    }
+    return this.withLock("roles-create", async () => {
+      // Step 1: remove from config.yaml under the shared config lock.
+      // The mutator must refuse to no-op silently — caller passed a
+      // role id and expects it to have existed.
+      let existed = false;
+      await this.updateConfig((cur) => {
+        if (!cur.roles[input.id]) return cur;
+        existed = true;
+        const { [input.id]: _removed, ...rest } = cur.roles;
+        return { ...cur, roles: rest };
+      });
+      if (!existed) {
+        throw new UsageError(
+          `Role '${input.id}' is not registered. Nothing to delete.`,
+        );
+      }
+      // Step 2: best-effort delete the markdown contract. If it was
+      // hand-removed already we still consider the operation a success
+      // (config-level deletion is the source of truth).
+      const mdPath = this.abs(rolePaths(input.id).roleFile);
+      try {
+        await fsp.unlink(mdPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
+      // Step 3: invalidate any live session. Without this, an agent
+      // window with the old MA_SESSION still exported would happily
+      // authenticate via findSessionById until the lease ran out —
+      // and could still call `agentctl plan` against a role that no
+      // longer exists in config.
+      let removedSessions = 0;
+      const sessionFile = this.abs(rolePaths(input.id).sessionFile);
+      try {
+        await fsp.unlink(sessionFile);
+        removedSessions = 1;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
+      // Step 4: audit. Broadcast so any agent reading its next plan
+      // (including reassigned task owners after recreate) sees the
+      // event in events.log.
+      await this.recordEventInternal({
+        type: "ROLE_DELETED",
+        from: "SYSTEM",
+        to: "*",
+        ref: input.id,
+        payload: { roleId: input.id, removedSessions },
+      });
+      return { role: input.id, removedSessions };
+    });
+  }
+
   // ---- wait sentinel ------------------------------------------------------
 
   async writeWaitSentinel(role: RoleId): Promise<{ path: string; writtenAt: string }> {

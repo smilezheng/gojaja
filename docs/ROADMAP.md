@@ -139,9 +139,27 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     `unset MA_SESSION` hint, `claim --eval` mode, handbook review
     handoff + role-neutrality regex guard. Suite 150 → 169.
 
+- **PR8d — prompt UX gate + role delete.**
+  - Runtime body opens with an "only when bound to a role" gate so an
+    unactivated agent window does not reflexively run agentctl.
+  - `prompt --write` prints a "restart any open agent windows" caveat
+    on every successful write; JSON adds `requiresWindowRestart`.
+  - "SKIPPED" renamed to "UNCHANGED (already up to date)"; new
+    `--force-rewrite` flag overrides the byte-equal short-circuit.
+  - New `agentctl role delete <id>` (SYSTEM-only): removes config /
+    md / live session and emits `ROLE_DELETED`. Open task assignments
+    are left in place by design so re-creating the same id reinherits
+    them.
+  - Suite 169 → 185.
+
 ### Planned, in priority order
 
-- **PR8d — schema-level deferments from PR8c.**
+- **PR8e — README rewrite.**
+  - Restructure README.md / README.zh-CN.md around the user / agent
+    boundary; explicitly document that `state/project_state.md` is
+    not auto-created; add upgrade and troubleshooting sections.
+
+- **PR8f — schema-level deferments from PR8c.**
   - Task `reviewers` field so a Review handoff can sign off without
     needing task-board ownership.
   - `STATE_UPDATED` event when `state/*` files change.
@@ -196,8 +214,9 @@ After PR10 we tag `v2.0.0`.
 ## Sequencing notes
 
 PR1–PR7 + PR8a establish the protocol surface (events, sessions,
-plan/ack, tasks, RFCs, ownership, handbook). PR7a / PR8b / PR8c are
-correctness + UX hardening that introduce no new protocol surface.
-PR8d–PR10 harden the layer for everyday use; PR8d is the only
-remaining schema-affecting PR before `v2.0.0`. Anything past `v2.0.0`
-only ships after the chaos suite (PR10) is green.
+plan/ack, tasks, RFCs, ownership, handbook). PR7a / PR8b / PR8c / PR8d
+are correctness + UX hardening that introduce no new protocol surface.
+PR8e is documentation. PR8f–PR10 harden the layer for everyday use;
+PR8f is the only remaining schema-affecting PR before `v2.0.0`.
+Anything past `v2.0.0` only ships after the chaos suite (PR10) is
+green.

@@ -21,6 +21,7 @@ export type EventType =
   | "SESSION_CLAIMED"
   | "SESSION_RELEASED"
   | "SESSION_TAKEOVER"
+  | "ROLE_DELETED"
   | "LOCK_BROKEN"
   | "SYSTEM";
 
