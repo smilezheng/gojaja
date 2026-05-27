@@ -80,6 +80,29 @@ export interface WorklogPayload {
   message: string;
 }
 
+/**
+ * Per-role configuration. The single source of truth for ownership,
+ * reporting structure, and any field that later commands (write-state,
+ * role reminder, RFC voter lists) consume programmatically. The markdown
+ * file under `roles/<id>.md` is for humans and the agent prompt; this
+ * structured record is for the machine.
+ */
+export interface RoleConfig {
+  title: string;
+  description: string;
+  /** Relative file paths the role is allowed to write. Enforced in PR7. */
+  owns: string[];
+  /** Roles this one should send REPORTs to by default. Advisory in PR3. */
+  reportsTo: RoleId[];
+  /** Relative file paths the role must not write. Advisory in PR3. */
+  mustNotEdit: string[];
+}
+
+export interface ProjectConfig {
+  schemaVersion: string;
+  roles: Record<RoleId, RoleConfig>;
+}
+
 /** Role lease metadata. */
 export interface SessionInfo {
   role: RoleId;

@@ -54,6 +54,15 @@ export function worklogEntryPath(role: string, eventId: string): string {
 }
 
 /**
+ * Sentinel written by `agentctl wait --mode exit`. Its presence means the
+ * role's window has voluntarily yielded between turns and is waiting for
+ * an external trigger to resume.
+ */
+export function waitSentinelPath(role: string): string {
+  return path.posix.join(Paths.pendingDir, role, ".wait");
+}
+
+/**
  * Resolve a relative path against a root, refusing anything that escapes the
  * root via `..` or absolute components. All command-layer path construction
  * MUST go through this so user/agent input can never reach `fs.*` directly.

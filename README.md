@@ -54,10 +54,13 @@ file-only_ agents safe to combine.
 
 ## Status
 
-**v2.0.0-alpha.1.** The storage core and the per-turn agent loop
-(`claim` / `plan` / `ack` / `report` / `worklog` / `release`) are
-implemented and covered by 39 tests. Still to come: `wait`, RFCs,
-ownership enforcement, doctor — see [docs/ROADMAP](./docs/ROADMAP.md).
+**v2.0.0-alpha.2.** The storage core, the per-turn agent loop
+(`claim` / `plan` / `ack` / `report` / `worklog` / `release` /
+`wait`), and the user-facing setup commands (`role create / list /
+show`, `prompt --target codex|claude|cursor|generic --write`) are
+implemented and covered by 64 tests. Still to come: per-turn role
+reminder, task board, RFCs, ownership enforcement, doctor — see
+[docs/ROADMAP](./docs/ROADMAP.md).
 
 If you want to follow along, watch the `v2` branch.
 
@@ -82,74 +85,105 @@ npx multi-agent-coordination --help
 
 ## Quickstart
 
-This walks through what works **today** (PR1 — storage core). You will:
+The user does steps 1–4 **once** per project. After that, the user only
+opens agent windows and drops in the activation snippets; the agents
+themselves call the rest of the CLI on every turn.
 
-1. Initialise the coordination layer in a project.
-2. Inspect the layout it creates.
-3. Verify the schema version.
-
-### 1. Initialise a project
+### 1. Initialise the project
 
 ```bash
 cd /path/to/your/project
 agentctl init
+# Initialised multi-agent layer (v2.0.0) at /path/to/your/project/.multi-agent
 ```
 
-You will see:
+The created `.multi-agent/` tree is plain text + JSON, safe to commit
+to git. Full schema: [docs/SCHEMA.md](./docs/SCHEMA.md).
 
-```
-Initialised multi-agent layer (v2.0.0) at /path/to/your/project/.multi-agent
-```
-
-This creates the `.multi-agent/` directory and is **safe to commit to
-git** — everything in it is plain text or JSON, designed for code
-review.
-
-### 2. Inspect what was created
+### 2. Create the roles you want
 
 ```bash
-ls .multi-agent
-# VERSION  comms/  locks/  protocol/  rfcs/  roles/  state/  worklog/
+agentctl role create PM "Product Manager"   --description "Owns scope and acceptance"
+agentctl role create TL "Tech Lead"         --description "Owns architecture and integration order"
+agentctl role create Backend "Backend Engineer"
+agentctl role create QA "Quality Assurance"
+
+agentctl role list
+# PM           Product Manager
+# TL           Tech Lead
+# Backend      Backend Engineer
+# QA           Quality Assurance
 ```
 
-| Path | What lives here |
-| --- | --- |
-| `roles/<role>.md` | The contract for each role (responsibilities, scope) |
-| `state/` | Shared project state (goals, task board, decisions, risks) |
-| `comms/events/` | Append-only event stream as one JSON file per event |
-| `comms/inbox/<role>/` | Per-role message queue |
-| `comms/cursors/<role>.json` | Each role's "last read" pointer |
-| `comms/sessions/<role>.json` | Which window currently holds each role |
-| `rfcs/RFC-NNNN-<slug>/` | One directory per cross-role decision |
-| `worklog/<role>/` | Each role's progress journal |
-| `locks/` | Short-lived file locks (transient) |
+Each `role create` writes both `.multi-agent/config.yaml` (machine
+truth) and `.multi-agent/roles/<id>.md` (human contract). Edit
+`config.yaml` to set `owns`, `reportsTo`, `mustNotEdit`.
 
-Full schema reference: [docs/SCHEMA.md](./docs/SCHEMA.md).
+### 3. Install the runtime artifact for each agent host
 
-### 3. Check the layer's schema version
+For every agent host you plan to use, run `prompt --write` once. The
+artifact is role-agnostic; you do not run this per role.
 
 ```bash
-agentctl version
-# agentctl 2.0.0-alpha.0
-# schema   2.0.0
+# If you use Cursor:
+agentctl prompt PM --target cursor --write
+# → writes .cursor/rules/multi-agent-runtime.mdc (alwaysApply: true)
+
+# If you use Claude Code:
+agentctl prompt PM --target claude --write
+# → upserts a marker block inside CLAUDE.md
+
+# If you use Codex CLI:
+agentctl prompt PM --target codex --write
+# → writes ~/.codex/skills/multi-agent-runtime/{SKILL.md, agents/openai.yaml}
+
+# For any other shell-capable agent:
+agentctl prompt PM --target generic
+# → prints the full prompt for you to paste manually
 ```
 
-JSON output is available everywhere for scripts and LLM agents:
+`prompt` also prints a short **activation snippet** at the end. You
+paste that snippet into each agent window's chat to bind it to a role.
+
+### 4. Open one agent window per role
+
+For example, if PM is a Cursor window and Backend is a Codex window:
+
+- Open a Cursor window in this project. The runtime rule loads
+  automatically. Paste the activation snippet from
+  `agentctl prompt PM --target cursor`. The agent will then run
+  `agentctl claim PM`, export `MA_SESSION`, and enter its loop.
+- Open a Codex shell in this project. Paste the activation snippet from
+  `agentctl prompt Backend --target codex`. The agent activates the
+  `$multi-agent-runtime` skill and does the same.
+
+That is the full setup. From here on **the user only chats with the
+agents**; the CLI is theirs.
+
+### What the agent does every turn
+
+Documented in [docs/PROTOCOL.md](./docs/PROTOCOL.md). The short version:
 
 ```bash
-agentctl version --json
-# {"cli":"2.0.0-alpha.0","schema":"2.0.0"}
+agentctl plan                          # JSON manifest of unread work + ackToken
+# ... agent processes events, may call:
+agentctl report  --to <role> --message "<text>"
+agentctl worklog --message "<text>"
+# ... then:
+agentctl ack --token <ackToken>        # advance cursor exactly to the manifest snapshot
+agentctl wait                          # block-sleep without burning tokens; ATTENTION or IDLE
 ```
 
-### 4. Walk through a two-role scenario
+### Bonus: see it work without agents
 
-Open two shells in the same project to see PM and TL collaborate.
+You can drive the same loop by hand in two shells to feel out the
+protocol.
 
 **Shell A (PM):**
 
 ```bash
-agentctl claim PM                           # prints a session id
-export MA_SESSION=<paste session id>
+agentctl claim PM
+export MA_SESSION=<paste session id from claim>
 agentctl report  --to TL --message "Goals locked in for Q3"
 agentctl worklog --message "Drafted acceptance for T-0001"
 ```
@@ -159,18 +193,10 @@ agentctl worklog --message "Drafted acceptance for T-0001"
 ```bash
 agentctl claim TL
 export MA_SESSION=<paste session id>
-agentctl plan                               # see PM's report + worklog
-# … process the events …
-agentctl ack --token <ack-token from plan>  # advances TL's cursor
-agentctl plan                               # now empty
+agentctl plan                              # sees PM's report + worklog
+agentctl ack --token <ackToken from plan>
+agentctl wait --idle 1                     # IDLE after a 1-minute sleep
 ```
-
-Every step is atomic and recorded under `.multi-agent/comms/events/`.
-The agent loop preview that used to live here is now real; only
-`agentctl wait` (the cheap-keepalive primitive) is still scheduled — see
-the [roadmap](#roadmap-highlights).
-
-The wire-level contract is in [docs/PROTOCOL.md](./docs/PROTOCOL.md).
 
 ---
 
@@ -224,8 +250,8 @@ What this layer does, and the things it intentionally does not do.
 - **Run a daemon.** Every command is a short-lived process. (An
   optional `agentctl watch` for stale-session cleanup is v2.x.)
 - **Enforce role write-scope at the OS level today.** The contract is
-  documented and will become enforced through `config.yaml` ownership
-  checks in PR5; until then, agents are expected to follow it.
+  already in `config.yaml` (introduced in PR3), but write-time
+  enforcement lands in PR7; until then, agents are expected to follow it.
 - **Support Windows out of the box yet.** Code targets POSIX semantics
   (rename onto open file, `process.kill(pid, 0)`). Windows is on the
   v2.x roadmap.
@@ -241,14 +267,16 @@ If any of these are a deal-breaker, see
 
 | Milestone | What lands | Status |
 | --- | --- | --- |
-| PR1 | Storage core, locks, events, cursors, sessions | **Done** |
-| PR2 | `claim` / `plan` / `ack` / `report` / `worklog` | **Done** |
-| PR3 | `wait` for cheap token-free keepalive | Next up |
-| PR4 | RFC state machine (comments + leader decides) | Planned |
-| PR5 | `config.yaml`-driven role ownership enforcement | Planned |
-| PR6 | Installer, `upgrade`, `reset`, AGENTS.md bridge | Planned |
-| PR7 | `agentctl doctor`, history, event archival | Planned |
-| PR8 | Chaos / concurrency soak suite | Planned |
+| PR1  | Storage core, locks, events, cursors, sessions | **Done** |
+| PR2  | `claim` / `plan` / `ack` / `report` / `worklog` | **Done** |
+| PR3  | `role create / list / show`, `prompt --target … --write`, `wait` | **Done** |
+| PR4  | Manifest `roleReminder` for context-compressed agents | Next up |
+| PR5  | Task board (`state/task_board.yaml`, `agentctl task *`) | Planned |
+| PR6  | RFC state machine (comments + leader decides) | Planned |
+| PR7  | `config.yaml`-driven role ownership enforcement | Planned |
+| PR8  | `agentctl upgrade` / `reset`, schema migrations | Planned |
+| PR9  | `agentctl doctor`, history, event archival | Planned |
+| PR10 | Chaos / concurrency soak suite | Planned |
 | v2.x | HTTP transport, watcher daemon, Windows, NFS | Deferred |
 
 Full plan: [docs/ROADMAP.md](./docs/ROADMAP.md).

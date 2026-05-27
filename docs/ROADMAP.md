@@ -41,16 +41,37 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     [SCHEMA: Inbox is a derived view](./SCHEMA.md#inbox-is-a-derived-view-not-files).
   - 39 vitest cases across storage, plan/ack, and identity resolution.
 
+- **PR3 — role / prompt / wait.**
+  - `agentctl role create / list / show` plus a backing `config.yaml`
+    that registers each role's title, owns, reportsTo, and mustNotEdit.
+  - `agentctl prompt <role> --target codex|claude|cursor|generic`
+    [`--write`], producing host-specific persistent artifacts: Codex
+    skill, Claude `CLAUDE.md` marker block, Cursor
+    `.cursor/rules/multi-agent-runtime.mdc`. Role-agnostic install +
+    per-window activation snippet.
+  - `agentctl wait` (block + exit modes) with no exit-code overloading
+    and no cursor mutation.
+  - `js-yaml` dependency added for `config.yaml` round-tripping.
+  - 25 new vitest cases (`tests/role.test.ts`, `tests/prompt.test.ts`,
+    `tests/wait.test.ts`); 64/64 total.
+
 ### Planned, in priority order
 
-- **PR3 — wait / lifecycle.**
-  - `agentctl wait <role> [--idle <min>] [--mode block|exit]`.
-  - Host-targeted defaults in `agentctl role start` (codex/claude/generic
-    → block; cursor → exit).
-  - No exit code overloading for "more work" vs "idle"; both exit 0
-    with structured JSON.
+- **PR4 — manifest self-anchoring + role reminder.**
+  - `agentctl plan` output includes a `roleReminder` block built from
+    `config.yaml` so a context-compressed agent re-anchors identity on
+    every plan.
+  - Auto-default of `--json` when stdout is not a TTY.
+  - `from` / `to` validation against the configured role set.
 
-- **PR4 — RFC state machine.**
+- **PR5 — task board.**
+  - `state/task_board.yaml` schema with id / status / owner / priority /
+    dependencies / acceptance.
+  - `agentctl task new / assign / status / list / show`.
+  - `plan` manifest includes `tasks` array filtered to the role.
+  - New event types: `TASK_CREATED`, `TASK_ASSIGNED`, `TASK_STATUS_CHANGED`.
+
+- **PR6 — RFC state machine.**
   - `agentctl rfc new <slug>` with strict slug validation.
   - `agentctl rfc comment <id> --option <id> --rationale <text>`.
   - `agentctl rfc decide <id> --by <leader> --option <id> --rationale <text>`
@@ -58,34 +79,30 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Auto-update of `state/decisions.md` when an RFC is accepted.
   - Event types `RFC_CREATED`, `RFC_COMMENT`, `RFC_DECIDED`.
 
-- **PR5 — role contracts and ownership.**
+- **PR7 — ownership enforcement.**
   - `config.yaml` schema validated at startup.
-  - `agentctl role create <role> --title <text>` provisioning.
   - `agentctl write-state --file <path>` gated by
     `config.yaml:roles[caller].owns`.
-  - `agentctl role list` / `agentctl role show <role>`.
 
-- **PR6 — installer & upgrade.**
-  - `npx multi-agent-coordination init` end-to-end (currently the bin
-    works but does not write the protocol/role markdown templates).
+- **PR8 — installer & upgrade.**
   - `agentctl upgrade` driving `src/migrations/<from>-<to>.ts`.
   - `agentctl reset --confirm <project-name>` for destructive nukes.
   - AGENTS.md bridge insertion with versioned marker block, re-written
     on every upgrade.
 
-- **PR7 — operational tooling.**
+- **PR9 — operational tooling.**
   - `agentctl doctor`: JSON parse all records, validate cursor reachability,
     detect orphan manifests, surface stale locks.
   - `agentctl history --role <role> [--since <ulid>]`.
   - Event archival (`comms/events/_archive/YYYY-MM-DD/`) with a configurable
     retention floor.
 
-- **PR8 — chaos / soak.**
+- **PR10 — chaos / soak.**
   - Multi-process integration tests under `vitest`'s pool=forks running
     real concurrent claim/plan/ack cycles.
   - Random-kill harness asserting `agentctl doctor` stays green.
 
-After PR8 we tag `v2.0.0`.
+After PR10 we tag `v2.0.0`.
 
 ## v2.x — deferred but slot-reserved
 

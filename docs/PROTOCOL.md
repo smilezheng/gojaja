@@ -149,34 +149,65 @@ Rules:
   `open` or `draft`. This is enforced at the task-claim level (planned),
   not in `agentctl rfc`.
 
-## Wait / idle keepalive (planned PR3)
+## Wait / idle keepalive
 
 An agent window that has nothing to do should stay alive — discussions,
 reviews, blocker messages may arrive from other agents — but should not
 consume tokens while idle. `wait` is the cheap-keepalive primitive.
 
-### `agentctl wait <role> [--idle <min>] [--mode block|exit]`
+### `agentctl wait [<role>] [--idle <minutes>] [--mode block|exit]`
 
-`--mode block` (default for Codex / Claude Code / generic shell hosts):
+Role resolution follows the same rules as `plan` (MA_SESSION first;
+explicit role argument must agree).
 
-1. Shell-level `sleep` for `--idle` minutes.
-2. After waking, `plan` is implicitly re-run.
-3. If the manifest is empty → exit 0, prints `idle` and the recommendation
-   to end the turn.
-4. If new items appeared → exit 0, prints `attention` and the manifest;
-   the agent should process and `ack` it.
+`--mode block` (default):
 
-The sleep is shell-level: no LLM tokens are consumed while waiting.
+1. Shell-level `setTimeout` blocks for `--idle` minutes. No LLM tokens
+   are consumed while sleeping.
+2. After waking, `wait` reads the cursor and lists events newer than it,
+   applying the same recipient filter as `plan` (`to ∈ {role, "*"} &&
+   from !== role`). The cursor is **not** modified, no manifest is
+   generated.
+3. Output (always exit 0):
+   - `ATTENTION role=<r> newEvents=<n> ...` if any new event matched.
+     The agent should then run `agentctl plan` to consume them.
+   - `IDLE role=<r> newEvents=0 ...` if none did. The agent may end the
+     turn.
+4. Use `--json` for machine-readable output (`status: "attention" | "idle"`).
 
 `--mode exit` (for Cursor and other hosts with short shell timeouts):
 
-1. Writes a sentinel `comms/pending/<role>/.wait` and exits 0 immediately.
-2. The next user message or an external trigger resumes the loop with a
-   fresh `plan`.
+1. Writes a sentinel `comms/pending/<role>/.wait`. See [SCHEMA](./SCHEMA.md).
+2. Exits 0 immediately. The agent window's outer loop is expected to be
+   resumed by the next user message (or an external scheduler in v2.x).
 
-The agent prompt printed by `agentctl role start <role> --target cursor`
-will default to `--mode exit`; `--target codex/claude/generic` default to
-`--mode block`. Targets are configurable per role.
+Two cardinal rules — both fix v0.1 bugs:
+
+- **No exit-code overloading.** Exit 0 in every normal outcome. Non-zero
+  is for genuine usage errors (e.g. unknown role).
+- **No cursor mutation.** `wait` is a pure read; only `plan` + `ack`
+  may move the cursor.
+
+## Activation in different agent hosts
+
+`agentctl prompt <role> --target <host> [--write]` produces a prompt body
+and, when `--write` is given, drops a persistent artifact into the host's
+own configuration area. The artifact is **role-agnostic**: it tells the
+agent how to find its identity via `MA_SESSION` and `agentctl plan`.
+Per-window role binding is done by pasting a short activation snippet
+into that window's chat.
+
+| Target | Persistent artifact location | Activation per window |
+| --- | --- | --- |
+| `codex` | `${CODEX_HOME:-~/.codex}/skills/multi-agent-runtime/SKILL.md` and `agents/openai.yaml` | User pastes `Use $multi-agent-runtime. I am the <role> agent for <project root>.` |
+| `claude` | A `<!-- multi-agent-runtime:BEGIN ... :END -->` marker block inside `<project>/CLAUDE.md` (preserves user content around it) | User pastes the activation snippet into the chat |
+| `cursor` | `<project>/.cursor/rules/multi-agent-runtime.mdc` with `alwaysApply: true` | User pastes the activation snippet into the chat |
+| `generic` | Nothing written | User pastes the full prompt body into the chat |
+
+Writing is idempotent — re-running `prompt --write` overwrites a
+prior artifact in place, and skips no-op rewrites. The CLI refuses
+to clobber an existing file that does not look like a previous artifact
+(heuristic: must contain the `agentctl plan` marker phrase).
 
 ## Reporting format
 

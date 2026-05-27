@@ -51,10 +51,12 @@ CrewAI 之类托管的多 agent 框架，那本项目解决的不是你的问题
 
 ## 当前状态
 
-**v2.0.0-alpha.1**。存储核心和每回合 agent 循环（`claim` / `plan` /
-`ack` / `report` / `worklog` / `release`）都已实现，由 39 个测试覆盖。
-还在排队的：`wait`、RFC、可写域强制、`doctor`——详见
-[docs/ROADMAP](./docs/ROADMAP.md)。
+**v2.0.0-alpha.2**。存储核心、每回合 agent 循环（`claim` / `plan` /
+`ack` / `report` / `worklog` / `release` / `wait`），以及给用户的
+配置命令（`role create / list / show`、`prompt --target codex|claude|cursor|generic --write`）
+都已实现，由 64 个测试覆盖。
+还在排队的：每回合 role reminder、任务板、RFC、可写域强制、`doctor`
+——详见 [docs/ROADMAP](./docs/ROADMAP.md)。
 
 跟进进度请关注 `v2` 分支。
 
@@ -79,73 +81,103 @@ alpha 阶段你也可以直接 clone 本仓库，见
 
 ## 快速上手
 
-下面演示的是**当前 PR1（存储核心）已经实现的功能**。你会：
-
-1. 在一个项目里初始化协作层。
-2. 看一眼它创建了什么。
-3. 检查 schema 版本。
+用户**只做 1-4 这四步**，全部是一次性的。之后你只需要打开 agent
+窗口、粘上激活提示词；剩下的命令 agent 自己每回合调。
 
 ### 1. 在项目里初始化
 
 ```bash
 cd /path/to/your/project
 agentctl init
+# Initialised multi-agent layer (v2.0.0) at /path/to/your/project/.multi-agent
 ```
 
-输出：
+`.multi-agent/` 全是纯文本 + JSON，**可以直接提交到 git**。完整
+schema：[docs/SCHEMA.md](./docs/SCHEMA.md)。
 
-```
-Initialised multi-agent layer (v2.0.0) at /path/to/your/project/.multi-agent
-```
-
-这会创建 `.multi-agent/` 目录，**可以直接提交到 git**——里面全是纯文本
-或 JSON，专门为代码 review 设计。
-
-### 2. 看看创建了什么
+### 2. 创建你需要的角色
 
 ```bash
-ls .multi-agent
-# VERSION  comms/  locks/  protocol/  rfcs/  roles/  state/  worklog/
+agentctl role create PM "Product Manager"   --description "Owns scope and acceptance"
+agentctl role create TL "Tech Lead"         --description "Owns architecture and integration order"
+agentctl role create Backend "Backend Engineer"
+agentctl role create QA "Quality Assurance"
+
+agentctl role list
+# PM           Product Manager
+# TL           Tech Lead
+# Backend      Backend Engineer
+# QA           Quality Assurance
 ```
 
-| 路径 | 用途 |
-| --- | --- |
-| `roles/<role>.md` | 每个角色的契约（职责、可写域） |
-| `state/` | 共享项目状态（目标、任务板、决策、风险） |
-| `comms/events/` | 仅追加的事件流，一事件一个 JSON 文件 |
-| `comms/inbox/<role>/` | 每个角色的收件队列 |
-| `comms/cursors/<role>.json` | 每个角色"已读到哪里"的游标 |
-| `comms/sessions/<role>.json` | 当前由哪个窗口占用某角色 |
-| `rfcs/RFC-NNNN-<slug>/` | 每个跨角色决议一个目录 |
-| `worklog/<role>/` | 每个角色的工作日志 |
-| `locks/` | 短生命周期的文件锁（瞬时） |
+每条 `role create` 同时写 `.multi-agent/config.yaml`（机器源）和
+`.multi-agent/roles/<id>.md`（人看的契约）。编辑 `config.yaml` 来
+设置 `owns` / `reportsTo` / `mustNotEdit`。
 
-完整 schema：[docs/SCHEMA.md](./docs/SCHEMA.md)。
+### 3. 为每种 agent host 安装一次 runtime 工件
 
-### 3. 检查 schema 版本
+对你**要用的每种 host**跑一次 `prompt --write` 就够了。工件是角色无
+关的，不用按角色重复跑。
 
 ```bash
-agentctl version
-# agentctl 2.0.0-alpha.0
-# schema   2.0.0
+# 如果你用 Cursor：
+agentctl prompt PM --target cursor --write
+# → 写出 .cursor/rules/multi-agent-runtime.mdc（alwaysApply: true）
+
+# 如果你用 Claude Code：
+agentctl prompt PM --target claude --write
+# → 在 CLAUDE.md 里 upsert 一个标记块
+
+# 如果你用 Codex CLI：
+agentctl prompt PM --target codex --write
+# → 写出 ~/.codex/skills/multi-agent-runtime/{SKILL.md, agents/openai.yaml}
+
+# 任何能跑 shell 的其它 agent：
+agentctl prompt PM --target generic
+# → 打印完整提示词，你手动粘
 ```
 
-所有命令都支持 `--json`，方便脚本和 LLM agent 解析：
+`prompt` 还会在最后打印一段**激活提示词**。把它粘到对应 agent
+窗口的聊天里，agent 就会绑定到这个角色。
+
+### 4. 一个角色一个 agent 窗口
+
+举例：PM 用 Cursor，Backend 用 Codex：
+
+- 在该项目里开一个 Cursor 窗口。runtime rule 已经自动加载。把
+  `agentctl prompt PM --target cursor` 打印的激活提示词粘到聊天
+  里。Agent 会自动跑 `agentctl claim PM`、export `MA_SESSION`、
+  然后进入运行循环。
+- 在该项目里开一个 Codex shell。粘
+  `agentctl prompt Backend --target codex` 的激活提示词。Agent 触发
+  `$multi-agent-runtime` skill 做同样的事。
+
+到这里全部安装完了。从这一刻起**用户只需要和 agent 自然聊天**；
+agentctl 是它们的工具。
+
+### Agent 每个回合自己跑什么
+
+详见 [docs/PROTOCOL.md](./docs/PROTOCOL.md)。简版：
 
 ```bash
-agentctl version --json
-# {"cli":"2.0.0-alpha.0","schema":"2.0.0"}
+agentctl plan                          # JSON：未读工作 + ackToken
+# ... agent 处理完事件，可能调：
+agentctl report  --to <role> --message "<text>"
+agentctl worklog --message "<text>"
+# ... 然后：
+agentctl ack --token <ackToken>        # 把游标精确推到 manifest 当时快照
+agentctl wait                          # 阻塞睡眠（不烧 token）；返回 ATTENTION 或 IDLE
 ```
 
-### 4. 走一遍两角色场景
+### 额外：手动跑一遍感受协议
 
-在同一个项目下开两个 shell，亲眼看 PM 和 TL 协作。
+可以在两个 shell 里手动驱动整个流程，更直观。
 
 **Shell A（PM）：**
 
 ```bash
-agentctl claim PM                           # 打印 session id
-export MA_SESSION=<把 session id 粘进来>
+agentctl claim PM
+export MA_SESSION=<粘 claim 返回的 session id>
 agentctl report  --to TL --message "Goals locked in for Q3"
 agentctl worklog --message "Drafted acceptance for T-0001"
 ```
@@ -154,19 +186,11 @@ agentctl worklog --message "Drafted acceptance for T-0001"
 
 ```bash
 agentctl claim TL
-export MA_SESSION=<把 session id 粘进来>
-agentctl plan                               # 看到 PM 的 report 和 worklog
-# … 处理这些事件 …
-agentctl ack --token <plan 输出里的 token>   # 推进 TL 的游标
-agentctl plan                               # 现在为空
+export MA_SESSION=<粘 session id>
+agentctl plan                              # 看到 PM 的 report 和 worklog
+agentctl ack --token <plan 输出的 ackToken>
+agentctl wait --idle 1                     # 1 分钟后返回 IDLE
 ```
-
-每一步都是原子的，所有事件都落在
-`.multi-agent/comms/events/` 下。之前这里的"工作流预览"现在已经
-是真命令；唯一还没实现的是 `agentctl wait`（无 token 消耗的保活
-原语），见 [路线图](#路线图概览)。
-
-Wire-level 契约见 [docs/PROTOCOL.md](./docs/PROTOCOL.md)。
 
 ---
 
@@ -213,8 +237,8 @@ Wire-level 契约见 [docs/PROTOCOL.md](./docs/PROTOCOL.md)。
   工具（Codex / Claude Code / Cursor）负责。
 - **不跑守护进程**。每条命令都是短生命周期进程。（可选的
   `agentctl watch` 用于清理过期 session，在 v2.x。）
-- **OS 级还没强制角色可写域**。契约已写在文档里，PR5 会引入
-  `config.yaml` 做服务端校验；在那之前 agent 需要自觉遵守。
+- **OS 级还没强制角色可写域**。契约已经在 `config.yaml` 里（PR3 引入），
+  但写入校验在 PR7 才上线；在那之前 agent 需要自觉遵守。
 - **暂不支持 Windows**。代码依赖 POSIX 语义（rename onto open file、
   `process.kill(pid, 0)`）。Windows 在 v2.x 路线图里。
 - **不替代 git**。审计就以纯文件形式躺在仓库里，靠 git 做 review 和
@@ -229,14 +253,16 @@ Wire-level 契约见 [docs/PROTOCOL.md](./docs/PROTOCOL.md)。
 
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
-| PR1 | 存储核心：锁、事件、游标、会话 | **完成** |
-| PR2 | `claim` / `plan` / `ack` / `report` / `worklog` | **完成** |
-| PR3 | `wait`：无 token 消耗的保活 | 即将开始 |
-| PR4 | RFC 状态机（意见 + leader 决定） | 计划中 |
-| PR5 | `config.yaml` 驱动的角色可写域强制 | 计划中 |
-| PR6 | 安装器、`upgrade`、`reset`、AGENTS.md 注入 | 计划中 |
-| PR7 | `agentctl doctor`、历史回放、事件归档 | 计划中 |
-| PR8 | 混沌 / 并发压测套件 | 计划中 |
+| PR1  | 存储核心：锁、事件、游标、会话 | **完成** |
+| PR2  | `claim` / `plan` / `ack` / `report` / `worklog` | **完成** |
+| PR3  | `role create / list / show`、`prompt --target … --write`、`wait` | **完成** |
+| PR4  | manifest 里的 `roleReminder`，让被压缩上下文的 agent 重新锚定身份 | 即将开始 |
+| PR5  | 任务板（`state/task_board.yaml`、`agentctl task *`） | 计划中 |
+| PR6  | RFC 状态机（意见 + leader 决定） | 计划中 |
+| PR7  | `config.yaml` 驱动的角色可写域强制 | 计划中 |
+| PR8  | 安装器、`upgrade`、`reset`、AGENTS.md 注入 | 计划中 |
+| PR9  | `agentctl doctor`、历史回放、事件归档 | 计划中 |
+| PR10 | 混沌 / 并发压测套件 | 计划中 |
 | v2.x | HTTP 传输、watcher daemon、Windows、NFS | 推迟 |
 
 完整路线图：[docs/ROADMAP.md](./docs/ROADMAP.md)。

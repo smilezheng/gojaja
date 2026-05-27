@@ -1,9 +1,11 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import * as yaml from "js-yaml";
 import {
   AlreadyInitializedError,
   NotInitializedError,
   StateCorruptionError,
+  UnknownRoleError,
   UsageError,
 } from "./errors";
 import {
@@ -22,17 +24,25 @@ import {
   manifestPath,
   resolveInside,
   rolePaths,
+  waitSentinelPath,
   worklogEntryPath,
 } from "./paths";
 import { validateRoleId } from "./role-id";
+import { renderRoleMarkdown } from "./role-template";
 import type { Store } from "./store";
 import type {
   CursorState,
   Event,
   Manifest,
+  ProjectConfig,
+  RoleConfig,
   RoleId,
   SessionInfo,
 } from "./types";
+
+function freshConfig(schemaVersion: string): ProjectConfig {
+  return { schemaVersion, roles: {} };
+}
 
 /**
  * Filesystem-backed Store. Operates against a `.multi-agent` directory rooted
@@ -75,6 +85,10 @@ export class LocalFsStore implements Store {
     ];
     await Promise.all(dirs.map((d) => fsp.mkdir(this.abs(d), { recursive: true })));
     await atomicWriteFile(this.abs(Paths.versionFile), `${version}\n`);
+    await atomicWriteFile(
+      this.abs(Paths.configFile),
+      yaml.dump(freshConfig(version), { lineWidth: 100, noRefs: true }),
+    );
   }
 
   async readVersion(): Promise<string> {
@@ -457,6 +471,119 @@ export class LocalFsStore implements Store {
         eventsAcked: manifest.events.length,
       };
     });
+  }
+
+  // ---- config & roles -----------------------------------------------------
+
+  async readConfig(): Promise<ProjectConfig> {
+    const file = this.abs(Paths.configFile);
+    let raw: string;
+    try {
+      raw = await fsp.readFile(file, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        // initialise() should have created this; treat absence as a layer
+        // that has never been initialised with a config schema.
+        throw new StateCorruptionError(
+          `${Paths.configFile} is missing. Run 'agentctl init' to create it.`,
+        );
+      }
+      throw err;
+    }
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(raw);
+    } catch (err) {
+      throw new StateCorruptionError(
+        `${Paths.configFile} is not valid YAML: ${(err as Error).message}`,
+      );
+    }
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof (parsed as { schemaVersion?: unknown }).schemaVersion !== "string"
+    ) {
+      throw new StateCorruptionError(
+        `${Paths.configFile} is missing required top-level fields.`,
+      );
+    }
+    const obj = parsed as ProjectConfig;
+    if (!obj.roles || typeof obj.roles !== "object") {
+      obj.roles = {};
+    }
+    return obj;
+  }
+
+  async writeConfig(config: ProjectConfig): Promise<void> {
+    await atomicWriteFile(
+      this.abs(Paths.configFile),
+      yaml.dump(config, { lineWidth: 100, noRefs: true }),
+    );
+  }
+
+  async createRole(input: {
+    id: RoleId;
+    title?: string;
+    description?: string;
+    owns?: string[];
+    reportsTo?: RoleId[];
+    mustNotEdit?: string[];
+  }): Promise<RoleConfig> {
+    validateRoleId(input.id);
+    const title = input.title ?? `${input.id} Agent`;
+    const description = input.description ?? "";
+    const owns = input.owns ?? [];
+    const reportsTo = (input.reportsTo ?? []).map((r) => validateRoleId(r));
+    const mustNotEdit = input.mustNotEdit ?? [];
+
+    return this.withLock("roles-create", async () => {
+      const config = await this.readConfig();
+      if (config.roles[input.id]) {
+        throw new UsageError(
+          `Role '${input.id}' already exists in config.yaml.`,
+        );
+      }
+      const roleMdPath = this.abs(rolePaths(input.id).roleFile);
+      if (await exists(roleMdPath)) {
+        throw new UsageError(
+          `Role markdown already exists: ${roleMdPath}.`,
+        );
+      }
+      const roleConfig: RoleConfig = { title, description, owns, reportsTo, mustNotEdit };
+      const nextConfig: ProjectConfig = {
+        ...config,
+        roles: { ...config.roles, [input.id]: roleConfig },
+      };
+      await atomicWriteFile(
+        roleMdPath,
+        renderRoleMarkdown({ id: input.id, ...roleConfig }),
+      );
+      await this.writeConfig(nextConfig);
+      return roleConfig;
+    });
+  }
+
+  async readRoleFile(role: RoleId): Promise<string> {
+    validateRoleId(role);
+    const file = this.abs(rolePaths(role).roleFile);
+    try {
+      return await fsp.readFile(file, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new UnknownRoleError(role);
+      }
+      throw err;
+    }
+  }
+
+  // ---- wait sentinel ------------------------------------------------------
+
+  async writeWaitSentinel(role: RoleId): Promise<{ path: string; writtenAt: string }> {
+    validateRoleId(role);
+    const writtenAt = new Date().toISOString();
+    const target = this.abs(waitSentinelPath(role));
+    await atomicWriteJson(target, { role, mode: "exit", writtenAt });
+    return { path: target, writtenAt };
   }
 
   // ---- helpers ------------------------------------------------------------

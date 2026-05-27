@@ -55,6 +55,39 @@ Plain text, no trailing whitespace beyond a single newline.
 Read with `agentctl version`. The CLI refuses to run against a layer
 whose schema is newer than its own (planned check).
 
+## `config.yaml`
+
+The machine-readable project configuration. Source of truth for role
+identity, ownership, and reporting structure. Markdown files under
+`roles/<id>.md` are for humans and never used as a programmatic source.
+
+```yaml
+schemaVersion: 2.0.0
+roles:
+  PM:
+    title: Product Manager
+    description: Owns product scope and acceptance.
+    owns:
+      - state/project_state.md
+      - state/task_board.yaml
+    reportsTo: []
+    mustNotEdit:
+      - state/architecture.md
+```
+
+Field rules:
+
+- `schemaVersion` must match the on-disk `VERSION` file.
+- `roles` is `Record<RoleId, RoleConfig>`.
+- `RoleConfig.owns` and `mustNotEdit` are advisory in v2.0.0-alpha.2;
+  enforcement at write time arrives in a later PR. They are still
+  authoritative for the role contract.
+- `reportsTo` is advisory; not enforced.
+
+Created and mutated only through `agentctl role create` (and future
+`agentctl role edit`). Hand edits are allowed but rare; the markdown
+contract in `roles/<id>.md` points the human at this file.
+
 ## `comms/events/<ulid>.json`
 
 Immutable event record. The file name is the event id; it is always a
@@ -189,6 +222,25 @@ Invariants:
   succeeds and emits `SESSION_TAKEOVER`.
 - `release` requires the holder's `sessionId`; a mismatched call is
   refused.
+
+## `comms/pending/<role>/.wait`
+
+Sentinel written by `agentctl wait --mode exit`. Its presence means
+the role's window has voluntarily yielded between turns and is waiting
+for an external trigger to resume.
+
+```jsonc
+{
+  "role": "PM",
+  "mode": "exit",
+  "writtenAt": "2026-05-27T05:23:00Z"
+}
+```
+
+The sentinel is informational only; nothing else reads it in v2.0.0.
+It exists so external schedulers and `agentctl doctor` (planned) can
+distinguish "idle and intentionally yielded" from "crashed" without
+ambiguity.
 
 ## `comms/heartbeats/<role>.json` (planned)
 

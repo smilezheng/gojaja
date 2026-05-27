@@ -4,9 +4,12 @@ import { runAck } from "./commands/ack";
 import { runClaim } from "./commands/claim";
 import { runInit } from "./commands/init";
 import { runPlan } from "./commands/plan";
+import { runPrompt } from "./commands/prompt";
 import { runRelease } from "./commands/release";
 import { runReport } from "./commands/report";
+import { runRole } from "./commands/role";
 import { runVersion } from "./commands/version";
+import { runWait } from "./commands/wait";
 import { runWorklog } from "./commands/worklog";
 import { HELP_TEXT } from "./help";
 
@@ -41,6 +44,12 @@ async function dispatch(): Promise<number> {
       return runReport(args);
     case "worklog":
       return runWorklog(args);
+    case "role":
+      return runRole(args);
+    case "prompt":
+      return runPrompt(args);
+    case "wait":
+      return runWait(args);
     default:
       throw new UsageError(`Unknown command: ${args.command}`);
   }

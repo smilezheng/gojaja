@@ -2,6 +2,8 @@ import type {
   CursorState,
   Event,
   Manifest,
+  ProjectConfig,
+  RoleConfig,
   RoleId,
   SessionInfo,
 } from "./types";
@@ -151,4 +153,36 @@ export interface Store {
     ackedThrough: string;
     eventsAcked: number;
   }>;
+
+  // ---- config & roles -----------------------------------------------------
+
+  readConfig(): Promise<ProjectConfig>;
+
+  /** Atomic full-config write. Caller is responsible for shape. */
+  writeConfig(config: ProjectConfig): Promise<void>;
+
+  /**
+   * Create a role end-to-end: register it in `config.yaml` AND write the
+   * `roles/<id>.md` human contract. Atomic at the operation level via a
+   * `roles-create` lock. Refuses if `id` already exists in either place.
+   */
+  createRole(input: {
+    id: RoleId;
+    title?: string;
+    description?: string;
+    owns?: string[];
+    reportsTo?: RoleId[];
+    mustNotEdit?: string[];
+  }): Promise<RoleConfig>;
+
+  /** Read the markdown role contract; throws ENOENT-like UsageError. */
+  readRoleFile(role: RoleId): Promise<string>;
+
+  // ---- wait sentinel ------------------------------------------------------
+
+  /**
+   * Write the `comms/pending/<role>/.wait` sentinel (used by
+   * `agentctl wait --mode exit`). Returns the absolute path written.
+   */
+  writeWaitSentinel(role: RoleId): Promise<{ path: string; writtenAt: string }>;
 }

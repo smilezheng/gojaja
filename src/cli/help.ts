@@ -5,32 +5,45 @@ export const HELP_TEXT = `agentctl ${CLI_VERSION}
 Usage:
   agentctl <command> [options]
 
-Bootstrap:
-  init [--root <path>]           Initialise a .multi-agent layer.
-  version                        Print CLI and schema version.
+Bootstrap (run once per project, by you):
+  init [--root <path>]                        Initialise a .multi-agent layer.
+  role create <id> [<title>]                  Register a role; writes
+                                              roles/<id>.md and config.yaml.
+  role list                                   List configured roles.
+  role show <id>                              Show role config + markdown.
+  prompt <role> [--target codex|claude|cursor|generic] [--write]
+                                              Print the agent activation
+                                              prompt; with --write, install
+                                              the host-specific persistent
+                                              artifact (skill / rule /
+                                              CLAUDE.md block).
 
-Session lifecycle:
+Session lifecycle (run once per agent window, then export MA_SESSION):
   claim <role> [--ttl <s>] [--force]
-                                 Lease a role for this shell.
-                                 Print the session id; export it as MA_SESSION.
-  release [<role>]               End the current session.
+  release [<role>]
 
-Per-turn loop (require MA_SESSION):
-  plan [<role>]                  Fetch unread events as a JSON manifest with
-                                 an ack token. Idempotent across retry.
-  ack  [<role>] --token <t>      Confirm a manifest; advance the cursor only
-                                 to that manifest's snapshot point.
+Per-turn loop (called by the agent; requires MA_SESSION):
+  plan [<role>]                               Fetch a manifest with ackToken.
+  ack  [<role>] --token <t>                   Confirm a manifest.
 
-Messaging (require MA_SESSION):
+Messaging (requires MA_SESSION):
   report --to <role> --message <text> [--ref <id>]
-                                 Send a directed event to another role.
-  worklog --message <text>       Broadcast a worklog entry; also writes
-                                 worklog/<role>/<id>.md for humans.
+  worklog --message <text>
+
+Keepalive (requires MA_SESSION):
+  wait [<role>] [--idle <minutes>] [--mode block|exit]
+                                              Block-mode sleeps without
+                                              burning tokens; exit-mode
+                                              writes a .wait sentinel and
+                                              returns immediately.
 
 Global options:
-  --root <path>                  Override project root (default: walk up).
-  --json                         Force JSON output where supported.
+  --root <path>                               Override project root.
+  --json                                      Force JSON output.
 
-Unimplemented (planned, see docs/ROADMAP.md):
-  wait, rfc *, role *, doctor, upgrade, reset
+Information:
+  version                                     CLI and schema version.
+  help                                        Show this help.
+
+Not yet implemented (see docs/ROADMAP.md): rfc *, task *, doctor, upgrade.
 `;
