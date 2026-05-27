@@ -1,44 +1,54 @@
-import { boolFlag, optionalString, type ParsedArgs } from "../argv";
+import { boolFlag, optionalString, requireString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
-import { buildArtifact, writeArtifactFile } from "../prompts";
+import { buildRuntime, writeArtifactFile } from "../prompts";
 import type { Target } from "../prompts";
 
 const TARGETS: ReadonlySet<Target> = new Set(["codex", "claude", "cursor", "generic"]);
 
+/**
+ * `agentctl prompt --target <host> [--write] [--no-handbook] [--json]`
+ *
+ * Strictly role-free. Builds the runtime artifact for a host — the same
+ * artifact for every role on that host. To bind a role to a specific
+ * chat window, the user (or agent) runs `agentctl activate <role> ...`
+ * separately. This separation prevents role identifiers from leaking
+ * into project-shared files like `.cursor/rules/*` or `CLAUDE.md`,
+ * which would otherwise lock the project to a single role per host.
+ *
+ * Passing a positional argument is refused with a hint pointing at
+ * `activate`, so users coming from earlier versions get a clear signal
+ * rather than silent rebinding.
+ */
 export async function runPrompt(args: ParsedArgs): Promise<number> {
-  const role = args.positional[0];
-  if (!role) {
+  if (args.positional.length > 0) {
     throw new UsageError(
-      "Usage: agentctl prompt <role> [--target codex|claude|cursor|generic] [--write] [--json]",
+      `'prompt' no longer accepts a role argument (got '${args.positional[0]}'). ` +
+        `Use 'agentctl activate <role> --target <host>' to get a per-window activation snippet. ` +
+        `'prompt' installs the host-wide runtime artifact only.`,
     );
   }
-  const target = (optionalString(args.flags, "target") ?? "generic") as Target;
+  const target = requireString(args.flags, "target") as Target;
   if (!TARGETS.has(target)) {
     throw new UsageError(`Unknown --target '${target}'. Use codex, claude, cursor, or generic.`);
   }
   const write = boolFlag(args.flags, "write");
   const json = boolFlag(args.flags, "json");
-  // --no-handbook drops the collaboration handbook from the artifact for
-  // projects with their own behavioural standards or unusually tight
-  // context budgets. Default: include.
   const withHandbook = !boolFlag(args.flags, "no-handbook");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
 
-  // Validate the role exists. We could skip this for `generic`, but
-  // catching the typo early matters more than a tiny ergonomics win.
-  const store = await openStoreOrThrow(root);
-  const config = await store.readConfig();
-  if (!config.roles[role]) {
-    throw new UsageError(
-      `Unknown role '${role}'. Create it first: agentctl role create ${role} "<title>"`,
-    );
-  }
+  // Even though we never embed a role, sanity-check that the layer is
+  // initialised so users get a clear error before we start writing files
+  // they may not have asked for.
+  await openStoreOrThrow(root);
 
-  const artifact = buildArtifact(target, role, root, { withHandbook });
+  const artifact = buildRuntime(target, root, { withHandbook });
 
   if (write && target === "generic") {
-    throw new UsageError("--write is not supported for --target generic (no persistence location).");
+    throw new UsageError(
+      "--write is not supported for --target generic (no persistent install location). " +
+        "Use `agentctl activate <role> --target generic` instead — it bundles the runtime body.",
+    );
   }
 
   const writeResults: Array<{ path: string; result: "wrote" | "skipped" }> = [];
@@ -52,11 +62,9 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
   if (json) {
     process.stdout.write(
       JSON.stringify({
-        role,
         target,
         wrote: writeResults,
         body: artifact.body,
-        activation: artifact.activation,
       }) + "\n",
     );
     return 0;
@@ -70,16 +78,17 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
     for (const r of writeResults) {
       process.stdout.write(`  - ${r.result === "wrote" ? "WROTE   " : "SKIPPED "} ${r.path}\n`);
     }
-    process.stdout.write("\n");
+    process.stdout.write(
+      `\nNext: open one agent window per role and run\n` +
+        `  agentctl activate <role> --target ${target}\n` +
+        `to get the chat-paste snippet for that window.\n`,
+    );
   } else if (artifact.files.length > 0) {
     process.stdout.write(
       `Re-run with --write to install the persistent artifact(s):\n` +
         artifact.files.map((f) => `  - ${f.path}`).join("\n") +
-        "\n\n",
+        "\n",
     );
   }
-  process.stdout.write("Activation snippet (paste this into the agent chat for this window):\n\n");
-  process.stdout.write(artifact.activation);
-  if (!artifact.activation.endsWith("\n")) process.stdout.write("\n");
   return 0;
 }

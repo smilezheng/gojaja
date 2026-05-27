@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { COLLABORATION_HANDBOOK } from "../src/cli/prompts/handbook";
-import { buildArtifact } from "../src/cli/prompts";
+import { buildActivation, buildRuntime } from "../src/cli/prompts";
 
 const KEY_TRIGGER_PHRASES: ReadonlyArray<RegExp> = [
   // Core stance + turn shape
@@ -59,12 +59,12 @@ describe("COLLABORATION_HANDBOOK", () => {
   });
 });
 
-describe("buildArtifact handbook integration", () => {
+describe("buildRuntime handbook integration", () => {
   const PROJ = "/tmp/example-project";
 
-  it("default builds include the handbook for every target", () => {
+  it("default runtime artifact includes the handbook for every target", () => {
     for (const t of ["codex", "claude", "cursor", "generic"] as const) {
-      const a = buildArtifact(t, "PM", PROJ);
+      const a = buildRuntime(t, PROJ);
       expect(a.body).toContain("Collaboration handbook");
       // Runtime mechanics still present alongside the handbook.
       expect(a.body).toContain("agentctl plan");
@@ -77,10 +77,9 @@ describe("buildArtifact handbook integration", () => {
 
   it("--no-handbook (withHandbook: false) omits the handbook section", () => {
     for (const t of ["codex", "claude", "cursor", "generic"] as const) {
-      const a = buildArtifact(t, "PM", PROJ, { withHandbook: false });
+      const a = buildRuntime(t, PROJ, { withHandbook: false });
       expect(a.body).not.toContain("Collaboration handbook");
       expect(a.body).not.toContain("Hard \"don't\"s");
-      // The runtime mechanics block is still present.
       expect(a.body).toContain("agentctl plan");
       if (t !== "generic") {
         expect(a.files[0].content).not.toContain("Collaboration handbook");
@@ -88,9 +87,16 @@ describe("buildArtifact handbook integration", () => {
     }
   });
 
-  it("dropping the handbook shrinks the artifact by at least ~2 KB", () => {
-    const withH = buildArtifact("cursor", "PM", PROJ).files[0].content;
-    const noH = buildArtifact("cursor", "PM", PROJ, { withHandbook: false }).files[0].content;
+  it("dropping the handbook shrinks the cursor file by at least ~2 KB", () => {
+    const withH = buildRuntime("cursor", PROJ).files[0].content;
+    const noH = buildRuntime("cursor", PROJ, { withHandbook: false }).files[0].content;
     expect(withH.length - noH.length).toBeGreaterThan(2000);
+  });
+
+  it("generic activation carries the handbook too (since there is no install location)", () => {
+    const s = buildActivation("generic", "PM", PROJ);
+    expect(s).toContain("Collaboration handbook");
+    const sNo = buildActivation("generic", "PM", PROJ, { withHandbook: false });
+    expect(sNo).not.toContain("Collaboration handbook");
   });
 });

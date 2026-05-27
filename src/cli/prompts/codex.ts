@@ -1,7 +1,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import { activationSnippet, runtimeLoopBody, type RuntimeBodyOptions } from "./core";
-import type { PromptArtifact } from "./types";
+import type { RuntimeArtifact } from "./types";
 
 function codexHome(): string {
   return process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
@@ -41,11 +41,10 @@ function openaiYaml(): string {
   ].join("\n");
 }
 
-export function buildCodexArtifact(
-  role: string,
+export function buildCodexRuntime(
   projectRoot: string,
   opts: RuntimeBodyOptions = {},
-): PromptArtifact {
+): RuntimeArtifact {
   const dir = skillDir();
   const skill = skillMarkdown(projectRoot, opts);
   const body = [
@@ -55,9 +54,8 @@ export function buildCodexArtifact(
     "",
     `  ${dir}`,
     "",
-    "After install, paste the activation line below into your Codex chat",
-    "for this window. Codex will look up the skill and follow its runtime",
-    "loop until the conversation ends.",
+    "After install, use `agentctl activate <role> --target codex` to get",
+    "the chat-paste line for each role.",
     "",
     "---",
     "",
@@ -69,8 +67,9 @@ export function buildCodexArtifact(
       { path: path.join(dir, "SKILL.md"),              content: skill,       mode: "replace" },
       { path: path.join(dir, "agents", "openai.yaml"), content: openaiYaml(), mode: "replace" },
     ],
-    activation:
-      `Use $multi-agent-runtime.\n` +
-      activationSnippet(role, projectRoot),
   };
+}
+
+export function buildCodexActivation(role: string, projectRoot: string): string {
+  return `Use $multi-agent-runtime.\n${activationSnippet(role, projectRoot)}`;
 }

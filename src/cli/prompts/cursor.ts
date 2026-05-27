@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import { activationSnippet, runtimeLoopBody, type RuntimeBodyOptions } from "./core";
-import type { PromptArtifact } from "./types";
+import type { RuntimeArtifact } from "./types";
 
 function ruleFile(projectRoot: string): string {
   return path.join(projectRoot, ".cursor", "rules", "multi-agent-runtime.mdc");
@@ -23,11 +23,10 @@ function ruleContent(projectRoot: string, opts: RuntimeBodyOptions): string {
   ].join("\n");
 }
 
-export function buildCursorArtifact(
-  role: string,
+export function buildCursorRuntime(
   projectRoot: string,
   opts: RuntimeBodyOptions = {},
-): PromptArtifact {
+): RuntimeArtifact {
   const target = ruleFile(projectRoot);
   const content = ruleContent(projectRoot, opts);
   const body = [
@@ -35,8 +34,10 @@ export function buildCursorArtifact(
     "",
     "Run with `--write` to create (or refresh) the rule. The rule is",
     "project-scoped, role-agnostic, and applies to every Cursor session",
-    "opened in this project. Each window picks its role at activation",
-    "time via the chat snippet below.",
+    "opened in this project.",
+    "",
+    "After install, use `agentctl activate <role> --target cursor` to get",
+    "the chat-paste line for each window.",
     "",
     "---",
     "",
@@ -45,6 +46,9 @@ export function buildCursorArtifact(
   return {
     body,
     files: [{ path: target, content, mode: "replace" }],
-    activation: activationSnippet(role, projectRoot),
   };
+}
+
+export function buildCursorActivation(role: string, projectRoot: string): string {
+  return activationSnippet(role, projectRoot);
 }

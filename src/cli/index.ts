@@ -1,6 +1,7 @@
 import { parseArgv } from "./argv";
 import { AgentctlError, UsageError } from "../core/errors";
 import { runAck } from "./commands/ack";
+import { runActivate } from "./commands/activate";
 import { runClaim } from "./commands/claim";
 import { runInit } from "./commands/init";
 import { runPlan } from "./commands/plan";
@@ -55,6 +56,8 @@ async function dispatch(): Promise<number> {
       return runRfc(args);
     case "prompt":
       return runPrompt(args);
+    case "activate":
+      return runActivate(args);
     case "wait":
       return runWait(args);
     case "write-state":

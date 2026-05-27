@@ -84,35 +84,44 @@ agentctl role list
 
 `--owns` 参数控制每个角色允许修改哪些文件。通过 `agentctl` 操作的 agent 无法写入它权限之外的内容。
 
-### 第三步 — 为你使用的 agent 工具安装运行时
+### 第三步 — 为每种 agent 工具装一次运行时
 
-你用哪种 agent 工具就跑对应那条命令，每种工具跑一次就够。这会在该工具的配置目录里写入一份永久指令，告诉 agent 如何协作。
+**每种工具跑一次**。装出来的文件是角色无关的——同一个项目下的两个
+Cursor 窗口、两个 Claude 会话，读的是同一份规则。
 
 ```bash
 # 如果你用 Cursor：
-agentctl prompt PM --target cursor --write
+agentctl prompt --target cursor --write
 # 写入 .cursor/rules/multi-agent-runtime.mdc
 
 # 如果你用 Claude Code：
-agentctl prompt PM --target claude --write
-# 追加一个标记块到 CLAUDE.md
+agentctl prompt --target claude --write
+# 在 CLAUDE.md 里 upsert 一个标记块
 
 # 如果你用 Codex CLI：
-agentctl prompt PM --target codex --write
+agentctl prompt --target codex --write
 # 写入 ~/.codex/skills/multi-agent-runtime/
 
 # 其他任何能跑 shell 的 agent：
-agentctl prompt PM --target generic
-# 打印完整提示词，你手动粘贴
+agentctl prompt --target generic
+# 打印 runtime body 供你审阅；不必 --write（没有持久化位置）
 ```
 
-`prompt` 最后还会打印一段**激活提示词**，稍后粘到 agent 聊天窗口里就能给它分配角色。
+### 第四步 — 每个窗口激活一个角色
 
-### 第四步 — 每个角色开一个 agent 窗口
+角色绑定是**窗口级**的，绝不写进项目共享文件。每个你想要的角色开一个 agent
+窗口，然后把 `activate` 打印的提示词粘到那个窗口的聊天里：
 
-- 在这个项目里打开一个 Cursor 窗口。协作规则会自动加载。把 `agentctl prompt PM --target cursor` 打印的激活提示词粘到聊天里。
-- 打开一个 Claude Code 会话，把 `agentctl prompt TL --target claude` 的激活提示词粘进去。
-- 其他角色同理。
+```bash
+agentctl activate PM      --target cursor    # 粘到 PM 的 Cursor 窗口
+agentctl activate TL      --target claude    # 粘到 TL 的 Claude 会话
+agentctl activate Backend --target codex     # 粘到 Backend 的 Codex 终端
+agentctl activate QA      --target cursor    # 再开一个 Cursor 窗口，给 QA
+```
+
+粘进去的内容会让那个窗口里的 agent 执行 `agentctl claim <role>`、export
+`MA_SESSION`、然后进入运行循环。**同一种工具的两个窗口可以扮演不同角色，
+互不干扰**。
 
 到这里配置就全部完成了。之后你只需要和 agent 自然聊天。
 

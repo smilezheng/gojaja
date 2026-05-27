@@ -11,15 +11,19 @@ Bootstrap (run once per project, by you):
                                               roles/<id>.md and config.yaml.
   role list                                   List configured roles.
   role show <id>                              Show role config + markdown.
-  prompt <role> [--target codex|claude|cursor|generic] [--write] [--no-handbook]
-                                              Print the agent activation
-                                              prompt; with --write, install
-                                              the host-specific persistent
-                                              artifact (skill / rule /
-                                              CLAUDE.md block).
-                                              --no-handbook drops the
-                                              collaboration handbook for a
-                                              shorter prompt.
+  prompt --target codex|claude|cursor|generic [--write] [--no-handbook]
+                                              Print (and with --write,
+                                              install) the host-specific
+                                              runtime artifact for this
+                                              project. ROLE-FREE: same
+                                              artifact for every role; do
+                                              not pass a role.
+  activate <role> --target codex|claude|cursor|generic [--no-handbook]
+                                              Print the chat-paste snippet
+                                              that binds <role> to one
+                                              agent window. Never writes
+                                              to disk; role binding stays
+                                              at the window/shell layer.
 
 Task board (PM/TL or any role with appropriate scope):
   task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3]

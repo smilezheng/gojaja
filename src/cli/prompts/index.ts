@@ -3,27 +3,59 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { atomicWriteFile, exists } from "../../core/atomic";
 import { UsageError } from "../../core/errors";
-import { buildClaudeArtifact } from "./claude";
-import { buildCodexArtifact } from "./codex";
+import { buildClaudeActivation, buildClaudeRuntime } from "./claude";
+import { buildCodexActivation, buildCodexRuntime } from "./codex";
 import type { RuntimeBodyOptions } from "./core";
-import { buildCursorArtifact } from "./cursor";
-import { buildGenericArtifact } from "./generic";
-import type { PromptArtifact, Target } from "./types";
+import { buildCursorActivation, buildCursorRuntime } from "./cursor";
+import { buildGenericActivation, buildGenericRuntime } from "./generic";
+import type { RuntimeArtifact, Target } from "./types";
 
-export type { PromptArtifact, Target };
+export type { RuntimeArtifact, Target };
 export type { RuntimeBodyOptions } from "./core";
 
-export function buildArtifact(
+/**
+ * Build the role-free runtime artifact for a host.
+ *
+ * Critical invariant: the returned `body` and any `files[].content` MUST
+ * NOT contain any role identifier. Two agent windows playing different
+ * roles in the same project read the same artifact; baking a role into
+ * it would lock the project to a single role per host. Enforced by
+ * `tests/prompt.test.ts`'s "no role intrusion" regression scan.
+ */
+export function buildRuntime(
+  target: Target,
+  projectRoot: string,
+  opts: RuntimeBodyOptions = {},
+): RuntimeArtifact {
+  switch (target) {
+    case "codex":   return buildCodexRuntime(projectRoot, opts);
+    case "claude":  return buildClaudeRuntime(projectRoot, opts);
+    case "cursor":  return buildCursorRuntime(projectRoot, opts);
+    case "generic": return buildGenericRuntime(projectRoot, opts);
+  }
+}
+
+/**
+ * Build the per-window activation snippet for a role. The snippet is
+ * never persisted to disk; it lives entirely in the chat history of the
+ * specific agent window that pastes it. This keeps role binding strictly
+ * at the window layer (and `MA_SESSION` in the window's shell), never
+ * at the project layer.
+ *
+ * For the generic target, the snippet has to bundle the runtime body
+ * because there is no persistent install location.
+ */
+export function buildActivation(
   target: Target,
   role: string,
   projectRoot: string,
   opts: RuntimeBodyOptions = {},
-): PromptArtifact {
+): string {
   switch (target) {
-    case "codex":   return buildCodexArtifact(role, projectRoot, opts);
-    case "claude":  return buildClaudeArtifact(role, projectRoot, opts);
-    case "cursor":  return buildCursorArtifact(role, projectRoot, opts);
-    case "generic": return buildGenericArtifact(role, projectRoot, opts);
+    case "codex":   return buildCodexActivation(role, projectRoot);
+    case "claude":  return buildClaudeActivation(role, projectRoot);
+    case "cursor":  return buildCursorActivation(role, projectRoot);
+    case "generic": return buildGenericActivation(role, projectRoot, opts);
   }
 }
 
@@ -33,25 +65,9 @@ function expandHome(p: string): string {
   return p;
 }
 
-/**
- * Write one artifact file to disk.
- *
- * - `replace` mode: atomic write. Refuses to overwrite an existing file
- *   UNLESS we recognise the file's prior content as one of our own
- *   `buildArtifact` outputs (heuristic: starts with a frontmatter line or
- *   contains the runtime-loop marker phrase). This is intentionally
- *   conservative — users with hand-edited rules / skills are protected.
- *
- * - `marker-block` mode: read the file, replace the content between
- *   `markerBegin` and `markerEnd` (or append the block if absent),
- *   atomic-write back. Idempotent across re-runs.
- *
- * Returns "wrote" if the file was changed, "skipped" if nothing changed,
- * or throws UsageError on a refused clobber.
- */
 const RUNTIME_MARKER = "agentctl plan";
 
-export async function writeArtifactFile(file: PromptArtifact["files"][number]): Promise<
+export async function writeArtifactFile(file: RuntimeArtifact["files"][number]): Promise<
   "wrote" | "skipped"
 > {
   const target = expandHome(file.path);

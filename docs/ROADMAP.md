@@ -95,6 +95,17 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     (a role may always update its own task's status).
   - New `ForbiddenError` class with stable exit code 9.
 
+- **PR7a — prompt / activate split.**
+  - `agentctl prompt` is now strictly role-free (`--target X [--write]`);
+    a new `agentctl activate <role> --target X` prints the per-window
+    chat-paste snippet without ever touching disk.
+  - Enforces the architectural invariant "role binding lives at the
+    window/shell layer, never at the project layer" — two Cursor chats
+    in the same project can hold different roles independently.
+  - Regression test scans the runtime body and every written file for
+    role-id leaks; any future contributor who embeds a role in the
+    template gets caught at CI.
+
 - **PR8a — collaboration handbook.**
   - New `src/cli/prompts/handbook.ts` exporting a ~7 KB UTF-8
     `COLLABORATION_HANDBOOK` string. Role-neutral; concrete triggers;

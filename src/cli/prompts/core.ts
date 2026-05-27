@@ -80,7 +80,9 @@ ${handbook}`;
 
 /**
  * The short activation line the user pastes into the agent chat to
- * bind a specific role to the current window.
+ * bind a specific role to the current window. Per-window and per-role —
+ * never persisted to disk, so the role identifier does NOT leak into
+ * any project-shared file.
  */
 export function activationSnippet(role: string, projectRoot: string): string {
   return `I am the ${role} agent for the multi-agent project at ${projectRoot}.

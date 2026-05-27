@@ -84,35 +84,46 @@ agentctl role list
 
 The `--owns` flag controls which files each role is allowed to write. Agents calling the CLI cannot write outside their assigned scope.
 
-### Step 3 — Install the runtime for your agent tool
+### Step 3 — Install the runtime for each agent tool you use
 
-Run this once for each type of agent tool you use. It writes a persistent instruction file that tells the agent how to coordinate.
+Run **once per agent tool**. The installed file is
+role-agnostic and shared by every window of that tool — two Cursor chats
+in the same project read the same rule.
 
 ```bash
 # If you use Cursor:
-agentctl prompt PM --target cursor --write
+agentctl prompt --target cursor --write
 # writes .cursor/rules/multi-agent-runtime.mdc
 
 # If you use Claude Code:
-agentctl prompt PM --target claude --write
-# appends a block to CLAUDE.md
+agentctl prompt --target claude --write
+# upserts a block in CLAUDE.md
 
 # If you use Codex CLI:
-agentctl prompt PM --target codex --write
+agentctl prompt --target codex --write
 # writes ~/.codex/skills/multi-agent-runtime/
 
 # Any other shell-capable agent:
-agentctl prompt PM --target generic
-# prints instructions for you to paste manually
+agentctl prompt --target generic
+# prints the body for you to inspect; skip --write (nothing to install)
 ```
 
-`prompt` also prints a short **activation snippet** — a few lines you'll paste into each agent window's chat to assign it a role.
+### Step 4 — Activate one role per agent window
 
-### Step 4 — Open one agent window per role
+Role binding is per-window, never persisted to a project-shared file.
+Open one agent window per role you want to staff, then in that window
+paste the snippet printed by `activate`:
 
-- Open a Cursor window in this project. The coordination rules load automatically. Paste the activation snippet from `agentctl prompt PM --target cursor` into the chat.
-- Open a Claude Code session. Paste the snippet from `agentctl prompt TL --target claude`.
-- Do the same for each role you want to staff.
+```bash
+agentctl activate PM --target cursor       # paste into the Cursor window for PM
+agentctl activate TL --target claude       # paste into the Claude window for TL
+agentctl activate Backend --target codex   # paste into the Codex window for Backend
+agentctl activate QA --target cursor       # another Cursor window, this time for QA
+```
+
+The pasted snippet tells that specific window to run `agentctl claim
+<role>`, export `MA_SESSION`, and enter the runtime loop. Two windows
+of the same tool can hold different roles independently.
 
 That's it. From this point, just chat with the agents normally.
 

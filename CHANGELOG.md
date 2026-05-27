@@ -12,6 +12,80 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 - PR8: installer / upgrade / reset, AGENTS.md bridge versioned block.
 
+## [2.0.0-alpha.8] — 2026-05-27
+
+### Changed — BREAKING (prompt / activate split)
+
+`agentctl prompt` was overloaded: it built both the host-shared runtime
+artifact (role-free) AND the per-window activation snippet (role-bound).
+The role positional made it look as if the persistent file contained
+role-specific instructions, which it never did. This release splits the
+two responsibilities into separate commands so role identifiers cannot
+leak into project-shared files.
+
+- `agentctl prompt` is now strictly role-free:
+  - Signature: `prompt --target codex|claude|cursor|generic [--write] [--no-handbook] [--json]`.
+  - Refuses any positional argument with a USAGE error pointing at the
+    new `activate` command (no silent fallback or back-compat alias —
+    we don't want a "two ways to do the same thing" period).
+- `agentctl activate <role> --target <host>` (new):
+  - Prints the chat-paste snippet that binds `<role>` to one specific
+    agent window. Never writes to disk.
+  - For codex/claude/cursor, the snippet is short (a few hundred
+    bytes); the runtime body lives in the persistent file installed
+    by `prompt --write`.
+  - For `--target generic`, the snippet bundles the runtime body too,
+    since generic has no install location.
+  - Validates the role exists in `config.yaml`; refuses unknown roles.
+- `src/cli/prompts/*` refactored:
+  - `RuntimeArtifact = { body, files }` is role-free.
+  - `buildRuntime(target, projectRoot, opts)` builds the artifact.
+  - `buildActivation(target, role, projectRoot, opts)` returns the
+    per-window snippet as a plain string.
+  - Each per-target wrapper exports `build<Target>Runtime` and
+    `build<Target>Activation` as two distinct functions.
+
+### Why
+
+Two Cursor chat windows in the same project are two agents. Anything
+written to `.cursor/rules/`, `<proj>/CLAUDE.md`, or `~/.codex/skills/`
+is shared across windows, so it MUST be role-agnostic. The old
+`prompt PM --target cursor --write` accepted a role even though the
+file it wrote contained no role information — confusing and inviting
+future bugs where a contributor accidentally embeds the role in the
+template. Splitting the commands makes the constraint inexpressible at
+the CLI surface.
+
+### Tests (121 -> 127)
+
+- New regression in `tests/prompt.test.ts`:
+  "every target body contains plan + MA_SESSION **but never a role id**".
+  The test scans the runtime body and every written file against every
+  role id in `config.yaml`. Future contributors who accidentally embed
+  a role will see CI go red.
+- `prompt` rejects positional role argument with USAGE.
+- `prompt --target generic --write` rejected (no install location).
+- `activate` rejects when role is missing or unknown.
+- `activate` for codex/claude/cursor produces short snippets
+  (< 800 bytes; no handbook embedded).
+- `activate` for generic bundles the full body (with or without the
+  handbook depending on `--no-handbook`).
+- Codex activation includes the `$multi-agent-runtime` skill-trigger
+  phrase.
+
+### Migration
+
+For anyone scripting the previous CLI: replace
+`agentctl prompt PM --target cursor --write` with the two-step pair:
+
+```bash
+agentctl prompt --target cursor --write   # once per host, no role
+agentctl activate PM --target cursor      # per agent window, role only
+```
+
+The shapes of the on-disk artifacts (Cursor rule, CLAUDE.md block,
+Codex skill) are unchanged.
+
 ## [2.0.0-alpha.7] — 2026-05-27
 
 ### Added (PR8a — collaboration handbook)
