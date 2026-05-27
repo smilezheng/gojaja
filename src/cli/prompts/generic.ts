@@ -12,6 +12,7 @@ export function buildGenericRuntime(
   projectRoot: string,
   opts: RuntimeBodyOptions = {},
 ): RuntimeArtifact {
+  const effectiveOpts: RuntimeBodyOptions = { ...opts, target: "generic" };
   const body = [
     "# Generic agent prompt body",
     "",
@@ -22,7 +23,7 @@ export function buildGenericRuntime(
     "",
     "----- BEGIN runtime body (for inspection only) -----",
     "",
-    runtimeLoopBody(projectRoot, opts),
+    runtimeLoopBody(projectRoot, effectiveOpts),
     "----- END -----",
     "",
   ].join("\n");
@@ -34,13 +35,14 @@ export function buildGenericActivation(
   projectRoot: string,
   opts: RuntimeBodyOptions = {},
 ): string {
+  const effectiveOpts: RuntimeBodyOptions = { ...opts, target: "generic" };
   return [
     "Paste the BEGIN..END block below into the agent window assigned to",
     `role '${role}'. The agent will follow the runtime loop on every turn.`,
     "",
     "----- BEGIN -----",
     "",
-    runtimeLoopBody(projectRoot, opts),
+    runtimeLoopBody(projectRoot, effectiveOpts),
     "",
     activationSnippet(role, projectRoot),
     "----- END -----",

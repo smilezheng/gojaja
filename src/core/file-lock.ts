@@ -182,13 +182,27 @@ async function tryBreakStale(
   }
   // Record changed under us. Try to put it back so the legitimate owner
   // is not silently de-locked.
+  //
+  // CRITICAL: must NOT use `rename(2)` here — POSIX rename overwrites
+  // an existing destination silently, which would clobber a fresh
+  // record installed by yet another process between our move-aside
+  // and this restore attempt. Use `link(2)` + `unlink` instead;
+  // link(2) is defined to fail with EEXIST when the target exists,
+  // which is exactly the semantics we want.
   try {
-    await fsp.rename(aside, lockPath);
-  } catch {
-    // Someone else has already created a new lockPath in the brief
-    // window. We MUST NOT delete `aside` — leave it as forensic evidence
-    // that two lock records existed for the same key at the same time.
-    // Operators / `agentctl doctor` (planned) will reconcile.
+    await fsp.link(aside, lockPath);
+    await safeUnlink(aside);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "EEXIST") {
+      // Unexpected I/O failure. Leave aside on disk for forensics
+      // rather than risk further damage.
+      return false;
+    }
+    // Someone else successfully claimed the lock between our move-aside
+    // and this restore. Leave `aside` as forensic evidence; never
+    // delete a record that may correspond to a now-stale-but-once-live
+    // owner. Operators / `agentctl doctor` (planned) will reconcile.
   }
   return false;
 }

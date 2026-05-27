@@ -11,7 +11,14 @@ function skillDir(): string {
   return path.join(codexHome(), "skills", "multi-agent-runtime");
 }
 
-function skillMarkdown(projectRoot: string, opts: RuntimeBodyOptions): string {
+function skillMarkdown(opts: RuntimeBodyOptions): string {
+  // M1: This skill ships to a USER-LEVEL location
+  // (~/.codex/skills/multi-agent-runtime/), so it MUST be reusable
+  // across every project the user works on. Hard-coding any specific
+  // project root would mean each `prompt --write` from a different
+  // project silently overwrites the previous install's projectRoot.
+  // Pass empty string; runtimeLoopBody will say "discover via cwd".
+  const effectiveOpts: RuntimeBodyOptions = { ...opts, target: "codex" };
   return [
     "---",
     "name: multi-agent-runtime",
@@ -24,7 +31,7 @@ function skillMarkdown(projectRoot: string, opts: RuntimeBodyOptions): string {
     "project-local `.multi-agent` coordination layer. Use it for the full",
     "runtime loop until the user ends the conversation.",
     "",
-    runtimeLoopBody(projectRoot, opts),
+    runtimeLoopBody("", effectiveOpts),
   ].join("\n");
 }
 
@@ -42,11 +49,15 @@ function openaiYaml(): string {
 }
 
 export function buildCodexRuntime(
-  projectRoot: string,
+  _projectRoot: string,
   opts: RuntimeBodyOptions = {},
 ): RuntimeArtifact {
   const dir = skillDir();
-  const skill = skillMarkdown(projectRoot, opts);
+  // Note: projectRoot is intentionally ignored. The Codex skill ships
+  // to ~/.codex/skills/multi-agent-runtime/ which is user-level — one
+  // install must service every project the user works on. The skill
+  // body discovers the active project at runtime via cwd.
+  const skill = skillMarkdown(opts);
   const body = [
     "# Codex skill: multi-agent-runtime",
     "",
@@ -55,7 +66,8 @@ export function buildCodexRuntime(
     `  ${dir}`,
     "",
     "After install, use `agentctl activate <role> --target codex` to get",
-    "the chat-paste line for each role.",
+    "the chat-paste line for each role. The skill is project-agnostic —",
+    "the activation snippet carries the project context per window.",
     "",
     "---",
     "",

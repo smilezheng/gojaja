@@ -77,6 +77,22 @@ describe("resolveIdentity", () => {
     ).rejects.toMatchObject({ code: "USAGE" });
   });
 
+  it("M3: refuses a session whose heartbeatAt is corrupt (empty / non-parseable)", async () => {
+    // Before fix: `if (isFinite(heartbeat) && expired) return null` would
+    // skip the expiry check entirely on a NaN heartbeat → corrupt
+    // session lives forever and can authenticate. Fix is fail-closed.
+    const s = await ctx.store.claimSession("PM", 60);
+    const file = path.join(ctx.root, "comms/sessions/PM.json");
+    const data = JSON.parse(await fsp.readFile(file, "utf8"));
+    data.heartbeatAt = ""; // corrupt
+    await fsp.writeFile(file, JSON.stringify(data));
+
+    process.env.MA_SESSION = s.sessionId;
+    await expect(
+      resolveIdentity(ctx.store, { requireSession: true }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
   it("refreshes heartbeat on every successful resolveIdentity", async () => {
     const s = await ctx.store.claimSession("PM", 60);
     const fileBefore = path.join(ctx.root, "comms/sessions/PM.json");

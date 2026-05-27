@@ -69,6 +69,46 @@ describe("Store.createTask", () => {
     ).rejects.toMatchObject({ code: "USAGE" });
   });
 
+  it("Step 5b: createTask with --owner defaults status to Ready", async () => {
+    // The whole point: PM creates and assigns; the owner must see the
+    // task in their next plan, which filters Backlog out. So new tasks
+    // with an owner start in Ready.
+    const t = await ctx.store.createTask({
+      title: "Build login", owner: "Backend", actor: "PM",
+    });
+    expect(t.status).toBe("Ready");
+  });
+
+  it("Step 5b: createTask without --owner defaults status to Backlog", async () => {
+    const t = await ctx.store.createTask({
+      title: "Triage idea", actor: "PM",
+    });
+    expect(t.status).toBe("Backlog");
+    expect(t.owner).toBeNull();
+  });
+
+  it("Step 12: createTask refuses an owner that is not registered (USAGE — likely a typo)", async () => {
+    // PM types `--owner Forntend` instead of `Frontend`. Without the
+    // gate, the TASK_ASSIGNED event goes to a role no manifest will
+    // ever surface. Refuse loudly with a hint about role list/create.
+    await expect(
+      ctx.store.createTask({
+        title: "Build login", owner: "Forntend", actor: "PM",
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("Step 12: assignTask refuses --to that is not a registered role", async () => {
+    const t = await ctx.store.createTask({
+      title: "x", owner: "Backend", actor: "PM",
+    });
+    await expect(
+      ctx.store.assignTask({
+        taskId: t.id, newOwner: "Forntend", actor: "PM",
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
   it("serialises concurrent creates; ids remain unique and contiguous", async () => {
     const N = 10;
     const results = await Promise.all(
@@ -115,7 +155,8 @@ describe("Store.assignTask / setTaskStatus", () => {
     expect(updated.status).toBe("InProgress");
     const events = await ctx.store.listEventsAfter("");
     const change = events.find((e) => e.type === "TASK_STATUS_CHANGED");
-    expect(change?.payload.previousStatus).toBe("Backlog");
+    // Step 5b: createTask with an owner defaults to Ready, not Backlog.
+    expect(change?.payload.previousStatus).toBe("Ready");
     expect(change?.payload.newStatus).toBe("InProgress");
   });
 
@@ -141,13 +182,16 @@ describe("Manifest.tasks", () => {
 
   it("includes only tasks owned by the role with an ACTIVE status", async () => {
     // Two for Backend, one for QA. Vary statuses.
+    // Step 5b: tasks with an owner default to Ready, so to land in
+    // Backlog we explicitly push them back.
     const t1 = await ctx.store.createTask({ title: "BE Ready", owner: "Backend", priority: "P1", actor: "PM" });
     const t2 = await ctx.store.createTask({ title: "BE Backlog", owner: "Backend", priority: "P2", actor: "PM" });
     const t3 = await ctx.store.createTask({ title: "QA later", owner: "QA", priority: "P2", actor: "PM" });
     const t4 = await ctx.store.createTask({ title: "BE Done", owner: "Backend", priority: "P3", actor: "PM" });
-    await ctx.store.setTaskStatus({ taskId: t1.id, newStatus: "Ready", actor: "PM" });
+    // t1 created Ready by default — no setTaskStatus needed.
+    await ctx.store.setTaskStatus({ taskId: t2.id, newStatus: "Backlog", actor: "PM" });
+    await ctx.store.setTaskStatus({ taskId: t3.id, newStatus: "Backlog", actor: "PM" });
     await ctx.store.setTaskStatus({ taskId: t4.id, newStatus: "Done", actor: "PM" });
-    // t2 stays Backlog; t3 stays Backlog.
 
     const m = await ctx.store.openOrCreatePlan("Backend");
     const ids = m.tasks.map((t) => t.id).sort();

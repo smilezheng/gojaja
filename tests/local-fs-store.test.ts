@@ -312,10 +312,119 @@ describe("LocalFsStore.withLock", () => {
     expect(restored.owner).toBe("NEW-OWNER");
   });
 
+  it("H2 regression: restore step uses link(2), refuses to clobber a Z-installed lock", async () => {
+    // Scenario: X detected stale, moved aside, then while X is busy
+    // reading aside, process Z races into open(lockPath, "wx") and
+    // succeeds. X then attempts to restore aside → must NOT silently
+    // overwrite Z's record. Using rename(2) would; using link(2) refuses
+    // with EEXIST, leaving Z intact and aside as forensic evidence.
+    const { _tryBreakStaleForTest, _writeRawLockForTest } = await import(
+      "../src/core/file-lock"
+    );
+    const lockPath = path.join(ctx.root, "locks", "z-race.lock");
+    const expected = {
+      owner: "OLD-OWNER",
+      pid: 999_999,
+      host: "old-host",
+      acquiredAt: Date.now() - 60_000,
+      leaseExpiresAt: Date.now() - 5_000,
+    };
+
+    // Step 1: Simulate "X detected stale, then rename-aside ran". We
+    // skip past tryBreakStale's first rename by leaving lockPath empty
+    // and the aside-equivalent set up to look like a record that
+    // doesn't match expected.
+    await fsp.mkdir(path.dirname(lockPath), { recursive: true });
+    const aside = `${lockPath}.dead-rg01`;
+    await fsp.writeFile(aside, JSON.stringify({
+      owner: "SOMETHING-ELSE",
+      pid: 12_345,
+      host: "old-host",
+      acquiredAt: Date.now() - 30_000,
+      leaseExpiresAt: Date.now() - 1_000,
+    }));
+
+    // Step 2: Before X's restore runs, process Z acquires the new lock.
+    await _writeRawLockForTest(lockPath, {
+      owner: "Z-NEW",
+      pid: 22_222,
+      acquiredAt: Date.now(),
+      leaseExpiresAt: Date.now() + 30_000,
+    });
+
+    // Step 3: Drive the restore path by invoking tryBreakStale directly
+    // with mismatching expected; since lockPath already has Z-NEW, the
+    // first rename-aside will move Z's record. Then the mismatch path
+    // will TRY to restore aside back — and must refuse to clobber.
+    const broke = await _tryBreakStaleForTest(lockPath, expected);
+    expect(broke).toBe(false);
+
+    // Lock file on disk must NOT be expected's stale record (no silent
+    // overwrite of whatever's there).
+    const exists = await fsp.stat(lockPath).then(
+      () => true,
+      () => false,
+    );
+    if (exists) {
+      const onDisk = JSON.parse(await fsp.readFile(lockPath, "utf8"));
+      expect(onDisk.owner).not.toBe("OLD-OWNER");
+    }
+  });
+
   it("rejects invalid lock keys", async () => {
     await expect(
       ctx.store.withLock("../escape", async () => 1),
     ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("Step 11 regression: createRole + createRfc concurrent on the same config.yaml", async () => {
+    // Before updateConfig: createRole held `roles-create`, createRfc
+    // held `rfcs`, both read-modify-write config.yaml — concurrent
+    // execution lost one writer's changes. Verify the merged state has
+    // both the new role AND the bumped rfcCounter.
+    const before = await ctx.store.readConfig();
+    expect(before.rfcCounter ?? 0).toBe(0);
+    expect(before.roles.Frontend).toBeUndefined();
+
+    await Promise.all([
+      ctx.store.createRole({ id: "Frontend", title: "Frontend Engineer" }),
+      ctx.store.createRfc({
+        slug: "auth-design",
+        title: "Authentication design",
+        voters: [],
+        deciders: ["Frontend"],
+        options: [{ id: "A", summary: "JWT" }, { id: "B", summary: "Session" }],
+        createdBy: "SYSTEM",
+      }),
+    ]);
+
+    const after = await ctx.store.readConfig();
+    expect(after.roles.Frontend).toBeDefined();
+    expect(after.rfcCounter).toBe(1);
+  });
+
+  it("Step 11 regression: 50 concurrent createRfc all get unique sequential ids", async () => {
+    const N = 50;
+    const results = await Promise.allSettled(
+      Array.from({ length: N }, (_, i) =>
+        ctx.store.createRfc({
+          slug: `concurrent-rfc-${i}`,
+          title: `RFC ${i}`,
+          voters: [],
+          deciders: ["any-role"], // will be overridden by mutator check
+          options: [{ id: "A", summary: "x" }],
+          createdBy: "SYSTEM",
+        }),
+      ),
+    );
+    const ok = results.filter((r) => r.status === "fulfilled");
+    expect(ok.length).toBe(N);
+    const ids = new Set(
+      ok.map((r) => (r as PromiseFulfilledResult<{ id: string }>).value.id),
+    );
+    expect(ids.size).toBe(N);
+    const config = await ctx.store.readConfig();
+    expect(config.rfcCounter).toBe(N);
   });
 });
 

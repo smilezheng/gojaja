@@ -101,6 +101,45 @@ describe("Store.writeStateFile", () => {
     ).rejects.toMatchObject({ code: "PATH_INVALID" });
   });
 
+  it("H1 regression: refuses 'state//architecture.md' (would bypass mustNotEdit)", async () => {
+    // Without canonical-form enforcement, pathMatches sees the literal
+    // 'state//architecture.md', misses the mustNotEdit entry
+    // 'state/architecture.md', and the disk write goes to the
+    // resolved (canonical) path. Defence in depth: refuse non-canonical
+    // input outright.
+    await expect(
+      ctx.store.writeStateFile({
+        actor: "PM",
+        relPath: "state//architecture.md",
+        content: "...",
+      }),
+    ).rejects.toMatchObject({ code: "PATH_INVALID" });
+  });
+
+  it("H1 regression: refuses 'state/./architecture.md' (would bypass mustNotEdit)", async () => {
+    await expect(
+      ctx.store.writeStateFile({
+        actor: "PM",
+        relPath: "state/./architecture.md",
+        content: "...",
+      }),
+    ).rejects.toMatchObject({ code: "PATH_INVALID" });
+  });
+
+  it("H1 regression: refuses trailing slash variant of an owned path", async () => {
+    // PM owns 'state/project_state.md'; passing 'state/project_state.md/'
+    // (trailing slash) should normalise to the same path but be refused
+    // for not matching canonical form (avoids any future divergence in
+    // matchers and the disk writer).
+    await expect(
+      ctx.store.writeStateFile({
+        actor: "PM",
+        relPath: "state/project_state.md/",
+        content: "...",
+      }),
+    ).rejects.toMatchObject({ code: "PATH_INVALID" });
+  });
+
   it("a directory entry in owns covers files inside it", async () => {
     // Give Backend ownership of the whole state/ tree
     const config = await ctx.store.readConfig();

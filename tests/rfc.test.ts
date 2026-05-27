@@ -176,13 +176,15 @@ describe("Store.decideRfc / rejectRfc", () => {
     expect(events.some((e) => e.type === "RFC_DECIDED")).toBe(true);
   });
 
-  it("refuses decide from a non-decider role", async () => {
+  it("refuses decide from a non-decider role (FORBIDDEN, not USAGE)", async () => {
+    // M2: permission denial, not user error. Exit code FORBIDDEN (9) so
+    // the handbook can teach agents to escalate rather than retry.
     const r = await ctx.store.createRfc(NEW_RFC);
     await expect(
       ctx.store.decideRfc({
         rfcId: r.id, decidedBy: "Backend", chosenOption: "A", rationale: "x",
       }),
-    ).rejects.toMatchObject({ code: "USAGE" });
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
     const { proposal } = await ctx.store.readRfc(r.id);
     expect(proposal.status).toBe("open"); // unchanged
   });
@@ -216,6 +218,37 @@ describe("Store.decideRfc / rejectRfc", () => {
     const { proposal, decision } = await ctx.store.readRfc(r.id);
     expect(proposal.status).toBe("rejected");
     expect(decision?.outcome).toBe("rejected");
+  });
+
+  it("H3 regression: N concurrent readers observing the inconsistent shape emit exactly ONE RFC_REPAIRED", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    const decisionPath = path.join(
+      ctx.root, "rfcs", `${r.id}-${r.slug}`, "decision.json",
+    );
+    await fsp.writeFile(
+      decisionPath,
+      JSON.stringify({
+        rfcId: r.id,
+        decidedBy: "TL",
+        ts: new Date().toISOString(),
+        outcome: "accepted",
+        chosenOption: "A",
+        rationale: "first decision",
+      }),
+    );
+
+    // 10 concurrent readRfc calls all observe the inconsistent shape.
+    // Without the lock-then-re-verify pattern, each would self-heal and
+    // each would emit its own RFC_REPAIRED. We assert exactly one event.
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => ctx.store.readRfc(r.id)),
+    );
+    for (const { proposal } of results) {
+      expect(proposal.status).toBe("accepted");
+    }
+    const events = await ctx.store.listEventsAfter("");
+    const repaired = events.filter((e) => e.type === "RFC_REPAIRED" && e.ref === r.id);
+    expect(repaired.length).toBe(1);
   });
 
   it("self-heals when decision.json exists but proposal.yaml is still open (crash recovery)", async () => {

@@ -1,8 +1,17 @@
 import { COLLABORATION_HANDBOOK } from "./handbook";
+import type { Target } from "./types";
 
 export interface RuntimeBodyOptions {
   /** Append the collaboration handbook (heuristics for "when to use what"). */
   withHandbook?: boolean;
+  /**
+   * Host target. The runtime body uses this only to tweak the
+   * recommended `wait` invocation: Cursor's chat-mode shell typically
+   * times out within seconds, so a default `agentctl wait` (block mode,
+   * 10 minutes) will be killed by the host. Cursor builds recommend
+   * `--mode exit`; other targets stay on the cheaper block mode.
+   */
+  target?: Target;
 }
 
 /**
@@ -25,10 +34,16 @@ export function runtimeLoopBody(
   opts: RuntimeBodyOptions = { withHandbook: true },
 ): string {
   const handbook = opts.withHandbook === false ? "" : `\n\n${COLLABORATION_HANDBOOK}`;
-  return `You are participating in a multi-agent coordination layer rooted at:
-
-  ${projectRoot}
-
+  const waitCmd = waitRecommendation(opts.target);
+  // Empty projectRoot is intentional for user-level installs (Codex
+  // skill at ~/.codex/skills/...) — that install services every project
+  // the user works on, so it cannot bake any specific path. Agent
+  // resolves the project from cwd when it runs `agentctl plan`.
+  const projectLine = projectRoot
+    ? `rooted at:\n\n  ${projectRoot}\n`
+    : `for whichever project this window is currently working in
+(\`agentctl\` discovers the project root from the shell's cwd).\n`;
+  return `You are participating in a multi-agent coordination layer ${projectLine}
 The shared coordination state lives in \`.multi-agent/\` under that path,
 mediated by a CLI named \`agentctl\`. Treat the CLI — not chat — as the
 source of truth for who you are and what you should do.
@@ -62,7 +77,7 @@ unread work.
 4. Confirm what you saw:
      agentctl ack --token <ackToken from step 1>
 5. Stay alive without burning tokens:
-     agentctl wait
+     ${waitCmd}
    It prints either ATTENTION (new work arrived) or IDLE (nothing new;
    you may end the turn). Loop to step 1 on ATTENTION.
 
@@ -76,6 +91,27 @@ unread work.
 - If you are blocked by a cross-role decision, do not guess. Open an
   RFC (\`agentctl rfc new\`) and let the designated decider close it.
 ${handbook}`;
+}
+
+/**
+ * Per-target recommendation for the `wait` invocation.
+ *
+ * Cursor's chat-mode shell wraps each tool call with a host-side
+ * timeout in the seconds range, well below the default `--idle 10`
+ * minutes for block mode. The block-mode sleep is silently killed by
+ * the host, the agent sees a broken exit code, and the runtime loop
+ * stalls. Exit-mode is the right default for Cursor (drops a sentinel,
+ * returns immediately).
+ *
+ * Codex / Claude Code / generic shells can run a 10-minute sleep
+ * without trouble — block mode is cheaper because it does not require
+ * the agent to be re-prompted to resume.
+ */
+function waitRecommendation(target: Target | undefined): string {
+  if (target === "cursor") {
+    return "agentctl wait --mode exit";
+  }
+  return "agentctl wait";
 }
 
 /**

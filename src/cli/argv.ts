@@ -24,6 +24,7 @@ const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "no-wait",
   "help",
   "version",
+  "eval",
 ]);
 
 /**

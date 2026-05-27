@@ -166,7 +166,24 @@ export interface Store {
 
   readConfig(): Promise<ProjectConfig>;
 
-  /** Atomic full-config write. Caller is responsible for shape. */
+  /**
+   * Atomic read-modify-write of `config.yaml` under the `config-yaml`
+   * lock. ALL multi-step config mutations (createRole, createRfc, role
+   * setting changes, ...) MUST go through this — without a single
+   * coordinated lock, concurrent RMW from different code paths
+   * (e.g. createRole + createRfc) would lose one writer's changes when
+   * their own resource lock (`roles-create` / `rfcs`) does not exclude
+   * each other.
+   */
+  updateConfig(
+    mutator: (current: ProjectConfig) => ProjectConfig,
+  ): Promise<ProjectConfig>;
+
+  /**
+   * Atomic full-config write. Caller is responsible for shape AND must
+   * already hold the `config-yaml` lock. Prefer `updateConfig` for any
+   * read-modify-write pattern.
+   */
   writeConfig(config: ProjectConfig): Promise<void>;
 
   /**

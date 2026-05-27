@@ -5,6 +5,7 @@ import {
   AlreadyInitializedError,
   ForbiddenError,
   NotInitializedError,
+  PathValidationError,
   StateCorruptionError,
   UnknownRoleError,
   UsageError,
@@ -308,9 +309,17 @@ export class LocalFsStore implements Store {
         const heartbeatAge = now - Date.parse(existing.heartbeatAt);
         const stillAlive = heartbeatAge < existing.leaseTtlSeconds * 1000;
         if (stillAlive) {
+          // Step 4b: deliberately do NOT advertise `--force` here. LLM
+          // agents that see "pass --force to take over" will reflexively
+          // do so, and a live peer in another window is silently killed.
+          // The `--force` flag still works for humans who pass it
+          // explicitly (see `agentctl claim --help`).
           throw new UsageError(
-            `Role '${role}' is already claimed by session ${existing.sessionId} ` +
-              `(heartbeat ${Math.floor(heartbeatAge / 1000)}s ago). Pass --force to take over.`,
+            `Role '${role}' is already claimed by a live session ` +
+              `(heartbeat ${Math.floor(heartbeatAge / 1000)}s ago). ` +
+              `If you believe the previous window is genuinely dead, ` +
+              `see \`agentctl claim --help\`. Otherwise stop and ask the ` +
+              `user — do NOT silently take over a peer.`,
           );
         }
       }
@@ -407,11 +416,15 @@ export class LocalFsStore implements Store {
       // no longer "live" and must not authenticate further commands. The
       // session file may still exist on disk because no one has called
       // claim again to take it over; that does NOT make it valid.
+      // M3: fail CLOSED on a corrupt heartbeatAt. Previously this
+      // check was `if (isFinite && expired) return null` — meaning a
+      // NaN heartbeat (empty string, malformed, missing key) caused
+      // the whole expiry check to be skipped and the session to be
+      // treated as perpetually live. Reject any session whose
+      // heartbeat we cannot interpret.
       const heartbeatMs = Date.parse(session.heartbeatAt);
-      if (
-        Number.isFinite(heartbeatMs) &&
-        heartbeatMs + session.leaseTtlSeconds * 1000 < now
-      ) {
+      if (!Number.isFinite(heartbeatMs)) return null;
+      if (heartbeatMs + session.leaseTtlSeconds * 1000 < now) {
         return null;
       }
       return session;
@@ -664,6 +677,32 @@ export class LocalFsStore implements Store {
     );
   }
 
+  async updateConfig(
+    mutator: (current: ProjectConfig) => ProjectConfig,
+  ): Promise<ProjectConfig> {
+    return this.withLock("config-yaml", async () => {
+      const current = await this.readConfig();
+      const next = mutator(current);
+      if (!next || typeof next !== "object") {
+        throw new StateCorruptionError(
+          "updateConfig mutator returned a non-config value.",
+        );
+      }
+      if (typeof next.schemaVersion !== "string") {
+        throw new StateCorruptionError(
+          "updateConfig mutator dropped schemaVersion.",
+        );
+      }
+      if (!next.roles || typeof next.roles !== "object") {
+        throw new StateCorruptionError(
+          "updateConfig mutator dropped or corrupted roles map.",
+        );
+      }
+      await this.writeConfig(next);
+      return next;
+    });
+  }
+
   async createRole(input: {
     id: RoleId;
     title?: string;
@@ -680,36 +719,44 @@ export class LocalFsStore implements Store {
     const mustNotEdit = input.mustNotEdit ?? [];
 
     return this.withLock("roles-create", async () => {
-      const config = await this.readConfig();
       const roleMdPath = this.abs(rolePaths(input.id).roleFile);
+      const newRoleConfig: RoleConfig = { title, description, owns, reportsTo, mustNotEdit };
+
+      // Step 1: register in config.yaml under the config-yaml lock. The
+      // mutator handles all three pre-existing shapes: fresh create,
+      // recovery (already in config, md missing), and duplicate
+      // (already in config AND md exists). The thrown errors propagate
+      // out of the lock cleanly.
+      let committedConfig: RoleConfig | null = null;
+      let recoveryNoOp = false;
+      // The mutator runs under config-yaml lock. We CANNOT do file I/O
+      // inside it (it must be a pure function of the current config),
+      // so the duplicate / recovery split is decided post-lock by
+      // re-checking the markdown file. The mutator just decides whether
+      // to add a new entry or no-op.
+      await this.updateConfig((cur) => {
+        if (cur.roles[input.id]) {
+          committedConfig = cur.roles[input.id];
+          recoveryNoOp = true;
+          return cur;
+        }
+        return {
+          ...cur,
+          roles: { ...cur.roles, [input.id]: newRoleConfig },
+        };
+      });
       const mdExists = await exists(roleMdPath);
-      const inConfig = !!config.roles[input.id];
 
-      // Recovery path: if a previous createRole crashed AFTER writing
-      // config.yaml but BEFORE writing the markdown (or, with the old
-      // order, the reverse), we now have a half-created role. Complete
-      // the missing side rather than refusing forever.
-      if (inConfig && mdExists) {
-        throw new UsageError(`Role '${input.id}' already exists in config.yaml.`);
-      }
-      if (!inConfig && mdExists) {
-        // Legacy / hand-edit case: someone left a markdown file with no
-        // config entry. Refuse to clobber it — the user must explicitly
-        // move it aside, since we cannot know whether its contents
-        // represent a different intent.
-        throw new UsageError(
-          `Role markdown ${roleMdPath} exists but '${input.id}' is not in config.yaml. ` +
-            `Move that file aside before re-running create.`,
-        );
-      }
-      const roleConfig: RoleConfig = { title, description, owns, reportsTo, mustNotEdit };
-
-      if (inConfig && !mdExists) {
-        // Crash-recovery completion: config already has the role; just
-        // finish writing the markdown using the existing config entry.
-        // We deliberately keep the existing config so any hand edits
-        // (owns, reportsTo) are preserved.
-        const existing = config.roles[input.id];
+      if (recoveryNoOp) {
+        // Two sub-cases now:
+        //   (a) duplicate     — both config + md present
+        //   (b) recovery      — config present, md missing
+        if (mdExists) {
+          throw new UsageError(`Role '${input.id}' already exists in config.yaml.`);
+        }
+        // (b) Complete the missing markdown using the EXISTING config
+        // entry so any hand edits (owns, reportsTo) are preserved.
+        const existing = committedConfig as unknown as RoleConfig;
         await atomicWriteFile(
           roleMdPath,
           renderRoleMarkdown({ id: input.id, ...existing }),
@@ -717,20 +764,30 @@ export class LocalFsStore implements Store {
         return existing;
       }
 
-      // Fresh create. Write config FIRST: if we crash between the two
-      // writes, the next retry observes "config has, md missing" and
-      // takes the recovery path above — never the "md present, config
-      // missing" wedge that the prior write-order produced.
-      const nextConfig: ProjectConfig = {
-        ...config,
-        roles: { ...config.roles, [input.id]: roleConfig },
-      };
-      await this.writeConfig(nextConfig);
+      // Fresh create path. Config write committed; if the markdown
+      // write fails, the next retry observes "config has, md missing"
+      // and takes the recovery branch above — never the "md present,
+      // config missing" wedge the prior write-order produced.
+      if (mdExists) {
+        // Legacy / hand-edit shape that pre-existed our config write
+        // (e.g. someone manually put a markdown file with no config
+        // entry, and now we just wrote a config entry). Refuse to
+        // clobber the hand-edited file; revert the config write to
+        // keep the invariant.
+        await this.updateConfig((cur) => {
+          const { [input.id]: _removed, ...rest } = cur.roles;
+          return { ...cur, roles: rest };
+        });
+        throw new UsageError(
+          `Role markdown ${roleMdPath} pre-existed but '${input.id}' was not in config.yaml. ` +
+            `Move that file aside before re-running create.`,
+        );
+      }
       await atomicWriteFile(
         roleMdPath,
-        renderRoleMarkdown({ id: input.id, ...roleConfig }),
+        renderRoleMarkdown({ id: input.id, ...newRoleConfig }),
       );
-      return roleConfig;
+      return newRoleConfig;
     });
   }
 
@@ -780,6 +837,29 @@ export class LocalFsStore implements Store {
     // Force a path-traversal check on relPath even though it's a
     // framework-internal constant in most call sites — defence in depth.
     this.abs(relPath);
+    // Reject any input that does not match its own POSIX normalisation.
+    // Without this, `state//architecture.md` slips past pathMatches
+    // (string compare against `state/architecture.md` fails) yet
+    // resolves to the protected path on disk via path.resolve — a
+    // mustNotEdit bypass. `state/./foo` and trailing-slash variants
+    // hit the same hole.
+    //
+    // path.posix.normalize keeps a trailing slash (POSIX directory
+    // semantics), so we add an explicit rule: a write target must not
+    // end in '/'. Files are not directories; ambiguous input is
+    // rejected outright rather than silently coerced.
+    if (relPath.endsWith("/")) {
+      throw new PathValidationError(
+        `Path '${relPath}' must not end with '/' for a file write target.`,
+      );
+    }
+    const normalized = path.posix.normalize(relPath);
+    if (normalized !== relPath) {
+      throw new PathValidationError(
+        `Path '${relPath}' is not in canonical form (would normalise to '${normalized}'). ` +
+          `Pass the canonical path so ownership checks cannot be bypassed.`,
+      );
+    }
 
     const config = await this.readConfig();
     const cfg = config.roles[actor];
@@ -881,7 +961,20 @@ export class LocalFsStore implements Store {
     }
     const priority = (input.priority ?? "P2").trim();
     const owner = input.owner === undefined ? null : input.owner;
-    if (owner !== null) validateRoleId(owner);
+    if (owner !== null) {
+      validateRoleId(owner);
+      // Step 12: owner must be a registered role. Otherwise the
+      // TASK_ASSIGNED event we emit goes to a nobody and the typo
+      // (e.g. `--owner Forntend`) is silently accepted.
+      const config = await this.readConfig();
+      if (!config.roles[owner]) {
+        throw new UsageError(
+          `Owner role '${owner}' is not registered. Run \`agentctl role list\` ` +
+            `to see registered roles or \`agentctl role create ${owner} ...\` ` +
+            `to add it first.`,
+        );
+      }
+    }
     const dependsOn = (input.dependsOn ?? []).map((d) => String(d));
     const acceptance = input.acceptance ?? "";
 
@@ -892,10 +985,16 @@ export class LocalFsStore implements Store {
       const idNumber = board.nextId + 1;
       const id = formatTaskId(idNumber);
       const now = new Date().toISOString();
+      // When an owner is given at creation time, "assigning" implies
+      // "go work on this" — default to Ready so the owner's next plan
+      // surfaces the task (Backlog is filtered out of manifest.tasks
+      // by design). Without an owner, the task is a product/PM backlog
+      // item that needs triage before anyone should pick it up.
+      const initialStatus: TaskStatus = owner !== null ? "Ready" : "Backlog";
       const task: Task = {
         id,
         title,
-        status: "Backlog",
+        status: initialStatus,
         owner,
         priority,
         dependsOn,
@@ -932,6 +1031,15 @@ export class LocalFsStore implements Store {
     actor: RoleId | "SYSTEM";
   }): Promise<Task> {
     validateRoleId(input.newOwner);
+    // Step 12: owner must be registered. Same reasoning as createTask.
+    const config = await this.readConfig();
+    if (!config.roles[input.newOwner]) {
+      throw new UsageError(
+        `Owner role '${input.newOwner}' is not registered. Run ` +
+          `\`agentctl role list\` to see registered roles or ` +
+          `\`agentctl role create ${input.newOwner} ...\` to add it first.`,
+      );
+    }
     await this.requireOwnership(input.actor, Paths.taskBoardFile);
     return this.withLock("task-board", async () => {
       const board = await this.readTaskBoard();
@@ -1058,22 +1166,37 @@ export class LocalFsStore implements Store {
     }
 
     return this.withLock("rfcs", async () => {
-      const config = await this.readConfig();
-      const idNumber = (config.rfcCounter ?? 0) + 1;
-      const id = formatRfcId(idNumber);
-
-      // Refuse if any directory already exists for this id or this slug.
-      // We do not allow slug reuse across RFCs to keep `rfc show <slug>`
-      // unambiguous if we add it later.
-      const dirsBeforeAlloc = await this.listRfcDirNames();
-      for (const d of dirsBeforeAlloc) {
-        if (d.startsWith(`${id}-`)) {
-          throw new StateCorruptionError(
-            `RFC dir ${d} already exists for id ${id}.`,
-          );
-        }
+      // Refuse if the slug is already used. (Slug uniqueness is checked
+      // pre-allocation so we don't burn an id on a doomed create.)
+      const dirsBefore = await this.listRfcDirNames();
+      for (const d of dirsBefore) {
         if (d.endsWith(`-${input.slug}`)) {
           throw new UsageError(`Slug '${input.slug}' is already used by ${d}.`);
+        }
+      }
+
+      // Atomically allocate the next id under config-yaml lock. This is
+      // the only place `rfcCounter` is mutated, but it shares the file
+      // with `createRole` — without coordinated lock, a concurrent
+      // role-create would read the same config, write its own version,
+      // and clobber our +1.
+      let idNumber = 0;
+      await this.updateConfig((cur) => {
+        idNumber = (cur.rfcCounter ?? 0) + 1;
+        return { ...cur, rfcCounter: idNumber };
+      });
+      const id = formatRfcId(idNumber);
+
+      // Race protection: after id allocation, double-check no directory
+      // for this id already exists on disk (could only happen if a
+      // previous create crashed after allocating but before writing).
+      const dirsAfter = await this.listRfcDirNames();
+      for (const d of dirsAfter) {
+        if (d.startsWith(`${id}-`)) {
+          throw new StateCorruptionError(
+            `RFC dir ${d} already exists for freshly-allocated id ${id}. ` +
+              `A prior create likely crashed between id allocation and dir write.`,
+          );
         }
       }
 
@@ -1095,7 +1218,6 @@ export class LocalFsStore implements Store {
         this.abs(rfcProposalPath(id, input.slug)),
         yaml.dump(proposal, { lineWidth: 100, noRefs: true }),
       );
-      await this.writeConfig({ ...config, rfcCounter: idNumber });
       await this.recordEventInternal({
         type: "RFC_CREATED",
         from: input.createdBy,
@@ -1204,7 +1326,11 @@ export class LocalFsStore implements Store {
         );
       }
       if (!proposal.deciders.includes(args.decidedBy)) {
-        throw new UsageError(
+        // M2: This is a permission denial (caller lacks authority to
+        // sign off this RFC), not a usage mistake. ForbiddenError exits
+        // with code 9 which the handbook teaches agents to escalate
+        // rather than retry.
+        throw new ForbiddenError(
           `Role '${args.decidedBy}' is not in deciders for ${args.rfcId} (deciders: ${proposal.deciders.join(", ") || "(none)"}).`,
         );
       }
@@ -1278,6 +1404,70 @@ export class LocalFsStore implements Store {
       throw new UsageError(`Unknown RFC '${rfcId}'.`);
     }
     const slug = dirName.slice(rfcId.length + 1);
+    const snapshot = await this.readRfcFiles(rfcId, slug);
+
+    // Crash-recovery: `finaliseRfc` writes decision.json BEFORE updating
+    // proposal.yaml's status. If the process died between those two
+    // writes, an external observer would now see a `decision.json` but a
+    // still-`open` proposal — and the next `decideRfc` call would happily
+    // pass the `status === "open"` guard and overwrite the prior
+    // decision, silently corrupting the audit record.
+    //
+    // Self-heal: when we observe that inconsistent shape, take the
+    // RFC's lock and repair under it. This guarantees that N concurrent
+    // readers all observe the inconsistency but only ONE writes the
+    // proposal.yaml fix and only ONE emits RFC_REPAIRED — re-verifying
+    // inside the lock means the second reader sees the already-repaired
+    // shape and just returns it.
+    if (snapshot.decision !== null && snapshot.proposal.status === "open") {
+      return this.withLock(`rfc-${rfcId}`, async () => {
+        const fresh = await this.readRfcFiles(rfcId, slug);
+        if (fresh.decision === null || fresh.proposal.status !== "open") {
+          // Another reader/writer beat us to the repair under the lock.
+          return fresh;
+        }
+        const repaired: RfcProposal = {
+          ...fresh.proposal,
+          status: fresh.decision.outcome === "accepted" ? "accepted" : "rejected",
+        };
+        await atomicWriteFile(
+          this.abs(rfcProposalPath(rfcId, slug)),
+          yaml.dump(repaired, { lineWidth: 100, noRefs: true }),
+        );
+        await this.recordEventInternal({
+          type: "RFC_REPAIRED",
+          from: "SYSTEM",
+          to: "*",
+          ref: rfcId,
+          payload: {
+            rfcId,
+            repairedStatus: repaired.status,
+            decidedBy: fresh.decision.decidedBy,
+          },
+        });
+        return {
+          proposal: repaired,
+          comments: fresh.comments,
+          decision: fresh.decision,
+        };
+      });
+    }
+    return snapshot;
+  }
+
+  /**
+   * Pure read of the on-disk state for an RFC. No mutations, no events.
+   * Pulled out of readRfcUnchecked so the self-heal path can re-verify
+   * the shape under the rfc-${id} lock without recursing.
+   */
+  private async readRfcFiles(
+    rfcId: string,
+    slug: string,
+  ): Promise<{
+    proposal: RfcProposal;
+    comments: RfcComment[];
+    decision: RfcDecision | null;
+  }> {
     const proposalRaw = await fsp.readFile(
       this.abs(rfcProposalPath(rfcId, slug)),
       "utf8",
@@ -1306,39 +1496,6 @@ export class LocalFsStore implements Store {
     const decision = await readJsonFileOrNull<RfcDecision>(
       this.abs(rfcDecisionPath(rfcId, slug)),
     );
-
-    // Crash-recovery: `finaliseRfc` writes decision.json BEFORE updating
-    // proposal.yaml's status. If the process died between those two
-    // writes, an external observer would now see a `decision.json` but a
-    // still-`open` proposal — and the next `decideRfc` call would happily
-    // pass the `status === "open"` guard and overwrite the prior
-    // decision, silently corrupting the audit record.
-    //
-    // Self-heal: when we observe that inconsistent shape, write the
-    // proposal's status from the decision's outcome and emit an
-    // RFC_REPAIRED system event for the audit trail.
-    if (decision !== null && proposal.status === "open") {
-      const repaired: RfcProposal = {
-        ...proposal,
-        status: decision.outcome === "accepted" ? "accepted" : "rejected",
-      };
-      await atomicWriteFile(
-        this.abs(rfcProposalPath(rfcId, slug)),
-        yaml.dump(repaired, { lineWidth: 100, noRefs: true }),
-      );
-      await this.recordEventInternal({
-        type: "RFC_REPAIRED",
-        from: "SYSTEM",
-        to: "*",
-        ref: rfcId,
-        payload: {
-          rfcId,
-          repairedStatus: repaired.status,
-          decidedBy: decision.decidedBy,
-        },
-      });
-      return { proposal: repaired, comments, decision };
-    }
     return { proposal, comments, decision };
   }
 

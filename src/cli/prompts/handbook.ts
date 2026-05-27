@@ -164,6 +164,28 @@ Common temptations that are NOT the user's job:
   acceptance is ambiguous, report to the task's owner role for
   clarification before marking Done.
 
+### Review handoff (temporary protocol)
+
+When you push a task to Review:
+
+1. Send a report to a role authorised to mark task-board state as
+   Done — any role whose \`config.yaml:owns\` includes
+   \`state/task_board.yaml\`. Typically the role in your
+   \`roleReminder.reportsTo\` qualifies; if you are unsure, use
+   \`agentctl role list\` and \`agentctl role show <id>\` to inspect.
+2. The authorised role inspects your work, then either:
+   - \`agentctl task status <id> Done\` if they accept, or
+   - \`agentctl task status <id> InProgress\` plus a report
+     explaining what is missing.
+3. Do not move your own task to Done. The owner-exception lets you
+   change your task's status freely, but Done is a sign-off act
+   that should come from an authorised role so the audit log stays
+   honest.
+
+This is a temporary protocol; a \`reviewers\` field on tasks is on
+the roadmap and will let a designated reviewer role sign off
+directly without needing task-board ownership.
+
 ### Idle and lifecycle
 
 - Plan returned nothing, wait returned IDLE → end the turn cleanly.
@@ -194,4 +216,9 @@ Common temptations that are NOT the user's job:
   report with someone else's \`from\`. Both are detectable.
 - Don't open an RFC for a question that has a single clear owner.
 - Don't bounce to the user as a first move.
+- Seeing "already claimed by a live session ..." on
+  \`agentctl claim <role>\` is an instruction to STOP and ask the
+  user. It is NOT an invitation to use \`--force\`. The previous
+  window may be a peer doing real work; forcing takeover silently
+  kills it.
 `;

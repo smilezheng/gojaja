@@ -76,4 +76,45 @@ describe("agentctl claim — role registration gate", () => {
       cap.release();
     }
   });
+
+  it("Step 4a: --eval prints exactly one `export MA_SESSION=<ulid>` line suitable for shell eval", async () => {
+    // Output contract: agent runs `eval "$(agentctl claim PM --eval)"`.
+    // Anything other than a single line of `export VAR=value\n` would
+    // either fail eval or — worse — get partially interpreted as a
+    // chained command. Strict format matters.
+    const cap = captureStdio();
+    try {
+      const code = await runClaim(args("PM", { root: ctx.root, eval: true }));
+      expect(code).toBe(0);
+      expect(cap.stdout).toMatch(/^export MA_SESSION=[0-9A-Z]{26}\n$/);
+      expect(cap.stderr).toBe("");
+    } finally {
+      cap.release();
+    }
+  });
+
+  it("Step 4b: claim against a live peer does NOT advertise --force in the error", async () => {
+    // First claim succeeds.
+    const cap1 = captureStdio();
+    try {
+      await runClaim(args("PM", { root: ctx.root, json: true }));
+    } finally {
+      cap1.release();
+    }
+    // Second claim against the same live role: error message must NOT
+    // mention `--force` (LLM agents reflexively retry with --force,
+    // silently killing the peer). It MUST tell the agent to ask the
+    // user.
+    const cap2 = captureStdio();
+    try {
+      await runClaim(args("PM", { root: ctx.root }));
+      throw new Error("expected to throw");
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).not.toContain("--force");
+      expect(msg).toMatch(/ask the user/i);
+    } finally {
+      cap2.release();
+    }
+  });
 });

@@ -118,7 +118,35 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     task lifecycle micro-rules, idle/stale-manifest handling, build/test
     breakage, hard "don't"s. See [HANDBOOK.md](./HANDBOOK.md).
 
+- **PR8b — critical correctness pass.**
+  - Ten independent fixes from two consolidated reviews. argv boolean
+    flag whitelist, ULID cross-process watermark, stale-lock
+    conditional restore, RFC self-heal on inconsistent on-disk shape,
+    `MA_SESSION` strict semantics, session lease + auto-heartbeat,
+    atomic `createRole`, `wait` refusal with pending manifest,
+    `claim` / `publishReport` recipient-role validation, TTY-aware
+    `plan` default + tasks/RFCs in text output.
+
+- **PR8c — review correctness + UX.**
+  - Fourteen independent fixes from a third reviewer pass plus a
+    business-process simulation: path-canonicalisation enforcement,
+    `link(2)`-based stale-lock restore, RFC self-heal under lock,
+    `Store.updateConfig` for atomic config-yaml RMW, Cursor target
+    `wait --mode exit`, `task new` default Ready on owner, `claim`
+    error de-advertises `--force`, Codex SKILL.md project-agnostic,
+    RFC deciders gate → `FORBIDDEN`, fail-closed corrupt heartbeat,
+    `task new` / `task assign` owner registration check, `release`
+    `unset MA_SESSION` hint, `claim --eval` mode, handbook review
+    handoff + role-neutrality regex guard. Suite 150 → 169.
+
 ### Planned, in priority order
+
+- **PR8d — schema-level deferments from PR8c.**
+  - Task `reviewers` field so a Review handoff can sign off without
+    needing task-board ownership.
+  - `STATE_UPDATED` event when `state/*` files change.
+  - `dependsOn` cycle detection in task board.
+  - Schema-version compatibility check on `agentctl plan`.
 
 - **PR8 — installer & upgrade.**
   - `agentctl upgrade` driving `src/migrations/<from>-<to>.ts`.
@@ -168,6 +196,8 @@ After PR10 we tag `v2.0.0`.
 ## Sequencing notes
 
 PR1–PR7 + PR8a establish the protocol surface (events, sessions,
-plan/ack, tasks, RFCs, ownership, handbook). PR8–PR10 harden the layer
-for everyday use without changing the protocol. Anything past `v2.0.0`
+plan/ack, tasks, RFCs, ownership, handbook). PR7a / PR8b / PR8c are
+correctness + UX hardening that introduce no new protocol surface.
+PR8d–PR10 harden the layer for everyday use; PR8d is the only
+remaining schema-affecting PR before `v2.0.0`. Anything past `v2.0.0`
 only ships after the chaos suite (PR10) is green.

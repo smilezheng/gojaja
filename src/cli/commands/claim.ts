@@ -7,7 +7,9 @@ const DEFAULT_TTL_SECONDS = 1800; // 30 minutes
 export async function runClaim(args: ParsedArgs): Promise<number> {
   const role = args.positional[0];
   if (!role) {
-    throw new UsageError("Usage: agentctl claim <role> [--ttl <seconds>] [--force]");
+    throw new UsageError(
+      "Usage: agentctl claim <role> [--ttl <seconds>] [--eval] [--json]",
+    );
   }
   const ttlRaw = optionalString(args.flags, "ttl");
   const ttl = ttlRaw ? Number(ttlRaw) : DEFAULT_TTL_SECONDS;
@@ -16,6 +18,10 @@ export async function runClaim(args: ParsedArgs): Promise<number> {
   }
   const force = boolFlag(args.flags, "force");
   const json = boolFlag(args.flags, "json");
+  const evalMode = boolFlag(args.flags, "eval");
+  if (evalMode && json) {
+    throw new UsageError("--eval and --json cannot be combined.");
+  }
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
 
   const store = await openStoreOrThrow(root);
@@ -31,13 +37,21 @@ export async function runClaim(args: ParsedArgs): Promise<number> {
   }
   const session = await store.claimSession(role, ttl, force);
 
-  if (json) {
+  if (evalMode) {
+    // Step 4a: shell-eval-friendly output. Agent runs:
+    //   eval "$(agentctl claim PM --eval)"
+    // and the env var is exported in the current shell in one step.
+    // Anything other than the export line (incl. trailing whitespace
+    // ambiguities) breaks `eval`, so format is strict.
+    process.stdout.write(`export MA_SESSION=${session.sessionId}\n`);
+  } else if (json) {
     process.stdout.write(JSON.stringify({ status: "claimed", session }) + "\n");
   } else {
     process.stdout.write(
       `Claimed role '${session.role}' (session ${session.sessionId}, lease ${session.leaseTtlSeconds}s).\n` +
         `Export this in your shell so follow-up commands authenticate as ${session.role}:\n\n` +
-        `  export MA_SESSION=${session.sessionId}\n`,
+        `  export MA_SESSION=${session.sessionId}\n\n` +
+        `Tip: \`eval "$(agentctl claim ${session.role} --eval)"\` does this in one step.\n`,
     );
   }
   return 0;

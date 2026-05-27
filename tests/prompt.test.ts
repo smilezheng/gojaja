@@ -80,6 +80,35 @@ describe("buildRuntime (role-free)", () => {
     const a = buildRuntime("generic", ctx.root);
     expect(a.files).toEqual([]);
   });
+
+  it("Step 6: cursor body recommends `wait --mode exit` (cursor chat times out long blocks)", () => {
+    const a = buildRuntime("cursor", ctx.root);
+    expect(a.body).toContain("agentctl wait --mode exit");
+    // Must NOT recommend the default `agentctl wait` alone — the cursor
+    // host kills sleeping shells before --idle 10 elapses.
+    expect(a.body).not.toMatch(/agentctl wait\s*\n/);
+  });
+
+  it("Step 6: non-cursor bodies keep block-mode default `agentctl wait`", () => {
+    for (const t of ["codex", "claude", "generic"] as const) {
+      const a = buildRuntime(t, ctx.root);
+      expect(a.body).toContain("agentctl wait");
+      expect(a.body).not.toContain("agentctl wait --mode exit");
+    }
+  });
+
+  it("M1: codex SKILL.md is project-agnostic — same bytes for any projectRoot", async () => {
+    const a1 = buildRuntime("codex", "/tmp/project-A");
+    const b1 = buildRuntime("codex", "/Users/someone/code/project-B");
+    const skillA = a1.files.find((f) => path.basename(f.path) === "SKILL.md");
+    const skillB = b1.files.find((f) => path.basename(f.path) === "SKILL.md");
+    expect(skillA).toBeDefined();
+    expect(skillB).toBeDefined();
+    expect(skillA!.content).toBe(skillB!.content);
+    // And the skill should NOT contain either of those project paths.
+    expect(skillA!.content).not.toContain("/tmp/project-A");
+    expect(skillA!.content).not.toContain("/Users/someone/code/project-B");
+  });
 });
 
 describe("buildActivation (role-bound, never persisted)", () => {

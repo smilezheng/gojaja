@@ -23,10 +23,22 @@ export async function runRelease(args: ParsedArgs): Promise<number> {
 
   if (json) {
     process.stdout.write(
-      JSON.stringify({ status: "released", role, sessionId: session.sessionId }) + "\n",
+      JSON.stringify({
+        status: "released",
+        role,
+        sessionId: session.sessionId,
+        hint: "unset MA_SESSION",
+      }) + "\n",
     );
   } else {
-    process.stdout.write(`Released session ${session.sessionId} for role '${role}'.\n`);
+    // Step 10: include a concrete `unset` hint. Without it, the shell
+    // still has the stale MA_SESSION exported and subsequent commands
+    // in the same shell fail with "session not found", which agents
+    // often mis-diagnose as a framework bug.
+    process.stdout.write(
+      `Released session ${session.sessionId} for role '${role}'.\n` +
+        `Remember to unset MA_SESSION in this shell: \`unset MA_SESSION\`\n`,
+    );
   }
   return 0;
 }

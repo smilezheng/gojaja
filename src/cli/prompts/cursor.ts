@@ -7,6 +7,7 @@ function ruleFile(projectRoot: string): string {
 }
 
 function ruleContent(projectRoot: string, opts: RuntimeBodyOptions): string {
+  const effectiveOpts: RuntimeBodyOptions = { ...opts, target: "cursor" };
   return [
     "---",
     'description: "Runtime loop for an agent window assigned to a role in this project\'s .multi-agent layer."',
@@ -19,7 +20,7 @@ function ruleContent(projectRoot: string, opts: RuntimeBodyOptions): string {
     "has `MA_SESSION` exported, you are the agent for the role bound to",
     "that session; follow the runtime loop below for every turn.",
     "",
-    runtimeLoopBody(projectRoot, opts),
+    runtimeLoopBody(projectRoot, effectiveOpts),
   ].join("\n");
 }
 

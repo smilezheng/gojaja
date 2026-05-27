@@ -51,11 +51,56 @@ describe("COLLABORATION_HANDBOOK", () => {
     expect(COLLABORATION_HANDBOOK).not.toMatch(/\bDevOps\b/);
   });
 
-  it("stays within a reasonable size budget (<8 KB of UTF-8)", () => {
+  it("regex-based stricter check: handbook never names a role as the actor", () => {
+    // The hardcoded `PM`, `TL`, ... blacklist above catches the common
+    // four roles. But a project could define `Alice`, `ProductOwner`,
+    // anything. The general invariant is: no sentence in the handbook
+    // says "<RoleName> verbs ...". Catch that pattern with a regex so
+    // hand edits cannot silently re-introduce role-coupled phrasing.
+    const ROLE_ACT_PATTERN =
+      /\b[A-Z][A-Za-z0-9_-]{1,30}\s+(should|must|will|may|owns|is the|gets|handles|reviews|approves)\b/g;
+    const matches = COLLABORATION_HANDBOOK.match(ROLE_ACT_PATTERN) ?? [];
+    // Allowlist: generic determiners / pronouns that take the same
+    // grammatical shape as a role name but are obviously not roles.
+    const GRAMMATICAL_ALLOW = new Set([
+      "Each",
+      "Any",
+      "Every",
+      "The",
+      "Your",
+      "No",
+      "This",
+      "That",
+      "These",
+      "Those",
+      "All",
+      "Both",
+      "Plan",
+      // Interrogatives that begin "Common temptations that are NOT the
+      // user's job" rhetorical questions ("How should I word ...",
+      // "Who should review ...") — not role names.
+      "How",
+      "Who",
+      "What",
+      "Why",
+      "When",
+      "Where",
+      "Which",
+    ]);
+    const offenders = matches.filter((m) => {
+      const first = m.split(/\s+/)[0];
+      return !GRAMMATICAL_ALLOW.has(first);
+    });
+    expect(offenders).toEqual([]);
+  });
+
+  it("stays within a reasonable size budget (<10 KB of UTF-8)", () => {
     // Loaded once per session into the host's persistent area, so the
-    // budget is generous compared to roleReminder. But still capped so
-    // future edits notice when the handbook bloats.
-    expect(Buffer.byteLength(COLLABORATION_HANDBOOK, "utf8")).toBeLessThan(8 * 1024);
+    // budget is generous compared to roleReminder. Still capped so
+    // future edits notice when the handbook bloats. Bumped from 8 KB
+    // to 10 KB in PR8c to accommodate the review-handoff temporary
+    // protocol and the claim --force don't.
+    expect(Buffer.byteLength(COLLABORATION_HANDBOOK, "utf8")).toBeLessThan(10 * 1024);
   });
 });
 

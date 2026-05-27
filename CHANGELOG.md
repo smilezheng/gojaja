@@ -10,8 +10,128 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 ### Planned next
 
-- PR8c: secondary correctness + polish (STATE_UPDATED event,
-  dependsOn cycle detection, schema version check, etc.).
+- PR8d: schema-level features deferred from PR8c (task `reviewers`
+  field, STATE_UPDATED event, dependsOn cycle detection,
+  schema-version compatibility check).
+
+## [2.0.0-alpha.10] — 2026-05-27
+
+### Third correctness + UX pass (PR8c)
+
+Fourteen independent fixes from a third reviewer pass plus a
+business-process simulation. Every fix is covered by a regression test
+(suite grew from 150 to 169).
+
+#### A. Safety / consistency
+
+- **H1 — mustNotEdit path-normalisation bypass.** `state//architecture.md`
+  used to slip past `pathMatches` (string compare against
+  `state/architecture.md` failed) yet resolved to the protected path on
+  disk via `path.resolve`. `requireOwnership` now refuses any input
+  that is not its own POSIX-normalised form, and explicitly refuses
+  trailing-slash file targets. Three tests in `tests/ownership.test.ts`.
+- **H2 — stale-lock restore could clobber a fresh owner.** `tryBreakStale`
+  previously used `rename(2)` to restore the aside record, which
+  silently overwrites a destination installed by a racing process.
+  Now uses `link(2)` + `unlink`: `link(2)` fails with `EEXIST` on a
+  populated target, leaving the new owner intact and the aside file as
+  forensic evidence. New regression test in `tests/local-fs-store.test.ts`.
+- **H3 — RFC self-heal raced under concurrent readers.** N concurrent
+  `readRfc` calls observing the same inconsistent shape used to each
+  emit `RFC_REPAIRED` and each rewrite `proposal.yaml`. Self-heal now
+  enters the `rfc-${id}` lock and re-verifies inside the lock; only
+  one writer commits the repair. New 10-concurrent-reader test in
+  `tests/rfc.test.ts`.
+- **Step 11 — concurrent `config.yaml` RMW lost writes.** `createRole`
+  and `createRfc` both did read-modify-write on the same file under
+  *different* resource locks (`roles-create`, `rfcs`); concurrent
+  execution dropped writes. New `Store.updateConfig(mutator)` API
+  serialises ALL config-yaml mutations under a dedicated
+  `config-yaml` lock. Both 50× concurrent `createRfc` and mixed
+  role/RFC concurrency tests pass.
+
+#### B. Behaviour changes that fix first-run demo
+
+- **Step 5b — `task new --owner X` defaults to `Ready`, not `Backlog`.**
+  Manifest filters `Backlog` out by design, so the README's PM example
+  (`task new --owner Backend`) would leave the assignee unable to see
+  the task. Tasks created without an owner still default to `Backlog`
+  (unassigned product idea pending triage). Two new tests; one
+  existing test's `previousStatus` assertion adjusted.
+- **Step 6 — Cursor runtime body now recommends `wait --mode exit`.**
+  Cursor's chat shell kills long-running tool calls within seconds, so
+  the default block-mode `agentctl wait` (10-minute idle) was always
+  killed. `runtimeLoopBody` takes a `target` argument; only the Cursor
+  artifact swaps to exit mode. Codex / Claude / Generic keep cheaper
+  block mode. Two new tests in `tests/prompt.test.ts`.
+- **Step 4b — `claim` against a live peer no longer advertises `--force`.**
+  Error message used to say "Pass --force to take over", which LLM
+  agents immediately did, silently killing peer windows. New message:
+  "ask the user — do NOT silently take over a peer." `--force` still
+  works for humans who pass it explicitly. New test in
+  `tests/claim.test.ts`.
+
+#### C. Safety / consistency P1
+
+- **M1 — Codex `SKILL.md` is now project-agnostic.** The skill installs
+  to `~/.codex/skills/multi-agent-runtime/`, a user-level singleton,
+  so the previous baking of `projectRoot` meant `prompt --write` from
+  project B overwrote project A's install. Skill body now says "the
+  project where this skill is activated (discovered from cwd at
+  runtime)"; one install services every project. Per-project context
+  travels via the per-window `activate` snippet. Cross-project
+  byte-equality test in `tests/prompt.test.ts`.
+- **M2 — RFC deciders gate now raises `ForbiddenError`.** Previously
+  raised `UsageError` (exit 2) for permission denial; should always
+  have been `FORBIDDEN` (exit 9) so the handbook's escalation rule
+  applies. Test assertion updated.
+- **M3 — corrupt `heartbeatAt` no longer fails open.** `findSessionById`
+  guarded the lease check with `if (Number.isFinite(heartbeatMs) &&
+  expired)`, which silently skipped the entire check on a NaN
+  heartbeat — sessions with malformed timestamps were perpetually
+  valid. Now fails closed: any non-finite heartbeat → `null`. New
+  test in `tests/identity.test.ts`.
+- **Step 12 — `task new` / `task assign` reject unregistered owners.**
+  `--owner Forntend` (typo) used to be accepted; the resulting
+  `TASK_ASSIGNED` event went to a role no manifest could route. Now
+  `createTask` and `assignTask` check `config.roles[owner]` after
+  syntactic validation and throw `UsageError` with a hint. Two new
+  tests in `tests/task-board.test.ts`.
+
+#### D. UX
+
+- **Step 10 — `release` reminds you to `unset MA_SESSION`.** Without
+  the hint, the shell still has the stale session id exported and
+  every subsequent command fails with "session not found." Output
+  now includes the exact shell-runnable line.
+- **Step 4a — new `agentctl claim --eval` mode.** Outputs exactly
+  `export MA_SESSION=<ulid>\n` for shell `eval`:
+  ```
+  eval "$(agentctl claim PM --eval)"
+  ```
+  Single-step claim+export so weaker LLM agents cannot forget to
+  copy the export line manually. Regular text output now also shows
+  the `--eval` tip. Strict format test in `tests/claim.test.ts`.
+- **Step 7 — handbook gets a `Review handoff` temporary protocol.**
+  Role-neutral text that tells agents how to hand a Review task off
+  to a task-board-owning role, then wait for that role to mark Done.
+  Also adds a hard don't to `Hard "don't"s`: seeing "already claimed
+  by a live session ..." means STOP and ask the user, not retry
+  with `--force`.
+- **Handbook role-neutrality regex.** Existing test only checked five
+  hardcoded role ids (`PM`, `TL`, `Backend`, `QA`, `DevOps`); custom
+  project roles slipped through. New test scans for the generic
+  pattern `<Capital> should|must|will|may|owns|...` and rejects any
+  match that isn't an allowlisted grammatical word.
+
+### Cross-cutting
+
+- Suite size 150 → 169.
+- Three exit codes get a clearer mapping to agent action in
+  the handbook: `USAGE` (fix your call), `FORBIDDEN` (escalate, do
+  not retry), `STATE_CORRUPTION` (stop and ask the user).
+- `Store` interface gains `updateConfig`; existing `writeConfig`
+  is now documented as caller-must-hold-`config-yaml`-lock.
 
 ## [2.0.0-alpha.9] — 2026-05-27
 

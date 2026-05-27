@@ -47,11 +47,19 @@ all implemented.
 
 ## Claim
 
-`agentctl claim <role> [--ttl <seconds>] [--force]`
+`agentctl claim <role> [--ttl <seconds>] [--eval] [--force]`
 
 - Refuses if an existing session for `<role>` has a heartbeat younger
   than its `leaseTtlSeconds`. The agent should report this as a
-  configuration error, not retry blindly.
+  configuration error, not retry blindly. The error message
+  deliberately does NOT mention `--force`; reflexively forcing
+  takeover would silently kill a peer window doing real work.
+- If the existing session has missed its lease (heartbeat older than
+  `leaseTtlSeconds`) the new claim takes over automatically — no
+  `--force` needed.
+- `--eval` outputs a single shell line: `export MA_SESSION=<ulid>`.
+  Intended use: `eval "$(agentctl claim PM --eval)"` to claim and
+  export in one step.
 - With `--force`, takes over any existing session and emits a
   `SESSION_TAKEOVER` event. Use only when the previous window is known
   dead.

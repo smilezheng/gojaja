@@ -16,6 +16,11 @@ every host's persistent prompt area (`.cursor/rules/`,
 `<project>/CLAUDE.md` marker block). Opt out per-call with
 `agentctl prompt … --no-handbook`.
 
+Role-neutrality is enforced at CI: `tests/handbook.test.ts` scans the
+handbook for any `<Capital> should|must|will|may|...` pattern that
+would name a role as actor. Hand edits that re-introduce role-coupled
+phrasing fail the build.
+
 ## Why it exists
 
 Without this layer, agents tend to default in two failure modes:
