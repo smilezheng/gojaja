@@ -239,6 +239,7 @@ agentctl rfc decide RFC-0001 --option A --rationale "同意，开始迁移。"
 | [docs/HANDBOOK.md](./docs/HANDBOOK.md) | 行为判断指南——什么时候写 worklog、发 report、开 RFC、上报给用户 |
 | [docs/SCHEMA.md](./docs/SCHEMA.md) | `.multi-agent/` 下每个文件的内容格式 |
 | [docs/DESIGN.md](./docs/DESIGN.md) | 为什么这样设计 |
+| [docs/RELEASE.md](./docs/RELEASE.md) | 维护者发版流程 |
 | [CHANGELOG.md](./CHANGELOG.md) | 版本记录 |
 
 ---
