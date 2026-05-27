@@ -54,12 +54,19 @@ file-only_ agents safe to combine.
 
 ## Status
 
-**v2.0.0-alpha.2.** The storage core, the per-turn agent loop
-(`claim` / `plan` / `ack` / `report` / `worklog` / `release` /
-`wait`), and the user-facing setup commands (`role create / list /
-show`, `prompt --target codex|claude|cursor|generic --write`) are
-implemented and covered by 64 tests. Still to come: per-turn role
-reminder, task board, RFCs, ownership enforcement, doctor — see
+**v2.0.0-alpha.4.** Implemented and covered by 81 tests:
+
+- Storage core (events, cursors, sessions, per-resource locks).
+- Per-turn agent loop: `claim` / `plan` / `ack` / `report` / `worklog`
+  / `release` / `wait`. Each `plan` returns a manifest embedding a
+  compact `roleReminder` so a context-compressed agent re-anchors
+  identity by re-running `plan` once.
+- Setup CLI: `role create / list / show`,
+  `prompt --target codex|claude|cursor|generic --write`.
+- Task board: `task new / assign / status / list / show` with
+  manifests automatically carrying the role's active tasks.
+
+Still to come: RFCs, ownership enforcement, doctor — see
 [docs/ROADMAP](./docs/ROADMAP.md).
 
 If you want to follow along, watch the `v2` branch.
@@ -165,35 +172,44 @@ agents**; the CLI is theirs.
 Documented in [docs/PROTOCOL.md](./docs/PROTOCOL.md). The short version:
 
 ```bash
-agentctl plan                          # JSON manifest of unread work + ackToken
-# ... agent processes events, may call:
-agentctl report  --to <role> --message "<text>"
-agentctl worklog --message "<text>"
+agentctl plan                          # JSON manifest: unread work + ackToken
+                                       # also carries roleReminder (id, title,
+                                       # owns, etc.) and tasks (active items
+                                       # owned by this role)
+# ... agent processes events / tasks, may call:
+agentctl report      --to <role> --message "<text>"
+agentctl worklog     --message "<text>"
+agentctl task status <task-id> InProgress
 # ... then:
-agentctl ack --token <ackToken>        # advance cursor exactly to the manifest snapshot
-agentctl wait                          # block-sleep without burning tokens; ATTENTION or IDLE
+agentctl ack  --token <ackToken>       # advance cursor exactly to the snapshot
+agentctl wait                          # block-sleep without burning tokens
 ```
 
-### Bonus: see it work without agents
+### Bonus: a small end-to-end demo
 
-You can drive the same loop by hand in two shells to feel out the
-protocol.
+You can drive the loop by hand in two shells to feel out the protocol.
 
 **Shell A (PM):**
 
 ```bash
 agentctl claim PM
 export MA_SESSION=<paste session id from claim>
+agentctl task new --title "Implement /login API" --owner Backend --priority P1 \
+                  --acceptance "POST /login returns JWT, rate-limited 10/min"
 agentctl report  --to TL --message "Goals locked in for Q3"
 agentctl worklog --message "Drafted acceptance for T-0001"
 ```
 
-**Shell B (TL):**
+**Shell B (Backend):**
 
 ```bash
-agentctl claim TL
+agentctl claim Backend
 export MA_SESSION=<paste session id>
-agentctl plan                              # sees PM's report + worklog
+agentctl plan                              # sees the PM events + tasks=[T-0001]
+agentctl task status T-0001 InProgress     # broadcast TASK_STATUS_CHANGED
+# ... do real work in the repo, then:
+agentctl task status T-0001 Review
+agentctl worklog --message "T-0001 ready for review, see commit abc123"
 agentctl ack --token <ackToken from plan>
 agentctl wait --idle 1                     # IDLE after a 1-minute sleep
 ```
@@ -270,9 +286,9 @@ If any of these are a deal-breaker, see
 | PR1  | Storage core, locks, events, cursors, sessions | **Done** |
 | PR2  | `claim` / `plan` / `ack` / `report` / `worklog` | **Done** |
 | PR3  | `role create / list / show`, `prompt --target … --write`, `wait` | **Done** |
-| PR4  | Manifest `roleReminder` for context-compressed agents | Next up |
-| PR5  | Task board (`state/task_board.yaml`, `agentctl task *`) | Planned |
-| PR6  | RFC state machine (comments + leader decides) | Planned |
+| PR4  | Manifest `roleReminder` for context-compressed agents | **Done** |
+| PR5  | Task board (`state/task_board.yaml`, `agentctl task *`) | **Done** |
+| PR6  | RFC state machine (comments + leader decides) | Next up |
 | PR7  | `config.yaml`-driven role ownership enforcement | Planned |
 | PR8  | `agentctl upgrade` / `reset`, schema migrations | Planned |
 | PR9  | `agentctl doctor`, history, event archival | Planned |

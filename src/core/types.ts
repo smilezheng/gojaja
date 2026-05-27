@@ -11,6 +11,9 @@ export type RoleId = string;
 export type EventType =
   | "REPORT"
   | "WORKLOG"
+  | "TASK_CREATED"
+  | "TASK_ASSIGNED"
+  | "TASK_STATUS_CHANGED"
   | "RFC_CREATED"
   | "RFC_COMMENT"
   | "RFC_DECIDED"
@@ -99,6 +102,13 @@ export interface Manifest {
   events: Event[];
   /** Self-anchoring identity + protocol summary. */
   roleReminder: RoleReminder;
+  /**
+   * Tasks currently requiring this role's attention. Tasks are owned by
+   * exactly one role; this list is filtered by `owner == role` AND
+   * `status ∈ ACTIVE_TASK_STATUSES`. Minimal fields by design — call
+   * `agentctl task show <id>` for the full record.
+   */
+  tasks: TaskSummary[];
 }
 
 /** Payload shape for type=REPORT events. */
@@ -132,6 +142,99 @@ export interface RoleConfig {
 export interface ProjectConfig {
   schemaVersion: string;
   roles: Record<RoleId, RoleConfig>;
+}
+
+/**
+ * Task lifecycle states. The framework does not enforce transitions in
+ * v2; any role with write access may set any status. A more constrained
+ * state machine arrives with PR7 ownership enforcement if that proves
+ * necessary in practice.
+ */
+export type TaskStatus =
+  | "Backlog"
+  | "Ready"
+  | "InProgress"
+  | "Blocked"
+  | "Review"
+  | "Done";
+
+export const TASK_STATUSES: ReadonlyArray<TaskStatus> = [
+  "Backlog",
+  "Ready",
+  "InProgress",
+  "Blocked",
+  "Review",
+  "Done",
+];
+
+/**
+ * The set of statuses we consider "actively requiring the owner's
+ * attention" — used to filter the per-role manifest. Backlog and Done
+ * fall outside this set: Backlog is product/PM space, Done is history.
+ */
+export const ACTIVE_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  "Ready",
+  "InProgress",
+  "Blocked",
+  "Review",
+]);
+
+export interface Task {
+  /** `T-NNNN` (zero-padded, 4 digits minimum). Auto-assigned by the store. */
+  id: string;
+  title: string;
+  status: TaskStatus;
+  owner: RoleId | null;
+  /** "P0" | "P1" | "P2" | "P3" — string-typed to allow project extensions. */
+  priority: string;
+  /** Other task ids this depends on. */
+  dependsOn: string[];
+  /** Multi-line acceptance criteria; free-form prose. */
+  acceptance: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskBoard {
+  schemaVersion: string;
+  /**
+   * Last assigned numeric id. Stored separately from the tasks map so
+   * deleting a task does not allow id reuse.
+   */
+  nextId: number;
+  /** Tasks keyed by id for O(1) lookup; YAML preserves insertion order. */
+  tasks: Record<string, Task>;
+}
+
+export interface TaskSummary {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  priority: string;
+  /** Subset of dependsOn that are not yet `Done`. */
+  blockedBy: string[];
+}
+
+/** Payload shape for type=TASK_CREATED events. */
+export interface TaskCreatedPayload {
+  taskId: string;
+  title: string;
+  owner: RoleId | null;
+  priority: string;
+}
+
+/** Payload shape for type=TASK_ASSIGNED events. */
+export interface TaskAssignedPayload {
+  taskId: string;
+  previousOwner: RoleId | null;
+  newOwner: RoleId;
+}
+
+/** Payload shape for type=TASK_STATUS_CHANGED events. */
+export interface TaskStatusChangedPayload {
+  taskId: string;
+  previousStatus: TaskStatus;
+  newStatus: TaskStatus;
 }
 
 /** Role lease metadata. */

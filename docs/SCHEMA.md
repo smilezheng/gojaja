@@ -88,6 +88,55 @@ Created and mutated only through `agentctl role create` (and future
 `agentctl role edit`). Hand edits are allowed but rare; the markdown
 contract in `roles/<id>.md` points the human at this file.
 
+## `state/task_board.yaml`
+
+The structured task list. Each task is a record keyed by its id. Auto-id
+allocation uses the top-level `nextId` counter (the file's
+`tasks` map is not enough on its own — deleting a task must not allow
+its id to be reused).
+
+```yaml
+schemaVersion: 2.0.0
+nextId: 2
+tasks:
+  T-0001:
+    id: T-0001
+    title: Implement /login API
+    status: Ready          # Backlog | Ready | InProgress | Blocked | Review | Done
+    owner: Backend
+    priority: P1
+    dependsOn: []
+    acceptance: |
+      - POST /login returns JWT
+      - rate-limited to 10/min
+    createdAt: 2026-05-27T05:23:00.000Z
+    updatedAt: 2026-05-27T05:23:00.000Z
+  T-0002:
+    id: T-0002
+    title: Implement signup
+    status: Backlog
+    owner: Backend
+    priority: P2
+    dependsOn: [T-0001]
+    acceptance: ""
+    createdAt: ...
+    updatedAt: ...
+```
+
+Field rules:
+
+- `id` is `T-NNNN` (zero-padded, minimum 4 digits). Assigned by the
+  store; do not hand-pick.
+- `status` is the union above; v2 does not enforce transitions (any
+  status may move to any status).
+- `owner` is a role id or `null`. The role does not have to exist in
+  `config.yaml` yet, but it must pass role-id validation.
+- `dependsOn` is an array of other task ids. Cycle detection is not
+  done in v2.
+- Hand-edits are allowed for trivial fixes, but normal mutation goes
+  through `agentctl task new/assign/status`, which also emits the
+  corresponding event.
+
 ## `comms/events/<ulid>.json`
 
 Immutable event record. The file name is the event id; it is always a
@@ -118,18 +167,21 @@ Fields:
 
 Event types currently emitted:
 
-| Type                | Emitted by                          | Notes                                              |
-| ------------------- | ----------------------------------- | -------------------------------------------------- |
-| `REPORT`            | `agentctl report` (PR2)             | Directed message; also writes an inbox record.     |
-| `WORKLOG`           | `agentctl worklog` (PR2)            | Broadcast `to = "*"`.                              |
-| `RFC_CREATED`       | `agentctl rfc new` (PR4)            | `ref` = RFC id.                                    |
-| `RFC_COMMENT`       | `agentctl rfc comment` (PR4)        | `ref` = RFC id.                                    |
-| `RFC_DECIDED`       | `agentctl rfc decide` (PR4)         | `ref` = RFC id; final.                             |
-| `SESSION_CLAIMED`   | `Store.claimSession`                | First-time claim.                                  |
-| `SESSION_TAKEOVER`  | `Store.claimSession` (stale)        | After lease/PID-based break.                       |
-| `SESSION_RELEASED`  | `Store.releaseSession`              | Voluntary release.                                 |
-| `LOCK_BROKEN`       | `Store.withLock` (stale)            | `ref` = lock key.                                  |
-| `SYSTEM`            | misc system actions                 | Reserved for free-form internal events.            |
+| Type                  | Emitted by                          | Notes                                              |
+| --------------------- | ----------------------------------- | -------------------------------------------------- |
+| `REPORT`              | `agentctl report` (PR2)             | Directed message; also writes an inbox record.     |
+| `WORKLOG`             | `agentctl worklog` (PR2)            | Broadcast `to = "*"`.                              |
+| `TASK_CREATED`        | `agentctl task new` (PR5)           | Broadcast; `ref` = task id.                        |
+| `TASK_ASSIGNED`       | `agentctl task new/assign` (PR5)    | `to` = new owner; `ref` = task id.                 |
+| `TASK_STATUS_CHANGED` | `agentctl task status` (PR5)        | Broadcast; `ref` = task id.                        |
+| `RFC_CREATED`         | `agentctl rfc new` (PR6)            | `ref` = RFC id.                                    |
+| `RFC_COMMENT`         | `agentctl rfc comment` (PR6)        | `ref` = RFC id.                                    |
+| `RFC_DECIDED`         | `agentctl rfc decide` (PR6)         | `ref` = RFC id; final.                             |
+| `SESSION_CLAIMED`     | `Store.claimSession`                | First-time claim.                                  |
+| `SESSION_TAKEOVER`    | `Store.claimSession` (stale)        | After lease/PID-based break.                       |
+| `SESSION_RELEASED`    | `Store.releaseSession`              | Voluntary release.                                 |
+| `LOCK_BROKEN`         | `Store.withLock` (stale)            | `ref` = lock key.                                  |
+| `SYSTEM`              | misc system actions                 | Reserved for free-form internal events.            |
 
 Records are append-only at the directory level. There is no in-place
 modification; corrections are expressed as later events.
@@ -211,7 +263,14 @@ Invariants:
   recover. Fields read from `config.yaml`; empty lists are intentionally
   omitted to keep the manifest tight.
 
-`tasks` is reserved for PR5; `rfcsPendingAction` is reserved for PR6.
+The manifest also carries a `tasks` array (PR5): a list of
+`TaskSummary` records filtered to those where `owner == role` and
+`status ∈ {Ready, InProgress, Blocked, Review}`. Each summary carries
+only `id`, `title`, `status`, `priority`, and `blockedBy` (the subset
+of `dependsOn` that is not yet Done). The full task record is fetched
+on demand via `agentctl task show <id>`.
+
+`rfcsPendingAction` is reserved for PR6.
 
 ## `comms/sessions/<role>.json`
 

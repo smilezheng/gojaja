@@ -31,7 +31,9 @@ import { validateRoleId } from "./role-id";
 import { renderRoleMarkdown } from "./role-template";
 import type { Store } from "./store";
 import {
+  ACTIVE_TASK_STATUSES,
   PROTOCOL_ONE_LINER,
+  TASK_STATUSES,
   type CursorState,
   type Event,
   type Manifest,
@@ -40,10 +42,22 @@ import {
   type RoleId,
   type RoleReminder,
   type SessionInfo,
+  type Task,
+  type TaskBoard,
+  type TaskStatus,
+  type TaskSummary,
 } from "./types";
 
 function freshConfig(schemaVersion: string): ProjectConfig {
   return { schemaVersion, roles: {} };
+}
+
+function freshTaskBoard(schemaVersion: string): TaskBoard {
+  return { schemaVersion, nextId: 0, tasks: {} };
+}
+
+function formatTaskId(n: number): string {
+  return `T-${String(n).padStart(4, "0")}`;
 }
 
 /**
@@ -90,6 +104,10 @@ export class LocalFsStore implements Store {
     await atomicWriteFile(
       this.abs(Paths.configFile),
       yaml.dump(freshConfig(version), { lineWidth: 100, noRefs: true }),
+    );
+    await atomicWriteFile(
+      this.abs(Paths.taskBoardFile),
+      yaml.dump(freshTaskBoard(version), { lineWidth: 100, noRefs: true }),
     );
   }
 
@@ -399,6 +417,8 @@ export class LocalFsStore implements Store {
       const advanceCursorTo =
         events.length > 0 ? events[events.length - 1].id : cursor.ackedThrough;
       const ackToken = newId();
+      const board = await this.readTaskBoard();
+      const tasks = this.taskSummariesForRole(board, role);
       const manifest: Manifest = {
         ackToken,
         role,
@@ -407,6 +427,7 @@ export class LocalFsStore implements Store {
         fromCursor: cursor.ackedThrough,
         events: filtered,
         roleReminder: await this.buildRoleReminder(role),
+        tasks,
       };
       await atomicWriteJson(this.abs(manifestPath(role, ackToken)), manifest);
       const updated: CursorState = {
@@ -616,6 +637,197 @@ export class LocalFsStore implements Store {
     const target = this.abs(waitSentinelPath(role));
     await atomicWriteJson(target, { role, mode: "exit", writtenAt });
     return { path: target, writtenAt };
+  }
+
+  // ---- task board ---------------------------------------------------------
+
+  async readTaskBoard(): Promise<TaskBoard> {
+    const file = this.abs(Paths.taskBoardFile);
+    let raw: string;
+    try {
+      raw = await fsp.readFile(file, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        // initialise() should have written one; treat absence as empty.
+        return freshTaskBoard("2.0.0");
+      }
+      throw err;
+    }
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(raw);
+    } catch (err) {
+      throw new StateCorruptionError(
+        `${Paths.taskBoardFile} is not valid YAML: ${(err as Error).message}`,
+      );
+    }
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof (parsed as { schemaVersion?: unknown }).schemaVersion !== "string"
+    ) {
+      throw new StateCorruptionError(
+        `${Paths.taskBoardFile} is missing required top-level fields.`,
+      );
+    }
+    const board = parsed as TaskBoard;
+    if (!board.tasks || typeof board.tasks !== "object") board.tasks = {};
+    if (typeof board.nextId !== "number" || !Number.isFinite(board.nextId)) board.nextId = 0;
+    return board;
+  }
+
+  private async writeTaskBoardUnlocked(board: TaskBoard): Promise<void> {
+    await atomicWriteFile(
+      this.abs(Paths.taskBoardFile),
+      yaml.dump(board, { lineWidth: 100, noRefs: true }),
+    );
+  }
+
+  async createTask(input: {
+    title: string;
+    owner?: RoleId | null;
+    priority?: string;
+    dependsOn?: string[];
+    acceptance?: string;
+    actor: RoleId | "SYSTEM";
+  }): Promise<Task> {
+    const title = String(input.title ?? "").trim();
+    if (title.length === 0) {
+      throw new UsageError("Task title must be non-empty.");
+    }
+    const priority = (input.priority ?? "P2").trim();
+    const owner = input.owner === undefined ? null : input.owner;
+    if (owner !== null) validateRoleId(owner);
+    const dependsOn = (input.dependsOn ?? []).map((d) => String(d));
+    const acceptance = input.acceptance ?? "";
+
+    return this.withLock("task-board", async () => {
+      const board = await this.readTaskBoard();
+      const idNumber = board.nextId + 1;
+      const id = formatTaskId(idNumber);
+      const now = new Date().toISOString();
+      const task: Task = {
+        id,
+        title,
+        status: "Backlog",
+        owner,
+        priority,
+        dependsOn,
+        acceptance,
+        createdAt: now,
+        updatedAt: now,
+      };
+      board.nextId = idNumber;
+      board.tasks[id] = task;
+      await this.writeTaskBoardUnlocked(board);
+      await this.recordEventInternal({
+        type: "TASK_CREATED",
+        from: input.actor,
+        to: "*",
+        ref: id,
+        payload: { taskId: id, title, owner, priority },
+      });
+      if (owner) {
+        await this.recordEventInternal({
+          type: "TASK_ASSIGNED",
+          from: input.actor,
+          to: owner,
+          ref: id,
+          payload: { taskId: id, previousOwner: null, newOwner: owner },
+        });
+      }
+      return task;
+    });
+  }
+
+  async assignTask(input: {
+    taskId: string;
+    newOwner: RoleId;
+    actor: RoleId | "SYSTEM";
+  }): Promise<Task> {
+    validateRoleId(input.newOwner);
+    return this.withLock("task-board", async () => {
+      const board = await this.readTaskBoard();
+      const task = board.tasks[input.taskId];
+      if (!task) {
+        throw new UsageError(`Unknown task '${input.taskId}'.`);
+      }
+      const previousOwner = task.owner;
+      if (previousOwner === input.newOwner) return task;
+      task.owner = input.newOwner;
+      task.updatedAt = new Date().toISOString();
+      await this.writeTaskBoardUnlocked(board);
+      await this.recordEventInternal({
+        type: "TASK_ASSIGNED",
+        from: input.actor,
+        to: input.newOwner,
+        ref: input.taskId,
+        payload: { taskId: input.taskId, previousOwner, newOwner: input.newOwner },
+      });
+      return task;
+    });
+  }
+
+  async setTaskStatus(input: {
+    taskId: string;
+    newStatus: TaskStatus;
+    actor: RoleId | "SYSTEM";
+  }): Promise<Task> {
+    if (!TASK_STATUSES.includes(input.newStatus)) {
+      throw new UsageError(
+        `Invalid status '${input.newStatus}'. Use one of: ${TASK_STATUSES.join(", ")}.`,
+      );
+    }
+    return this.withLock("task-board", async () => {
+      const board = await this.readTaskBoard();
+      const task = board.tasks[input.taskId];
+      if (!task) {
+        throw new UsageError(`Unknown task '${input.taskId}'.`);
+      }
+      const previousStatus = task.status;
+      if (previousStatus === input.newStatus) return task;
+      task.status = input.newStatus;
+      task.updatedAt = new Date().toISOString();
+      await this.writeTaskBoardUnlocked(board);
+      await this.recordEventInternal({
+        type: "TASK_STATUS_CHANGED",
+        from: input.actor,
+        to: "*",
+        ref: input.taskId,
+        payload: {
+          taskId: input.taskId,
+          previousStatus,
+          newStatus: input.newStatus,
+        },
+      });
+      return task;
+    });
+  }
+
+  async readTask(taskId: string): Promise<Task> {
+    const board = await this.readTaskBoard();
+    const t = board.tasks[taskId];
+    if (!t) throw new UsageError(`Unknown task '${taskId}'.`);
+    return t;
+  }
+
+  private taskSummariesForRole(board: TaskBoard, role: RoleId): TaskSummary[] {
+    const matching: Task[] = [];
+    for (const t of Object.values(board.tasks)) {
+      if (t.owner !== role) continue;
+      if (!ACTIVE_TASK_STATUSES.has(t.status)) continue;
+      matching.push(t);
+    }
+    return matching.map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      priority: t.priority,
+      blockedBy: t.dependsOn.filter((dep) => {
+        const d = board.tasks[dep];
+        return !d || d.status !== "Done";
+      }),
+    }));
   }
 
   // ---- helpers ------------------------------------------------------------

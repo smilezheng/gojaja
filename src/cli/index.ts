@@ -8,6 +8,7 @@ import { runPrompt } from "./commands/prompt";
 import { runRelease } from "./commands/release";
 import { runReport } from "./commands/report";
 import { runRole } from "./commands/role";
+import { runTask } from "./commands/task";
 import { runVersion } from "./commands/version";
 import { runWait } from "./commands/wait";
 import { runWorklog } from "./commands/worklog";
@@ -46,6 +47,8 @@ async function dispatch(): Promise<number> {
       return runWorklog(args);
     case "role":
       return runRole(args);
+    case "task":
+      return runTask(args);
     case "prompt":
       return runPrompt(args);
     case "wait":

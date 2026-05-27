@@ -62,14 +62,17 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Goal: a context-compressed agent recovers full identity by
     running `agentctl plan` once.
 
-### Planned, in priority order
-
 - **PR5 — task board.**
-  - `state/task_board.yaml` schema with id / status / owner / priority /
-    dependencies / acceptance.
+  - `state/task_board.yaml` schema with id, status, owner, priority,
+    dependsOn, acceptance, createdAt, updatedAt.
   - `agentctl task new / assign / status / list / show`.
-  - `plan` manifest includes `tasks` array filtered to the role.
-  - New event types: `TASK_CREATED`, `TASK_ASSIGNED`, `TASK_STATUS_CHANGED`.
+  - `plan` manifest now carries a `tasks` array filtered to
+    `owner == role && status ∈ {Ready, InProgress, Blocked, Review}`,
+    with `blockedBy` derived from dependsOn entries that are not Done.
+  - New event types: `TASK_CREATED`, `TASK_ASSIGNED`,
+    `TASK_STATUS_CHANGED`.
+
+### Planned, in priority order
 
 - **PR6 — RFC state machine.**
   - `agentctl rfc new <slug>` with strict slug validation.

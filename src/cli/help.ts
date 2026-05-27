@@ -18,6 +18,14 @@ Bootstrap (run once per project, by you):
                                               artifact (skill / rule /
                                               CLAUDE.md block).
 
+Task board (PM/TL or any role with appropriate scope):
+  task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3]
+           [--depends-on T-NNNN,...] [--acceptance <text>]
+  task assign <task-id> --to <role>
+  task status <task-id> <Backlog|Ready|InProgress|Blocked|Review|Done>
+  task list [--owner <role>] [--status <s>]
+  task show <task-id>
+
 Session lifecycle (run once per agent window, then export MA_SESSION):
   claim <role> [--ttl <s>] [--force]
   release [<role>]
@@ -45,5 +53,5 @@ Information:
   version                                     CLI and schema version.
   help                                        Show this help.
 
-Not yet implemented (see docs/ROADMAP.md): rfc *, task *, doctor, upgrade.
+Not yet implemented (see docs/ROADMAP.md): rfc *, doctor, upgrade.
 `;

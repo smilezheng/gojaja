@@ -84,6 +84,14 @@ serialises to under 300 bytes. It exists so that a context-compressed
 agent can recover its full operating identity by running `plan` once;
 it does not duplicate the full role contract or protocol docs.
 
+`manifest.tasks` is the role's active task list: tasks where
+`owner == role` and `status ∈ {Ready, InProgress, Blocked, Review}`.
+Each entry is a `TaskSummary` (`id`, `title`, `status`, `priority`,
+`blockedBy`). Backlog and Done are intentionally excluded — the
+former is product/PM space, the latter is history. Call
+`agentctl task show <id>` for full details (acceptance criteria,
+timestamps).
+
 If a previous manifest is outstanding (`pendingManifest != null`), `plan`
 returns the existing manifest verbatim and does not generate a new one.
 This makes the operation idempotent across crash-and-retry.
@@ -130,7 +138,42 @@ ack — see the regression test
 - Designed to be small and frequent; reserve large narratives for
   reports or RFC comments.
 
-## RFCs (planned PR4)
+## Task board
+
+Tasks are the unit of "what should this role be working on right now".
+The full schema is documented in
+[SCHEMA -> task_board.yaml](./SCHEMA.md#statetask_boardyaml).
+
+### `agentctl task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3] [--depends-on T-NNNN,...] [--acceptance <text>]`
+
+- The store assigns the next `T-NNNN` id atomically (under a
+  `task-board` lock); ids are never reused even if a task is deleted.
+- Emits `TASK_CREATED` (broadcast). If `--owner` is given, also emits
+  `TASK_ASSIGNED` (directed at the new owner).
+- `from` for the events is the actor's role (from `MA_SESSION`) when
+  available, otherwise `"SYSTEM"` (so a human one-off invocation still
+  produces audit events).
+
+### `agentctl task assign <task-id> --to <role>`
+
+- Sets `task.owner` and emits `TASK_ASSIGNED` with `previousOwner` and
+  `newOwner`.
+- No-op (no event) when the owner already matches.
+
+### `agentctl task status <task-id> <Backlog|Ready|InProgress|Blocked|Review|Done>`
+
+- Sets `task.status` and emits `TASK_STATUS_CHANGED`.
+- v2 does not enforce status transitions; any role with write access
+  may move any task between any two statuses. A constrained state
+  machine is on the roadmap if it proves necessary.
+
+### `agentctl task list [--owner <role>] [--status <s>]` and `agentctl task show <id>`
+
+- Read-only. Useful for humans browsing the project. The agent's
+  per-turn view of its tasks is `manifest.tasks`; explicit list/show
+  are for ad-hoc inspection.
+
+## RFCs (planned PR6)
 
 The goal is "every relevant role records an opinion; a designated leader
 picks; the decision is durable". There is no automatic tally.

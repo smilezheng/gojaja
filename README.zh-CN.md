@@ -51,12 +51,19 @@ CrewAI 之类托管的多 agent 框架，那本项目解决的不是你的问题
 
 ## 当前状态
 
-**v2.0.0-alpha.2**。存储核心、每回合 agent 循环（`claim` / `plan` /
-`ack` / `report` / `worklog` / `release` / `wait`），以及给用户的
-配置命令（`role create / list / show`、`prompt --target codex|claude|cursor|generic --write`）
-都已实现，由 64 个测试覆盖。
-还在排队的：每回合 role reminder、任务板、RFC、可写域强制、`doctor`
-——详见 [docs/ROADMAP](./docs/ROADMAP.md)。
+**v2.0.0-alpha.4**。已经实现并由 81 个测试覆盖：
+
+- 存储核心（事件、游标、会话、per-resource 锁）。
+- 每回合 agent 循环：`claim` / `plan` / `ack` / `report` / `worklog` /
+  `release` / `wait`。每次 `plan` 返回的 manifest 都自带一个精简的
+  `roleReminder`——上下文被压缩的 agent 只要再跑一次 `plan` 就能找回
+  完整身份。
+- 配置 CLI：`role create / list / show`、`prompt --target codex|claude|cursor|generic --write`。
+- 任务板：`task new / assign / status / list / show`；manifest 自动
+  携带这个角色的活跃任务。
+
+还在排队的：RFC、可写域强制、`doctor`——详见
+[docs/ROADMAP](./docs/ROADMAP.md)。
 
 跟进进度请关注 `v2` 分支。
 
@@ -161,15 +168,18 @@ agentctl 是它们的工具。
 
 ```bash
 agentctl plan                          # JSON：未读工作 + ackToken
-# ... agent 处理完事件，可能调：
-agentctl report  --to <role> --message "<text>"
-agentctl worklog --message "<text>"
+                                       # 还带 roleReminder（id/title/owns/...）
+                                       # 和 tasks（这个角色的活跃任务）
+# ... agent 处理完事件 / 任务，可能调：
+agentctl report      --to <role> --message "<text>"
+agentctl worklog     --message "<text>"
+agentctl task status <task-id> InProgress
 # ... 然后：
-agentctl ack --token <ackToken>        # 把游标精确推到 manifest 当时快照
-agentctl wait                          # 阻塞睡眠（不烧 token）；返回 ATTENTION 或 IDLE
+agentctl ack  --token <ackToken>       # 把游标精确推到 manifest 当时快照
+agentctl wait                          # 阻塞睡眠（不烧 token）
 ```
 
-### 额外：手动跑一遍感受协议
+### 额外：手动跑一遍完整 demo
 
 可以在两个 shell 里手动驱动整个流程，更直观。
 
@@ -178,16 +188,22 @@ agentctl wait                          # 阻塞睡眠（不烧 token）；返回
 ```bash
 agentctl claim PM
 export MA_SESSION=<粘 claim 返回的 session id>
+agentctl task new --title "Implement /login API" --owner Backend --priority P1 \
+                  --acceptance "POST /login returns JWT, rate-limited 10/min"
 agentctl report  --to TL --message "Goals locked in for Q3"
 agentctl worklog --message "Drafted acceptance for T-0001"
 ```
 
-**Shell B（TL）：**
+**Shell B（Backend）：**
 
 ```bash
-agentctl claim TL
+agentctl claim Backend
 export MA_SESSION=<粘 session id>
-agentctl plan                              # 看到 PM 的 report 和 worklog
+agentctl plan                              # 看到 PM 的事件 + tasks=[T-0001]
+agentctl task status T-0001 InProgress     # 广播 TASK_STATUS_CHANGED
+# ... 真去仓库里写代码 ...
+agentctl task status T-0001 Review
+agentctl worklog --message "T-0001 ready for review, see commit abc123"
 agentctl ack --token <plan 输出的 ackToken>
 agentctl wait --idle 1                     # 1 分钟后返回 IDLE
 ```
@@ -256,9 +272,9 @@ agentctl wait --idle 1                     # 1 分钟后返回 IDLE
 | PR1  | 存储核心：锁、事件、游标、会话 | **完成** |
 | PR2  | `claim` / `plan` / `ack` / `report` / `worklog` | **完成** |
 | PR3  | `role create / list / show`、`prompt --target … --write`、`wait` | **完成** |
-| PR4  | manifest 里的 `roleReminder`，让被压缩上下文的 agent 重新锚定身份 | 即将开始 |
-| PR5  | 任务板（`state/task_board.yaml`、`agentctl task *`） | 计划中 |
-| PR6  | RFC 状态机（意见 + leader 决定） | 计划中 |
+| PR4  | manifest 里的 `roleReminder`，让被压缩上下文的 agent 重新锚定身份 | **完成** |
+| PR5  | 任务板（`state/task_board.yaml`、`agentctl task *`） | **完成** |
+| PR6  | RFC 状态机（意见 + leader 决定） | 即将开始 |
 | PR7  | `config.yaml` 驱动的角色可写域强制 | 计划中 |
 | PR8  | 安装器、`upgrade`、`reset`、AGENTS.md 注入 | 计划中 |
 | PR9  | `agentctl doctor`、历史回放、事件归档 | 计划中 |

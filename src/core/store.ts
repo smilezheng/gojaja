@@ -6,6 +6,9 @@ import type {
   RoleConfig,
   RoleId,
   SessionInfo,
+  Task,
+  TaskBoard,
+  TaskStatus,
 } from "./types";
 
 /**
@@ -185,4 +188,49 @@ export interface Store {
    * `agentctl wait --mode exit`). Returns the absolute path written.
    */
   writeWaitSentinel(role: RoleId): Promise<{ path: string; writtenAt: string }>;
+
+  // ---- task board ---------------------------------------------------------
+
+  /**
+   * Read the whole task board. Returns the default empty board if the
+   * underlying file has not been created yet.
+   */
+  readTaskBoard(): Promise<TaskBoard>;
+
+  /**
+   * Create a new task. The store assigns `id` (next `T-NNNN`) and
+   * timestamps; emits `TASK_CREATED`. Owner may be null; if non-null and
+   * the role is configured, also emits `TASK_ASSIGNED`.
+   */
+  createTask(input: {
+    title: string;
+    owner?: RoleId | null;
+    priority?: string;
+    dependsOn?: string[];
+    acceptance?: string;
+    actor: RoleId | "SYSTEM";
+  }): Promise<Task>;
+
+  /**
+   * Reassign a task to a different owner. Emits `TASK_ASSIGNED`.
+   * `actor` is the role performing the change (for the event's `from`).
+   */
+  assignTask(input: {
+    taskId: string;
+    newOwner: RoleId;
+    actor: RoleId | "SYSTEM";
+  }): Promise<Task>;
+
+  /**
+   * Set a task's status. Emits `TASK_STATUS_CHANGED`. Refuses if the
+   * status string is not a known `TaskStatus`.
+   */
+  setTaskStatus(input: {
+    taskId: string;
+    newStatus: TaskStatus;
+    actor: RoleId | "SYSTEM";
+  }): Promise<Task>;
+
+  /** Read a single task; throws UsageError if id unknown. */
+  readTask(taskId: string): Promise<Task>;
 }

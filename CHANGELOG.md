@@ -12,6 +12,46 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 - PR6: RFC state machine (`rfc new / comment / decide / status`).
 
+## [2.0.0-alpha.4] — 2026-05-27
+
+### Added (PR5 — task board)
+
+- New on-disk artifact: `.multi-agent/state/task_board.yaml`. Schema:
+  `schemaVersion`, `nextId` (auto-allocator counter), and a `tasks`
+  map keyed by `T-NNNN` id with `title`, `status`, `owner`, `priority`,
+  `dependsOn`, `acceptance`, `createdAt`, `updatedAt`. Statuses:
+  `Backlog | Ready | InProgress | Blocked | Review | Done`.
+- New CLI surface `agentctl task`:
+  - `task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3]
+    [--depends-on T-NNNN,...] [--acceptance <text>]`.
+  - `task assign <task-id> --to <role>`.
+  - `task status <task-id> <Backlog|Ready|InProgress|Blocked|Review|Done>`.
+  - `task list [--owner <role>] [--status <s>]`.
+  - `task show <task-id>`.
+- New event types `TASK_CREATED`, `TASK_ASSIGNED`,
+  `TASK_STATUS_CHANGED`, all emitted automatically by the
+  corresponding command. `from` is the role bound to `MA_SESSION` when
+  available, otherwise `"SYSTEM"`.
+- Manifest carries a new `tasks` array (`TaskSummary[]`): tasks where
+  `owner == role` AND `status ∈ {Ready, InProgress, Blocked, Review}`.
+  Each summary keeps just `id`, `title`, `status`, `priority`, and
+  `blockedBy` (the subset of `dependsOn` that is not yet `Done`).
+  Full task records are fetched on demand via `agentctl task show <id>`.
+- New `Store` methods: `readTaskBoard`, `createTask`, `assignTask`,
+  `setTaskStatus`, `readTask`. All mutations go through a `task-board`
+  lock; auto-id allocation is monotonic even across crashes.
+- 14 new vitest cases covering id allocation, event emission, role-id
+  validation, status validation, idempotent no-op assigns, and
+  manifest filtering / `blockedBy` derivation.
+
+### Notes
+
+- Task status transitions are unrestricted in v2 by design — any role
+  may set any status. A constrained state machine (PR7+) can layer on
+  top of this once ownership enforcement lands.
+- `agentctl init` now seeds an empty `state/task_board.yaml` alongside
+  `VERSION` and `config.yaml`.
+
 ## [2.0.0-alpha.3] — 2026-05-27
 
 ### Added (PR4 — manifest self-anchoring)

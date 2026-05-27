@@ -13,6 +13,7 @@ export const Paths = {
   versionFile: "VERSION",
   configFile: "config.yaml",
   auditLog: "audit.log",
+  taskBoardFile: "state/task_board.yaml",
 
   protocolDir: "protocol",
   rolesDir: "roles",
