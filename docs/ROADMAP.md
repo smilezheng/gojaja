@@ -152,12 +152,26 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     them.
   - Suite 169 → 185.
 
-### Planned, in priority order
+- **PR8e — first-run UX.**
+  - README.md / README.zh-CN.md rewritten around the user-vs-agent
+    boundary (7 sections), including a "what you still write by
+    hand" section and a Common-situations troubleshooting block.
+  - SCHEMA.md flags `state/project_state.md` as not auto-created.
+  - `role create` nags about TBD sections in the freshly rendered
+    role markdown; `role list` annotates TBD rows; `agentctl
+    activate` refuses while the role markdown still has TBD.
+  - `activate` output rewritten: explicit `═══ BEGIN/END PASTE ═══`
+    dividers, second-person `You are the ...` framing, three numbered
+    steps (claim via --eval, role show, agentctl -h), auto-copy to
+    clipboard via pbcopy / wl-copy / xclip / xsel / clip.exe with
+    `--no-copy` escape hatch.
+  - `agentctl -h` rewritten: intro paragraph + Quickstart + per-section
+    inline tips + exit-codes table + See-also doc links.
+  - Handbook gains "Task assignment is push, not pull" + "Multi-role
+    task pattern" + hard-don't against `task assign --to <yourself>`.
+  - Suite 185 -> 198.
 
-- **PR8e — README rewrite.**
-  - Restructure README.md / README.zh-CN.md around the user / agent
-    boundary; explicitly document that `state/project_state.md` is
-    not auto-created; add upgrade and troubleshooting sections.
+### Planned, in priority order
 
 - **PR8f — schema-level deferments from PR8c.**
   - Task `reviewers` field so a Review handoff can sign off without
@@ -214,9 +228,8 @@ After PR10 we tag `v2.0.0`.
 ## Sequencing notes
 
 PR1–PR7 + PR8a establish the protocol surface (events, sessions,
-plan/ack, tasks, RFCs, ownership, handbook). PR7a / PR8b / PR8c / PR8d
-are correctness + UX hardening that introduce no new protocol surface.
-PR8e is documentation. PR8f–PR10 harden the layer for everyday use;
-PR8f is the only remaining schema-affecting PR before `v2.0.0`.
-Anything past `v2.0.0` only ships after the chaos suite (PR10) is
-green.
+plan/ack, tasks, RFCs, ownership, handbook). PR7a / PR8b / PR8c / PR8d /
+PR8e are correctness + UX hardening that introduce no new protocol
+surface. PR8f–PR10 harden the layer for everyday use; PR8f is the only
+remaining schema-affecting PR before `v2.0.0`. Anything past `v2.0.0`
+only ships after the chaos suite (PR10) is green.

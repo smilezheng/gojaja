@@ -34,6 +34,11 @@ const KEY_TRIGGER_PHRASES: ReadonlyArray<RegExp> = [
 
   // Hard don'ts block
   /Don't hand-edit anything under \\?`?\.multi-agent/,
+
+  // PR8e task-assignment rules
+  /Task assignment is push, not pull/,
+  /Don't self-assign by calling/,
+  /Multi-role task pattern/,
 ];
 
 describe("COLLABORATION_HANDBOOK", () => {

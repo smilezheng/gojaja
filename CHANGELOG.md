@@ -10,11 +10,75 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 ### Planned next
 
-- PR8e: README rewrite around the user / agent boundary so first-run
-  readers know what they own vs what agents do.
 - PR8f: schema-level features deferred from PR8c (task `reviewers`
   field, `STATE_UPDATED` event, `dependsOn` cycle detection,
   schema-version compatibility check).
+
+## [2.0.0-alpha.12] — 2026-05-27
+
+### First-run UX (PR8e)
+
+Surfaces a number of silent-failure modes first-time users hit, plus a
+README rewrite around the user-vs-agent boundary. Suite 185 -> 198.
+
+- **`role create` nags about TBD sections.** Freshly rendered
+  `roles/<id>.md` carries TBD in the Role description and
+  Responsibilities sections — the agent's main self-introduction.
+  Without filling them, the agent runs with only its id and title,
+  and asks the user trivial role-clarifying questions every turn.
+  Create output now prints a TODO block pointing at the file; JSON
+  output carries `needsFill: true` and `rolePath`.
+- **`role list` annotates TBD rows.** Rows for roles whose markdown
+  still has TBD show `(TBD: fill role markdown)`. JSON output carries
+  `needsFill` per row.
+- **`agentctl activate <role>` refuses while the role contract has TBD.**
+  Hard refusal at the most actionable moment — the user is about to
+  bind the role to a window and would otherwise discover the missing
+  self-introduction much later via every-turn agent confusion.
+- **`activate` output gets explicit dividers + clipboard copy.**
+  Snippet now appears between `═══ BEGIN PASTE TO AGENT ═══` and
+  `═══ END PASTE TO AGENT ═══` so it is obvious where the paste
+  payload begins and ends. Auto-copied to the system clipboard via
+  `pbcopy` / `wl-copy` / `xclip` / `xsel` / `clip.exe` when
+  available; `--no-copy` flag to skip. JSON output carries
+  `copiedToClipboard` and `clipboardTool` fields.
+- **Activation snippet rewritten for the agent's perspective.** Now
+  reads `You are the <role> agent for ...` (second person, addresses
+  the agent directly). Three numbered steps: claim via `--eval`, run
+  `agentctl role show <role>` to learn its own contract, run
+  `agentctl -h` to learn the CLI surface. Closes the gap where weak
+  models skipped the export step or never read their own contract.
+- **`agentctl -h` rewritten.** Opens with a one-paragraph description
+  of what the tool is, then a runnable Quickstart, then per-section
+  command listings with inline tips (`eval "$(... --eval)"`,
+  `unset MA_SESSION` after release, Cursor `wait --mode exit`). Adds
+  an exit-codes table with agent-actionable hints (USAGE / FORBIDDEN
+  / STATE_CORRUPTION) and a See-also block to the doc set.
+- **Handbook adds task-assignment rules.** New section "Task
+  assignment is push, not pull" telling agents that tasks are
+  assigned by the task-board owner (or a human), not self-claimed.
+  New section "Multi-role task pattern" documenting the lead +
+  sub-tasks + parent Blocked + report-to-assigner workflow for work
+  that spans multiple roles, built on the existing single-owner
+  schema. New hard don't: do not self-assign via
+  `task assign --to <yourself>`.
+- **README.md and README.zh-CN.md rewritten** around the user-vs-agent
+  boundary (7 sections). Adds an explicit "Your job vs the agent's
+  job" table, a "What you still need to write by hand" section
+  highlighting that `state/project_state.md` is not auto-created, a
+  "Common situations" troubleshooting block, and `npm link` /
+  `npm run watch` guidance under Develop locally.
+- **SCHEMA.md** flags `state/project_state.md` as not auto-created
+  with an explanation of the downstream effect (agents bounce
+  acceptance questions back to the user every turn).
+
+### Cross-cutting
+
+- New CLI flag `--no-copy` (booleans whitelisted in argv).
+- New util `src/cli/util/clipboard.ts` (no new dependencies).
+- 13 new tests across `tests/role-cli.test.ts`, `tests/activate.test.ts`,
+  `tests/help.test.ts`, `tests/handbook.test.ts`,
+  `tests/prompt.test.ts`.
 
 ## [2.0.0-alpha.11] — 2026-05-27
 

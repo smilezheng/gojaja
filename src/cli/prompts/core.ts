@@ -138,16 +138,28 @@ function waitRecommendation(target: Target | undefined): string {
  * any project-shared file.
  */
 export function activationSnippet(role: string, projectRoot: string): string {
-  return `I am the ${role} agent for the multi-agent project at ${projectRoot}.
+  return `You are the ${role} agent for the multi-agent project at ${projectRoot}.
 
-Please run the following steps, in order, before doing anything else:
+Before doing anything else, run these commands in this same shell,
+in order:
 
-  agentctl claim ${role}
-  # then export MA_SESSION to the printed sessionId, for example:
-  # export MA_SESSION=<sessionId>
+  1. eval "$(agentctl claim ${role} --eval)"
+     # Claims the role and exports MA_SESSION in one step.
+     # Subsequent agentctl commands in this shell will authenticate
+     # as ${role}.
+
+  2. agentctl role show ${role}
+     # Read your own role contract: title, owns, reportsTo,
+     # mustNotEdit, description, responsibilities. This is your
+     # self-introduction — every "who am I / what can I do" question
+     # is answered here.
+
+  3. agentctl -h
+     # Skim what the agentctl CLI can do. You will come back to it
+     # often (task, rfc, report, worklog, plan, ack, wait, ...).
 
 Then enter the runtime loop documented in the multi-agent-runtime
-instructions installed in this host (cursor rules / CLAUDE.md / codex
-skill, depending on which agent you are).
+instructions installed in this host (Cursor rule / CLAUDE.md / Codex
+skill — whichever applies to you).
 `;
 }

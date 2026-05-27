@@ -132,11 +132,20 @@ describe("buildActivation (role-bound, never persisted)", () => {
   it("cursor and claude activations stay short — they assume the runtime body is installed", () => {
     const cursor = buildActivation("cursor", "PM", ctx.root);
     const claude = buildActivation("claude", "PM", ctx.root);
-    // Short: a few hundred bytes, NOT the multi-KB runtime body.
-    expect(cursor.length).toBeLessThan(800);
-    expect(claude.length).toBeLessThan(800);
+    // Short: well under 2 KB, NOT the multi-KB runtime body. The
+    // budget was bumped from 800 to 1500 in PR8e to accommodate the
+    // "run role show + agentctl -h" three-step onboarding sequence
+    // that prevents the agent from skipping self-introduction.
+    expect(cursor.length).toBeLessThan(1500);
+    expect(claude.length).toBeLessThan(1500);
     expect(cursor).not.toContain("Collaboration handbook");
     expect(claude).not.toContain("Collaboration handbook");
+    // PR8e content invariants: the new snippet must address the agent
+    // in the second person and route it through eval + role show + -h.
+    expect(cursor).toContain("You are the PM agent");
+    expect(cursor).toContain('eval "$(agentctl claim PM --eval)"');
+    expect(cursor).toContain("agentctl role show PM");
+    expect(cursor).toContain("agentctl -h");
   });
 
   it("generic activation bundles the runtime body because there is no install location", () => {

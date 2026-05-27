@@ -45,6 +45,16 @@ files (`project_state.md`, `architecture.md`, `decisions.md`,
 `risks.yaml`) are listed here as the conventional locations the project
 will populate over time; they are not created up front.
 
+> **`state/project_state.md` is not auto-created.** `agentctl init`
+> does not write this file. It comes into existence the first time
+> someone — the user from their shell, or an agent whose role has the
+> right `owns` — writes to it. If a project never has a
+> `project_state.md`, agents will keep bouncing acceptance-criteria
+> questions back to the user every time a task reaches the "is this
+> Done?" decision, because the handbook tells them to consult this
+> file before deciding. Recommended minimum content: a one-paragraph
+> vision, a milestone list, and a per-task acceptance criterion line.
+
 ## `VERSION`
 
 Plain text, no trailing whitespace beyond a single newline.

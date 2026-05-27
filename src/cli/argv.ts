@@ -26,6 +26,7 @@ const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "version",
   "eval",
   "force-rewrite",
+  "no-copy",
 ]);
 
 /**

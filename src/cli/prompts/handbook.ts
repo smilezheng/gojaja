@@ -164,6 +164,41 @@ Common temptations that are NOT the user's job:
   acceptance is ambiguous, report to the task's owner role for
   clarification before marking Done.
 
+### Task assignment is push, not pull
+
+Tasks are **assigned** by the role that owns \`state/task_board.yaml\`
+(typically a coordinator role) or by a human user. Agents do not
+self-assign. If you believe a task should be yours, send a report
+explaining why to the role that owns the task board, and let them
+re-assign. Calling \`agentctl task assign <id> --to <yourself>\` from
+a role that happens to have task-board write access is a hard don't
+(see below).
+
+To discover what is yours, run \`agentctl plan\`; \`manifest.tasks\`
+already lists only tasks where \`owner == you\`. You do not need
+\`agentctl task list\` for work discovery.
+
+### Multi-role task pattern
+
+A single task has at most one \`owner\`. If a piece of work genuinely
+spans multiple roles, the assigner gives the parent task to a **lead
+role** (the one whose \`owns\` most overlaps the work). The lead's job:
+
+1. Send one report per peer with the same \`--ref <task-id>\`, asking
+   for input on the split.
+2. If a substantive trade-off needs sign-off, open an RFC; otherwise
+   resolve via reports.
+3. Create one sub-task per peer:
+   \`agentctl task new --title "..." --owner <peer> --depends-on <parent>\`.
+4. Move the parent task to \`Blocked\` (it now depends on its sub-tasks).
+5. Report the agreed breakdown back to the **assigner** (the task's
+   original creator — the audit-trail witness), citing each sub-task id.
+6. When all sub-tasks reach \`Done\`, push the parent to \`Review\` and
+   follow the Review handoff below.
+
+This pattern uses only the existing single-owner schema; a first-class
+multi-owner field is on the roadmap if pain persists.
+
 ### Review handoff (temporary protocol)
 
 When you push a task to Review:
@@ -221,4 +256,9 @@ directly without needing task-board ownership.
   user. It is NOT an invitation to use \`--force\`. The previous
   window may be a peer doing real work; forcing takeover silently
   kills it.
+- Don't self-assign by calling
+  \`agentctl task assign <task-id> --to <yourself>\`. Tasks are
+  push-assigned by the role that owns the task board or by the user.
+  If you think a task should be yours, send a report explaining why
+  and let the assigner reassign.
 `;
