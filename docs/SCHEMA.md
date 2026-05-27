@@ -181,6 +181,7 @@ Event types currently emitted:
 | `RFC_CREATED`         | `agentctl rfc new`               | Broadcast; `ref` = RFC id.                     |
 | `RFC_COMMENT`         | `agentctl rfc comment`           | Broadcast; `ref` = RFC id.                     |
 | `RFC_DECIDED`         | `agentctl rfc decide` / `reject` | Broadcast; `ref` = RFC id; final.              |
+| `RFC_REPAIRED`        | `Store.readRfc` self-heal        | Broadcast; `ref` = RFC id. Emitted when a half-written `finaliseRfc` is observed (decision.json exists but proposal.yaml still `open`) and the proposal status is forward-completed from the decision. |
 | `SESSION_CLAIMED`     | `Store.claimSession`             | First-time claim.                              |
 | `SESSION_TAKEOVER`    | `Store.claimSession` (stale)     | After lease / PID-based break.                 |
 | `SESSION_RELEASED`    | `Store.releaseSession`           | Voluntary release.                             |

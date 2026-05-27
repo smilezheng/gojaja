@@ -8,7 +8,7 @@ import type { ProjectConfig } from "../src/core/types";
 
 async function freshStore() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-role-"));
-  const store = new LocalFsStore(root);
+  const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   return { root, store };
 }
@@ -61,6 +61,34 @@ describe("Store.createRole", () => {
     await expect(
       ctx.store.createRole({ id: "PM", title: "PM" }),
     ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("recovers when config has the role but the markdown is missing (crash mid-create)", async () => {
+    // Simulate a crash between writeConfig and atomicWriteFile of the
+    // markdown. Without the recovery path, retrying createRole would
+    // either be wedged forever or silently clobber the existing config.
+    const config = await ctx.store.readConfig();
+    config.roles.PM = {
+      title: "Product Manager",
+      description: "owned scope and acceptance",
+      owns: ["state/project_state.md"],
+      reportsTo: ["TL"],
+      mustNotEdit: [],
+    };
+    await ctx.store.writeConfig(config);
+
+    const result = await ctx.store.createRole({
+      id: "PM",
+      title: "ignored — existing config wins",
+    });
+    // Existing config wins so hand-edits are not clobbered.
+    expect(result.title).toBe("Product Manager");
+    expect(result.owns).toEqual(["state/project_state.md"]);
+    const md = await fsp.readFile(
+      path.join(ctx.root, "roles", "PM.md"),
+      "utf8",
+    );
+    expect(md).toContain("Product Manager");
   });
 
   it("validates role id", async () => {

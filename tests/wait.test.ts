@@ -8,7 +8,7 @@ import type { ParsedArgs } from "../src/cli/argv";
 
 async function freshProject() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-wait-"));
-  const store = new LocalFsStore(path.join(root, ".multi-agent"));
+  const store = new LocalFsStore(path.join(root, ".multi-agent"), { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   await store.createRole({ id: "TL", title: "Tech Lead" });
   await store.createRole({ id: "PM", title: "Product Manager" });
@@ -134,6 +134,26 @@ describe("agentctl wait", () => {
       await expect(
         runWait(args("TL", { mode: "bogus", root: ctx.root })),
       ).rejects.toMatchObject({ code: "USAGE" });
+    } finally {
+      cap.release();
+    }
+  });
+
+  it("regression H-04: refuses block mode when a plan manifest is outstanding", async () => {
+    // Set up: emit an event, plan (creates pending manifest), then wait
+    // WITHOUT acking. Without the fix the count is computed against the
+    // pre-plan cursor; every event in the manifest is counted again and
+    // wait returns ATTENTION forever, looping the agent.
+    await ctx.store.publishReport({ from: "PM", to: "TL", message: "ping" });
+    await ctx.store.openOrCreatePlan("TL");
+
+    const cap = captureStdio();
+    try {
+      await expect(
+        runWait(args("TL", { "idle-seconds": "0", root: ctx.root })),
+      ).rejects.toMatchObject({ code: "USAGE" });
+      // The error message must steer the agent to ack first.
+      expect(cap.stderr + cap.stdout).not.toContain("ATTENTION");
     } finally {
       cap.release();
     }

@@ -19,6 +19,16 @@ export async function runClaim(args: ParsedArgs): Promise<number> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
 
   const store = await openStoreOrThrow(root);
+  // Refuse claims for roles that are not registered. Without this check
+  // a typo (`agentctl claim Forntend`) silently creates a "phantom" role
+  // session that no other agent's manifest will ever route to, and the
+  // agent ends up waiting forever for tasks it can never receive.
+  const config = await store.readConfig();
+  if (!config.roles[role]) {
+    throw new UsageError(
+      `Unknown role '${role}'. Create it first: agentctl role create ${role} "<title>"`,
+    );
+  }
   const session = await store.claimSession(role, ttl, force);
 
   if (json) {

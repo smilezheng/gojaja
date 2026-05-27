@@ -1,7 +1,7 @@
 import { boolFlag, optionalString, requireString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
-import { resolveIdentity } from "../identity";
+import { resolveActor, resolveIdentity } from "../identity";
 import type { RoleId } from "../../core/types";
 
 function splitList(raw: string | undefined): string[] {
@@ -33,12 +33,8 @@ function parseOptions(raw: string | undefined) {
 async function actorRole(args: ParsedArgs): Promise<{ root: string; actor: RoleId | "SYSTEM" }> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
-  try {
-    const { role } = await resolveIdentity(store, { requireSession: true });
-    return { root, actor: role };
-  } catch {
-    return { root, actor: "SYSTEM" };
-  }
+  const { actor } = await resolveActor(store);
+  return { root, actor };
 }
 
 async function runRfcNew(args: ParsedArgs): Promise<number> {

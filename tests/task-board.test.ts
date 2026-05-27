@@ -6,7 +6,7 @@ import { LocalFsStore } from "../src/core/local-fs-store";
 
 async function freshStore() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-task-"));
-  const store = new LocalFsStore(root);
+  const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   // PM owns the task board; Backend/QA do not, but they are still able to
   // update their own task's status thanks to the task-owner exception.

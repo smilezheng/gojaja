@@ -27,3 +27,29 @@ const ULID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 export function isUlid(value: string): boolean {
   return ULID_REGEX.test(value);
 }
+
+/**
+ * Crockford base32 alphabet used by ULID. The "time" portion of a ULID
+ * is the first 10 characters, encoding 48 bits of Unix-millis.
+ *
+ * We do NOT pull in `ulid`'s `decodeTime` because it throws on a
+ * marginal-but-still-parseable input; we want a strict "decode or treat
+ * as 0" behaviour, since invalid event ids are caught upstream by
+ * `isUlid`.
+ */
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+export function decodeUlidTimestamp(id: string): number {
+  // Caller is responsible for ensuring `id` already passed isUlid.
+  // Worth noting: the first character of a ULID can encode at most 0..7
+  // (3 bits) before the timestamp overflows JavaScript's safe-integer
+  // range; we ignore that overflow concern since real timestamps in our
+  // lifetime fit comfortably within the encoding.
+  let ts = 0;
+  for (let i = 0; i < 10; i++) {
+    const idx = CROCKFORD.indexOf(id[i]);
+    if (idx < 0) return 0;
+    ts = ts * 32 + idx;
+  }
+  return ts;
+}

@@ -140,6 +140,20 @@ async function tryBreakStale(
   lockPath: string,
   expected: LockRecord,
 ): Promise<boolean> {
+  // Race we are guarding against: between `detectStale` returning the
+  // stale record and us calling `rename` here, the original owner may
+  // have released and a fresh process B may have legitimately taken the
+  // lock with a new record. If we then unconditionally unlink the aside,
+  // B is in the critical section with NO lock file on disk, and a third
+  // process C can acquire the lock simultaneously. Two processes in the
+  // critical section is exactly what locks exist to prevent.
+  //
+  // Strategy: only delete `aside` when its record matches the expected
+  // (stale) record we set out to break. On mismatch, rename it BACK to
+  // `lockPath` (best effort). If the rename-back fails because someone
+  // else has created a new lock in the meantime, leave `aside` on disk
+  // as forensic evidence — never delete a record that may belong to a
+  // legitimate, live owner.
   const aside = `${lockPath}.dead-${freshId()}`;
   try {
     await fsp.rename(lockPath, aside);
@@ -148,10 +162,35 @@ async function tryBreakStale(
     if (code === "ENOENT") return true;
     return false;
   }
-  const movedRecord = await readJsonFileOrNull<LockRecord>(aside);
-  await safeUnlink(aside);
-  if (!movedRecord) return true;
-  return movedRecord.owner === expected.owner && movedRecord.pid === expected.pid;
+  let movedRecord: LockRecord | null = null;
+  try {
+    movedRecord = await readJsonFileOrNull<LockRecord>(aside);
+  } catch (err) {
+    if (!(err instanceof SyntaxError)) throw err;
+    // Treat partial reads as "not the expected record"; do not delete.
+  }
+  const matchesExpected =
+    movedRecord !== null &&
+    movedRecord.owner === expected.owner &&
+    movedRecord.pid === expected.pid;
+  if (matchesExpected || movedRecord === null) {
+    // Either the record we wanted to break, or an unreadable record we
+    // already moved aside (no live owner can correctly trust it). Safe
+    // to discard.
+    await safeUnlink(aside);
+    return true;
+  }
+  // Record changed under us. Try to put it back so the legitimate owner
+  // is not silently de-locked.
+  try {
+    await fsp.rename(aside, lockPath);
+  } catch {
+    // Someone else has already created a new lockPath in the brief
+    // window. We MUST NOT delete `aside` — leave it as forensic evidence
+    // that two lock records existed for the same key at the same time.
+    // Operators / `agentctl doctor` (planned) will reconcile.
+  }
+  return false;
 }
 
 function pidAlive(pid: number): boolean {
@@ -182,4 +221,13 @@ export async function _writeRawLockForTest(
     leaseExpiresAt: record.leaseExpiresAt ?? Date.now() + 60_000,
   };
   await atomicWriteJson(lockPath, full);
+}
+
+// Exposed only for regression testing of the conditional-restore behaviour
+// when the record on disk has changed between detectStale and the rename.
+export async function _tryBreakStaleForTest(
+  lockPath: string,
+  expected: LockRecord,
+): Promise<boolean> {
+  return tryBreakStale(lockPath, expected);
 }

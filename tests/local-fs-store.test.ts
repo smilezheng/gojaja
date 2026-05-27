@@ -8,7 +8,7 @@ import { _writeRawLockForTest } from "../src/core/file-lock";
 
 async function freshStore(): Promise<{ root: string; store: LocalFsStore }> {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-test-"));
-  const store = new LocalFsStore(root);
+  const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   return { root, store };
 }
@@ -278,6 +278,38 @@ describe("LocalFsStore.withLock", () => {
     expect(value).toBe(42);
     const events = await ctx.store.listEventsAfter("");
     expect(events.some((e) => e.type === "LOCK_BROKEN" && e.ref === "test-stale")).toBe(true);
+  });
+
+  it("does NOT delete a fresh lock when the on-disk record changed under us", async () => {
+    // Race we are guarding against: between detectStale returning the
+    // stale record and tryBreakStale running, a different process took
+    // over and the lock file on disk now contains its fresh record.
+    // The function must NOT delete the fresh record; it must rename it
+    // back so the new owner stays locked.
+    const { _tryBreakStaleForTest, _writeRawLockForTest } = await import(
+      "../src/core/file-lock"
+    );
+    const lockPath = path.join(ctx.root, "locks", "race-key.lock");
+    // 1. The "expected" record (what detectStale would have returned).
+    const expected = {
+      owner: "OLD-OWNER",
+      pid: 999_999,
+      host: "old-host",
+      acquiredAt: Date.now() - 60_000,
+      leaseExpiresAt: Date.now() - 5_000,
+    };
+    // 2. But on disk right now is a fresh record from a different owner.
+    await _writeRawLockForTest(lockPath, {
+      owner: "NEW-OWNER",
+      pid: 12_345,
+      acquiredAt: Date.now(),
+      leaseExpiresAt: Date.now() + 30_000,
+    });
+    const broke = await _tryBreakStaleForTest(lockPath, expected);
+    expect(broke).toBe(false);
+    // Lock file must still exist with NEW-OWNER's record.
+    const restored = JSON.parse(await fsp.readFile(lockPath, "utf8"));
+    expect(restored.owner).toBe("NEW-OWNER");
   });
 
   it("rejects invalid lock keys", async () => {

@@ -4,11 +4,19 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalFsStore } from "../src/core/local-fs-store";
 import { isUlid } from "../src/core/ids";
+import { runPlan } from "../src/cli/commands/plan";
+import type { ParsedArgs } from "../src/cli/argv";
 
 async function freshStore(): Promise<{ root: string; store: LocalFsStore }> {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-plan-"));
-  const store = new LocalFsStore(root);
+  const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
+  // PR8b requires recipients to be registered; seed a small role set so
+  // existing tests can freely publishReport between them without each
+  // one having to repeat the boilerplate.
+  for (const id of ["PM", "TL", "Backend", "QA"]) {
+    await store.createRole({ id, title: `${id} Agent` });
+  }
   return { root, store };
 }
 
@@ -40,6 +48,136 @@ describe("Store.publishReport", () => {
       ctx.store.publishReport({ from: "../etc", to: "TL", message: "x" }),
     ).rejects.toMatchObject({ code: "USAGE" });
   });
+
+  it("refuses an unregistered recipient role (PROTOCOL.md contract)", async () => {
+    // The recipient passes syntactic role-id validation but has no
+    // config.yaml entry. Without this gate the report is emitted into
+    // the void — no one's plan ever routes to "Frontend".
+    await expect(
+      ctx.store.publishReport({ from: "PM", to: "Frontend", message: "x" }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+});
+
+// ----------------------------------------------------------------------------
+// runPlan CLI behaviour (TTY detection + text body content).
+// ----------------------------------------------------------------------------
+
+interface Captured {
+  stdout: string;
+  stderr: string;
+  release: () => void;
+}
+
+function captureStdio(forceTty: boolean): Captured {
+  const cap: Captured = { stdout: "", stderr: "", release: () => undefined };
+  const origOut = process.stdout.write.bind(process.stdout);
+  const origErr = process.stderr.write.bind(process.stderr);
+  const origIsTTY = (process.stdout as unknown as { isTTY: boolean }).isTTY;
+  (process.stdout as unknown as { write: (chunk: string) => boolean }).write = (chunk: string) => {
+    cap.stdout += chunk;
+    return true;
+  };
+  (process.stderr as unknown as { write: (chunk: string) => boolean }).write = (chunk: string) => {
+    cap.stderr += chunk;
+    return true;
+  };
+  (process.stdout as unknown as { isTTY: boolean }).isTTY = forceTty;
+  cap.release = () => {
+    (process.stdout as unknown as { write: typeof origOut }).write = origOut;
+    (process.stderr as unknown as { write: typeof origErr }).write = origErr;
+    (process.stdout as unknown as { isTTY: boolean }).isTTY = origIsTTY;
+  };
+  return cap;
+}
+
+function planArgs(role: string, flags: Record<string, string | boolean>): ParsedArgs {
+  return { command: "plan", positional: [role], flags };
+}
+
+// runPlan uses openStoreOrThrow(root) which expects a PROJECT root and
+// appends `.multi-agent`. The freshStore above intentionally pins the
+// layer root directly for the unit-style tests; for CLI tests we need
+// the project shape.
+async function freshProject(): Promise<{ root: string; store: LocalFsStore }> {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-plan-proj-"));
+  const store = new LocalFsStore(path.join(root, ".multi-agent"), { safetyMarginMs: 0 });
+  await store.initialise("2.0.0-test");
+  // PM owns the task board so the runPlan tests can createTask via PM
+  // under PR7 ownership enforcement.
+  await store.createRole({
+    id: "PM", title: "PM Agent",
+    owns: ["state/task_board.yaml"],
+  });
+  for (const id of ["TL", "Backend", "QA"]) {
+    await store.createRole({ id, title: `${id} Agent` });
+  }
+  return { root, store };
+}
+
+describe("runPlan — TTY-aware output", () => {
+  let ctx: { root: string; store: LocalFsStore };
+  const originalEnv = process.env.MA_SESSION;
+  beforeEach(async () => {
+    ctx = await freshProject();
+    delete process.env.MA_SESSION;
+    const s = await ctx.store.claimSession("TL", 60);
+    process.env.MA_SESSION = s.sessionId;
+  });
+  afterEach(async () => {
+    if (originalEnv === undefined) delete process.env.MA_SESSION;
+    else process.env.MA_SESSION = originalEnv;
+    await fsp.rm(ctx.root, { recursive: true, force: true });
+  });
+
+  it("emits JSON automatically when stdout is not a TTY (agent default)", async () => {
+    await ctx.store.publishReport({ from: "PM", to: "TL", message: "x" });
+    const cap = captureStdio(false /* not a TTY */);
+    try {
+      const code = await runPlan(planArgs("TL", { root: ctx.root }));
+      expect(code).toBe(0);
+      // Output must be a single parseable JSON line, not the human text.
+      expect(cap.stdout).not.toContain("ack token       :");
+      const parsed = JSON.parse(cap.stdout);
+      expect(parsed.role).toBe("TL");
+      expect(Array.isArray(parsed.tasks)).toBe(true);
+      expect(Array.isArray(parsed.rfcs)).toBe(true);
+    } finally {
+      cap.release();
+    }
+  });
+
+  it("emits human text when stdout is a TTY, with both Tasks and RFCs sections", async () => {
+    // Seed a task assigned to TL so the text section has content.
+    await ctx.store.createTask({
+      title: "Build login", owner: "TL", priority: "P1", actor: "PM",
+    });
+    const tasks = await ctx.store.readTaskBoard();
+    const taskId = Object.keys(tasks.tasks)[0];
+    await ctx.store.setTaskStatus({
+      taskId, newStatus: "Ready", actor: "PM",
+    });
+    const cap = captureStdio(true /* a TTY */);
+    try {
+      await runPlan(planArgs("TL", { root: ctx.root }));
+      expect(cap.stdout).toContain("active tasks    :");
+      expect(cap.stdout).toContain("pending RFCs    :");
+      expect(cap.stdout).toContain("Build login");
+    } finally {
+      cap.release();
+    }
+  });
+
+  it("explicit --json still forces JSON in a TTY", async () => {
+    const cap = captureStdio(true);
+    try {
+      await runPlan(planArgs("TL", { root: ctx.root, json: true }));
+      const parsed = JSON.parse(cap.stdout);
+      expect(parsed.role).toBe("TL");
+    } finally {
+      cap.release();
+    }
+  });
 });
 
 describe("Store.publishWorklog", () => {
@@ -57,6 +195,57 @@ describe("Store.publishWorklog", () => {
     );
     expect(md).toContain("Drafted criteria");
     expect(md).toContain(`Worklog entry ${e.id}`);
+  });
+});
+
+describe("Store.openOrCreatePlan — safetyMarginMs watermark", () => {
+  async function freshWatermarkStore(safetyMarginMs: number) {
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-water-"));
+    const store = new LocalFsStore(root, { safetyMarginMs });
+    await store.initialise("2.0.0-test");
+    for (const id of ["PM", "TL"]) {
+      await store.createRole({ id, title: `${id} Agent` });
+    }
+    return { root, store };
+  }
+
+  it("fresh events are deferred to the next plan when watermark > 0", async () => {
+    const { root, store } = await freshWatermarkStore(1000);
+    try {
+      await store.publishReport({ from: "PM", to: "TL", message: "fresh" });
+
+      const m1 = await store.openOrCreatePlan("TL");
+      expect(m1.events).toHaveLength(0);
+      expect(m1.advanceCursorTo).toBe("");
+      await store.ackManifest("TL", m1.ackToken);
+
+      await new Promise((r) => setTimeout(r, 1100));
+      const m2 = await store.openOrCreatePlan("TL");
+      expect(m2.events.map((e) => e.payload.message)).toContain("fresh");
+    } finally {
+      await fsp.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("events newer than the watermark cannot advance the cursor", async () => {
+    // Core safety promise: cross-process same-ms ULID races cannot cause
+    // the cursor to skip past an event that has not been seen.
+    const { root, store } = await freshWatermarkStore(500);
+    try {
+      const old = await store.publishReport({ from: "PM", to: "TL", message: "old" });
+      await new Promise((r) => setTimeout(r, 600));
+      await store.publishReport({ from: "PM", to: "TL", message: "fresh" });
+
+      const m = await store.openOrCreatePlan("TL");
+      expect(m.events.map((e) => e.payload.message)).toEqual(["old"]);
+      expect(m.advanceCursorTo).toBe(old.id);
+      await store.ackManifest("TL", m.ackToken);
+
+      const cursor = await store.readCursor("TL");
+      expect(cursor.ackedThrough).toBe(old.id);
+    } finally {
+      await fsp.rm(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -88,15 +277,17 @@ describe("Store.openOrCreatePlan", () => {
   });
 
   it("reminder picks up config.yaml fields when set, still omits empty ones", async () => {
+    // freshStore seeds Backend with default config; use a distinct id so
+    // we can exercise the "rich config" path without collision.
     await ctx.store.createRole({
-      id: "Backend",
+      id: "BackendRich",
       title: "Backend Engineer",
       owns: ["src/api/", "src/db/"],
       reportsTo: ["TL", "PM"],
       mustNotEdit: [], // intentionally empty
     });
-    const m = await ctx.store.openOrCreatePlan("Backend");
-    expect(m.roleReminder.id).toBe("Backend");
+    const m = await ctx.store.openOrCreatePlan("BackendRich");
+    expect(m.roleReminder.id).toBe("BackendRich");
     expect(m.roleReminder.title).toBe("Backend Engineer");
     expect(m.roleReminder.owns).toEqual(["src/api/", "src/db/"]);
     expect(m.roleReminder.reportsTo).toEqual(["TL", "PM"]);
@@ -105,13 +296,13 @@ describe("Store.openOrCreatePlan", () => {
 
   it("reminder serialised size stays small (<300 bytes for a fully-populated reminder)", async () => {
     await ctx.store.createRole({
-      id: "Backend",
+      id: "BackendFull",
       title: "Backend Engineer",
       owns: ["src/api/", "src/db/"],
       reportsTo: ["TL"],
       mustNotEdit: ["state/architecture.md"],
     });
-    const m = await ctx.store.openOrCreatePlan("Backend");
+    const m = await ctx.store.openOrCreatePlan("BackendFull");
     const bytes = Buffer.byteLength(JSON.stringify(m.roleReminder));
     expect(bytes).toBeLessThan(300);
   });

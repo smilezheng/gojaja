@@ -1,6 +1,6 @@
 import { boolFlag, optionalString, requireString, type ParsedArgs } from "../argv";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
-import { resolveIdentity } from "../identity";
+import { resolveActor } from "../identity";
 
 async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) return "";
@@ -23,13 +23,9 @@ export async function runWriteState(args: ParsedArgs): Promise<number> {
 
   // Identity: agent invocations (MA_SESSION set) get their gated role;
   // bare human invocations bypass via "SYSTEM" (see Store.requireOwnership).
-  let actor: string;
-  try {
-    const { role } = await resolveIdentity(store, { requireSession: true });
-    actor = role;
-  } catch {
-    actor = "SYSTEM";
-  }
+  // A stale/invalid MA_SESSION must NOT silently downgrade to SYSTEM —
+  // that would be privilege escalation against the ownership gate.
+  const { actor } = await resolveActor(store);
 
   let content = optionalString(args.flags, "content");
   if (content === undefined) content = await readStdin();

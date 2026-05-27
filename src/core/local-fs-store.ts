@@ -19,7 +19,7 @@ import {
   safeUnlink,
 } from "./atomic";
 import { withFileLock } from "./file-lock";
-import { freshId, isUlid, newId } from "./ids";
+import { decodeUlidTimestamp, freshId, isUlid, newId } from "./ids";
 import {
   Paths,
   manifestPath,
@@ -90,6 +90,28 @@ function pathMatches(entry: string, target: string): boolean {
   return target.startsWith(`${e}/`);
 }
 
+export interface LocalFsStoreOptions {
+  /**
+   * Cross-process watermark used by `openOrCreatePlan`. Events whose ULID
+   * timestamp is newer than `now - safetyMarginMs` are deferred to the
+   * next plan rather than being included in the current manifest.
+   *
+   * This is the only practical defence against the cross-process
+   * ULID-monotonicity gap: `monotonicFactory()` only guarantees order
+   * within one process, so two processes generating events in the same
+   * millisecond can produce IDs whose lexicographic order is reversed
+   * relative to actual write order. A watermark wide enough to cover a
+   * write+rename round-trip eliminates the race; 200ms is generous on
+   * local filesystems while imperceptible at agent timescales.
+   *
+   * Tests pass 0 to keep deterministic assertions about immediate
+   * visibility.
+   */
+  safetyMarginMs?: number;
+}
+
+const DEFAULT_SAFETY_MARGIN_MS = 200;
+
 /**
  * Filesystem-backed Store. Operates against a `.multi-agent` directory rooted
  * at `root`. All path construction is forced through `resolveInside`, so no
@@ -99,10 +121,12 @@ export class LocalFsStore implements Store {
   readonly rootDescription: string;
 
   private readonly root: string;
+  private readonly safetyMarginMs: number;
 
-  constructor(rootDir: string) {
+  constructor(rootDir: string, opts: LocalFsStoreOptions = {}) {
     this.root = path.resolve(rootDir);
     this.rootDescription = this.root;
+    this.safetyMarginMs = opts.safetyMarginMs ?? DEFAULT_SAFETY_MARGIN_MS;
   }
 
   // ---- bootstrap ----------------------------------------------------------
@@ -372,12 +396,25 @@ export class LocalFsStore implements Store {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw err;
     }
+    const now = Date.now();
     for (const name of names) {
       if (!name.endsWith(".json") || name.startsWith(".")) continue;
       const session = await readJsonFileOrNull<SessionInfo>(
         path.join(dir, name),
       );
-      if (session && session.sessionId === sessionId) return session;
+      if (!session || session.sessionId !== sessionId) continue;
+      // Lease check: a session whose heartbeat is older than its TTL is
+      // no longer "live" and must not authenticate further commands. The
+      // session file may still exist on disk because no one has called
+      // claim again to take it over; that does NOT make it valid.
+      const heartbeatMs = Date.parse(session.heartbeatAt);
+      if (
+        Number.isFinite(heartbeatMs) &&
+        heartbeatMs + session.leaseTtlSeconds * 1000 < now
+      ) {
+        return null;
+      }
+      return session;
     }
     return null;
   }
@@ -394,6 +431,16 @@ export class LocalFsStore implements Store {
     validateRoleId(input.to);
     if (typeof input.message !== "string" || input.message.length === 0) {
       throw new UsageError("Report message must be a non-empty string.");
+    }
+    // PROTOCOL.md promises that reports to unknown recipients are
+    // refused. Without this the typo `--to Forntend` silently emits an
+    // event no one will ever read.
+    const config = await this.readConfig();
+    if (!config.roles[input.to]) {
+      throw new UsageError(
+        `Unknown recipient role '${input.to}'. ` +
+          `Known roles: ${Object.keys(config.roles).sort().join(", ") || "(none)"}.`,
+      );
     }
     return this.recordEventInternal({
       type: "REPORT",
@@ -441,11 +488,22 @@ export class LocalFsStore implements Store {
         // Pending pointer is stale; fall through and regenerate.
       }
       const events = await this.listEventsAfter(cursor.ackedThrough);
-      const filtered = events.filter(
+      // Watermark: only events whose ULID timestamp is older than the
+      // safety margin go into the manifest. Anything newer is deferred
+      // to the next plan so cross-process same-ms ULIDs cannot produce
+      // a cursor advance past an event that has not been seen.
+      const watermarkMs = Date.now() - this.safetyMarginMs;
+      const safeEvents =
+        this.safetyMarginMs > 0
+          ? events.filter((e) => decodeUlidTimestamp(e.id) <= watermarkMs)
+          : events;
+      const filtered = safeEvents.filter(
         (e) => e.from !== role && (e.to === role || e.to === "*"),
       );
       const advanceCursorTo =
-        events.length > 0 ? events[events.length - 1].id : cursor.ackedThrough;
+        safeEvents.length > 0
+          ? safeEvents[safeEvents.length - 1].id
+          : cursor.ackedThrough;
       const ackToken = newId();
       const board = await this.readTaskBoard();
       const tasks = this.taskSummariesForRole(board, role);
@@ -623,27 +681,55 @@ export class LocalFsStore implements Store {
 
     return this.withLock("roles-create", async () => {
       const config = await this.readConfig();
-      if (config.roles[input.id]) {
-        throw new UsageError(
-          `Role '${input.id}' already exists in config.yaml.`,
-        );
-      }
       const roleMdPath = this.abs(rolePaths(input.id).roleFile);
-      if (await exists(roleMdPath)) {
+      const mdExists = await exists(roleMdPath);
+      const inConfig = !!config.roles[input.id];
+
+      // Recovery path: if a previous createRole crashed AFTER writing
+      // config.yaml but BEFORE writing the markdown (or, with the old
+      // order, the reverse), we now have a half-created role. Complete
+      // the missing side rather than refusing forever.
+      if (inConfig && mdExists) {
+        throw new UsageError(`Role '${input.id}' already exists in config.yaml.`);
+      }
+      if (!inConfig && mdExists) {
+        // Legacy / hand-edit case: someone left a markdown file with no
+        // config entry. Refuse to clobber it — the user must explicitly
+        // move it aside, since we cannot know whether its contents
+        // represent a different intent.
         throw new UsageError(
-          `Role markdown already exists: ${roleMdPath}.`,
+          `Role markdown ${roleMdPath} exists but '${input.id}' is not in config.yaml. ` +
+            `Move that file aside before re-running create.`,
         );
       }
       const roleConfig: RoleConfig = { title, description, owns, reportsTo, mustNotEdit };
+
+      if (inConfig && !mdExists) {
+        // Crash-recovery completion: config already has the role; just
+        // finish writing the markdown using the existing config entry.
+        // We deliberately keep the existing config so any hand edits
+        // (owns, reportsTo) are preserved.
+        const existing = config.roles[input.id];
+        await atomicWriteFile(
+          roleMdPath,
+          renderRoleMarkdown({ id: input.id, ...existing }),
+        );
+        return existing;
+      }
+
+      // Fresh create. Write config FIRST: if we crash between the two
+      // writes, the next retry observes "config has, md missing" and
+      // takes the recovery path above — never the "md present, config
+      // missing" wedge that the prior write-order produced.
       const nextConfig: ProjectConfig = {
         ...config,
         roles: { ...config.roles, [input.id]: roleConfig },
       };
+      await this.writeConfig(nextConfig);
       await atomicWriteFile(
         roleMdPath,
         renderRoleMarkdown({ id: input.id, ...roleConfig }),
       );
-      await this.writeConfig(nextConfig);
       return roleConfig;
     });
   }
@@ -1220,6 +1306,39 @@ export class LocalFsStore implements Store {
     const decision = await readJsonFileOrNull<RfcDecision>(
       this.abs(rfcDecisionPath(rfcId, slug)),
     );
+
+    // Crash-recovery: `finaliseRfc` writes decision.json BEFORE updating
+    // proposal.yaml's status. If the process died between those two
+    // writes, an external observer would now see a `decision.json` but a
+    // still-`open` proposal — and the next `decideRfc` call would happily
+    // pass the `status === "open"` guard and overwrite the prior
+    // decision, silently corrupting the audit record.
+    //
+    // Self-heal: when we observe that inconsistent shape, write the
+    // proposal's status from the decision's outcome and emit an
+    // RFC_REPAIRED system event for the audit trail.
+    if (decision !== null && proposal.status === "open") {
+      const repaired: RfcProposal = {
+        ...proposal,
+        status: decision.outcome === "accepted" ? "accepted" : "rejected",
+      };
+      await atomicWriteFile(
+        this.abs(rfcProposalPath(rfcId, slug)),
+        yaml.dump(repaired, { lineWidth: 100, noRefs: true }),
+      );
+      await this.recordEventInternal({
+        type: "RFC_REPAIRED",
+        from: "SYSTEM",
+        to: "*",
+        ref: rfcId,
+        payload: {
+          rfcId,
+          repairedStatus: repaired.status,
+          decidedBy: decision.decidedBy,
+        },
+      });
+      return { proposal: repaired, comments, decision };
+    }
     return { proposal, comments, decision };
   }
 

@@ -1,7 +1,7 @@
 import { boolFlag, optionalString, requireString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
-import { resolveIdentity } from "../identity";
+import { resolveActor } from "../identity";
 import { TASK_STATUSES, type RoleId, type Task, type TaskStatus } from "../../core/types";
 
 function splitList(raw: string | undefined): string[] {
@@ -16,14 +16,12 @@ async function actorRole(args: ParsedArgs): Promise<{ root: string; actor: RoleI
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
   // Tasks may be created by an agent (with MA_SESSION) or by the human
-  // running CLI manually before any role has claimed a session. We allow
-  // both; the actor is recorded in the resulting event so audit is honest.
-  try {
-    const { role } = await resolveIdentity(store, { requireSession: true });
-    return { root, actor: role };
-  } catch {
-    return { root, actor: "SYSTEM" };
-  }
+  // running CLI manually before any role has claimed a session. Both
+  // are valid; resolveActor distinguishes "no session at all" (SYSTEM
+  // bypass) from "stale/invalid MA_SESSION" (propagated as USAGE error
+  // — must NOT silently fall through to SYSTEM).
+  const { actor } = await resolveActor(store);
+  return { root, actor };
 }
 
 async function runTaskNew(args: ParsedArgs): Promise<number> {

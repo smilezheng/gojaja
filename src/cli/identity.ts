@@ -30,8 +30,12 @@ export async function resolveIdentity(
   if (envSession) {
     const session = await store.findSessionById(envSession);
     if (!session) {
+      // findSessionById refuses BOTH "unknown session id" AND
+      // "session past its lease". Both are auth failures; the message
+      // is intentionally generic so an attacker probing for valid ids
+      // cannot tell which case they triggered.
       throw new UsageError(
-        `MA_SESSION='${envSession}' is not a known session. ` +
+        `MA_SESSION='${envSession}' is not a live session. ` +
           `Either remove the env var, or run 'agentctl claim <role>' first.`,
       );
     }
@@ -41,6 +45,13 @@ export async function resolveIdentity(
           `MA_SESSION ('${session.role}'). Drop the argument, or unset MA_SESSION.`,
       );
     }
+    // Auto-renew the lease on every authenticated command. Without this
+    // a busy agent that never explicitly heartbeats gets its session
+    // taken over the moment the default 30-minute TTL elapses. Failures
+    // propagate (e.g. another window has just taken over the session) —
+    // that is the correct behaviour: the caller's session is no longer
+    // valid and downstream writes must not proceed.
+    await store.touchHeartbeat(session.role, session.sessionId);
     return { role: session.role, session };
   }
   if (opts.requireSession) {
@@ -57,4 +68,25 @@ export async function resolveIdentity(
   }
   validateRoleId(opts.explicitRole);
   return { role: opts.explicitRole, session: null };
+}
+
+/**
+ * Helper for commands that accept either an authenticated agent (with
+ * `MA_SESSION` set) OR a bare human invocation (no session → `"SYSTEM"`
+ * bypass for bootstrap / repair).
+ *
+ * Critical semantic: if `MA_SESSION` is SET, resolution MUST succeed.
+ * A stale or invalid token does NOT silently fall through to SYSTEM,
+ * which would otherwise bypass every ownership check. The previous
+ * pattern (`try { resolveIdentity(...) } catch { return "SYSTEM" }`) was
+ * a silent privilege escalation in the face of token expiry.
+ */
+export async function resolveActor(
+  store: Store,
+): Promise<{ actor: RoleId | "SYSTEM" }> {
+  if (process.env.MA_SESSION) {
+    const { role } = await resolveIdentity(store, { requireSession: true });
+    return { actor: role };
+  }
+  return { actor: "SYSTEM" };
 }

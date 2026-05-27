@@ -8,7 +8,7 @@ import type { RfcProposal } from "../src/core/types";
 
 async function freshStore() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-rfc-"));
-  const store = new LocalFsStore(root);
+  const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   await store.createRole({ id: "PM", title: "Product Manager" });
   await store.createRole({ id: "TL", title: "Tech Lead" });
@@ -216,6 +216,44 @@ describe("Store.decideRfc / rejectRfc", () => {
     const { proposal, decision } = await ctx.store.readRfc(r.id);
     expect(proposal.status).toBe("rejected");
     expect(decision?.outcome).toBe("rejected");
+  });
+
+  it("self-heals when decision.json exists but proposal.yaml is still open (crash recovery)", async () => {
+    // Simulate the crash window inside finaliseRfc: decision written but
+    // proposal.yaml never updated. Without recovery, the next decideRfc
+    // would re-pass the open-status guard and overwrite the decision.
+    const r = await ctx.store.createRfc(NEW_RFC);
+    // Drop a decision.json directly, bypassing finaliseRfc.
+    const decisionPath = path.join(
+      ctx.root, "rfcs", `${r.id}-${r.slug}`, "decision.json",
+    );
+    await fsp.writeFile(
+      decisionPath,
+      JSON.stringify({
+        rfcId: r.id,
+        decidedBy: "TL",
+        ts: new Date().toISOString(),
+        outcome: "accepted",
+        chosenOption: "A",
+        rationale: "first decision (lost write to proposal)",
+      }),
+    );
+
+    // readRfc must detect the inconsistency and repair proposal.yaml.
+    const { proposal, decision } = await ctx.store.readRfc(r.id);
+    expect(proposal.status).toBe("accepted");
+    expect(decision?.chosenOption).toBe("A");
+
+    const events = await ctx.store.listEventsAfter("");
+    expect(events.some((e) => e.type === "RFC_REPAIRED" && e.ref === r.id)).toBe(true);
+
+    // Critical: a follow-up decideRfc must now be refused (cannot
+    // double-decide just because the proposal had been wedged open).
+    await expect(
+      ctx.store.decideRfc({
+        rfcId: r.id, decidedBy: "TL", chosenOption: "B", rationale: "tries to overwrite",
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
   });
 });
 

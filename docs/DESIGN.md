@@ -273,6 +273,12 @@ non-zero (cf. v0.1's `turn-end` returning 1 for the normal busy case).
   until manually trimmed. An archiver is on the roadmap.
 - **Schema migrations are stubs.** `agentctl upgrade` will arrive when we
   have a non-trivial schema delta to migrate.
+- **Cross-process event-visibility lag.** ULIDs are only process-locally
+  monotonic; two processes writing in the same millisecond can produce
+  ids whose lexicographic order is reversed relative to write order. To
+  preserve cursor monotonicity the store defers any event newer than
+  `safetyMarginMs` (default 200 ms) to the next `plan`. Tests pass 0 for
+  deterministic visibility. Tunable per `LocalFsStore` instance.
 
 ## Extension points reserved for v2.x
 

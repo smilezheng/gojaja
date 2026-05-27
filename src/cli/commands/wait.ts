@@ -72,6 +72,21 @@ export async function runWait(args: ParsedArgs): Promise<number> {
   }
 
   // block mode
+  // Refuse to enter block-mode wait while a plan manifest is still
+  // outstanding. Otherwise the count is computed against the OLD
+  // cursor.ackedThrough — every event already shown in the pending
+  // manifest contributes to count > 0, producing a permanent false
+  // ATTENTION verdict and an agent loop of plan -> wait -> plan...
+  const cursorState = await store.readCursor(role);
+  if (cursorState.pendingManifest !== null) {
+    throw new UsageError(
+      `Role '${role}' has an outstanding manifest awaiting ack ` +
+        `(token ${cursorState.pendingManifest}). ` +
+        `Run 'agentctl ack ${role} --token ${cursorState.pendingManifest}' first; ` +
+        `then 'agentctl wait'.`,
+    );
+  }
+
   const waitMs =
     idleSeconds !== undefined
       ? idleSeconds * 1000
@@ -79,7 +94,7 @@ export async function runWait(args: ParsedArgs): Promise<number> {
   const startedAt = new Date().toISOString();
   if (waitMs > 0) await sleep(waitMs);
 
-  const cursor = (await store.readCursor(role)).ackedThrough;
+  const cursor = cursorState.ackedThrough;
   const count = await visibleEventCountAfter(store, role, cursor);
   const status = count > 0 ? "ATTENTION" : "IDLE";
   const endedAt = new Date().toISOString();

@@ -10,7 +10,95 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 ### Planned next
 
-- PR8: installer / upgrade / reset, AGENTS.md bridge versioned block.
+- PR8c: secondary correctness + polish (STATE_UPDATED event,
+  dependsOn cycle detection, schema version check, etc.).
+
+## [2.0.0-alpha.9] — 2026-05-27
+
+### Critical correctness pass (PR8b)
+
+Ten independent fixes from two consolidated reviews (one external
+text-based, one canvas-based). Each maps to a regression test.
+
+- **C-03 argv boolean-flag whitelist.** `agentctl plan --json PM` used
+  to greedily consume `PM` as the value of `--json`, silently losing
+  the role argument. New `BOOLEAN_FLAGS` set in
+  [src/cli/argv.ts](./src/cli/argv.ts) keeps known booleans (`--json`,
+  `--write`, `--force`, `--no-handbook`, `--no-wait`, `--help`,
+  `--version`) from ever consuming the next token. 6 new tests in
+  `tests/argv.test.ts`.
+- **ULID cross-process race watermark.** Process-local monotonic ULIDs
+  do not guarantee global ordering; two writers in the same millisecond
+  can produce ids whose lexicographic order is reversed relative to
+  write order, which in turn lets the cursor advance past an event no
+  one has seen. `LocalFsStore` now defers events newer than
+  `safetyMarginMs` (default 200 ms) to the next `plan`, preserving the
+  cursor-never-skips invariant. Configurable via the constructor;
+  tests pass 0 for deterministic visibility.
+- **Stale lock conditional restore.** `tryBreakStale` no longer
+  unconditionally unlinks the renamed-aside file. If the record on
+  disk has changed under us (a fresh process legitimately took the
+  lock after our detect-stale), the function renames the new record
+  back in place and leaves any unrecoverable copy on disk as forensic
+  evidence — never silently de-locking a live owner.
+- **C-01 / lease + auto-heartbeat.** `findSessionById` now refuses
+  sessions whose `heartbeatAt + leaseTtlSeconds * 1000` is in the past;
+  `resolveIdentity` automatically calls `touchHeartbeat` on every
+  successful resolution, so any authenticated command refreshes the
+  lease. An active agent no longer gets silently taken over after the
+  default 30-minute TTL just because it never explicitly heartbeats.
+- **C-02 RFC self-heal on read.** `finaliseRfc` writes `decision.json`
+  before updating `proposal.yaml`; a crash between those two writes
+  used to leave the proposal `open` with a decision already on disk,
+  letting the next `decide` overwrite the prior decision. `readRfc`
+  now detects that inconsistent shape, forward-completes the proposal
+  status from the decision's outcome, and emits a new `RFC_REPAIRED`
+  event for the audit trail.
+- **MA_SESSION strict / `resolveActor` helper.** Replaced the
+  `try { resolveIdentity(...) } catch { actor = "SYSTEM" }` pattern in
+  `task`, `rfc`, and `write-state` commands with a strict helper:
+  `MA_SESSION` set → must resolve successfully; only unset means
+  SYSTEM bypass. A stale or invalid `MA_SESSION` token no longer
+  silently downgrades to SYSTEM, which had been an effective ownership
+  bypass.
+- **H-01 createRole atomic order + recovery.** Write order is now
+  config-first, markdown-second. The "config has, markdown missing"
+  shape is no longer permanently wedged — `createRole` detects it and
+  finishes writing the markdown (preserving any hand-edited config
+  fields). The "markdown without config" shape still refuses (legacy /
+  hand-edit case requiring user action).
+- **H-04 wait refuses pending manifest.** `wait --mode block` now
+  errors out (USAGE) when `cursor.pendingManifest` is non-null. Before
+  this the count was computed against the pre-plan cursor, so every
+  event already in the pending manifest contributed to `count > 0`,
+  producing a permanent false ATTENTION verdict and an agent loop.
+- **claim + report registration gate.** `agentctl claim` now refuses
+  unknown role ids (typo `claim Forntend` no longer creates a phantom
+  session). `Store.publishReport` now refuses an unknown recipient
+  role, matching the PROTOCOL.md contract.
+- **plan TTY-aware output.** `agentctl plan` defaults to JSON whenever
+  `process.stdout.isTTY` is false — agents invoking via shell now get
+  the structured manifest the runtime contract promises. The
+  human-text rendering additionally prints `Tasks (N)` and
+  `RFCs (N)` sections, since the prior text body only showed events.
+
+### Tests
+
+127 → 150 (`tests/argv.test.ts` × 6, `tests/claim.test.ts` × 2, plus
+targeted additions across existing files). Several existing tests had
+to seed roles or pass `safetyMarginMs: 0` to remain deterministic
+under the new gates.
+
+### Docs
+
+- [docs/SCHEMA.md](./docs/SCHEMA.md): new `RFC_REPAIRED` row.
+- [docs/DESIGN.md](./docs/DESIGN.md): "Known limitations" gains the
+  watermark trade-off note.
+
+### Notes
+
+PR8b is purely correctness; the larger PR8 (installer / upgrade /
+reset) is unaffected. PR8c (secondary correctness + polish) is queued.
 
 ## [2.0.0-alpha.8] — 2026-05-27
 

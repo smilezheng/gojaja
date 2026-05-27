@@ -17,6 +17,7 @@ export type EventType =
   | "RFC_CREATED"
   | "RFC_COMMENT"
   | "RFC_DECIDED"
+  | "RFC_REPAIRED"
   | "SESSION_CLAIMED"
   | "SESSION_RELEASED"
   | "SESSION_TAKEOVER"

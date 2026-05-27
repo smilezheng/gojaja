@@ -15,7 +15,7 @@ import {
 
 async function freshProject() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-prompt-"));
-  const store = new LocalFsStore(path.join(root, ".multi-agent"));
+  const store = new LocalFsStore(path.join(root, ".multi-agent"), { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   // Several roles are configured so the no-role-intrusion regression has
   // multiple strings to scan against.

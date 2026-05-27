@@ -7,13 +7,35 @@ export interface ParsedArgs {
 }
 
 /**
+ * Flags that are unambiguously boolean — they MUST NOT consume the next
+ * token as a value. Without this, `agentctl plan --json PM` greedily
+ * parses as `flags.json="PM"` and `positional=[]`, losing the role
+ * argument and silently disabling the JSON contract that agents rely on.
+ *
+ * Add new boolean flags here when introduced. Keep this list tight; any
+ * flag genuinely capable of taking a value belongs in the value-taking
+ * branch below.
+ */
+const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
+  "json",
+  "write",
+  "force",
+  "no-handbook",
+  "no-wait",
+  "help",
+  "version",
+]);
+
+/**
  * Minimal argv parser. We deliberately avoid a heavyweight CLI library to
  * keep the dependency surface tight and the JSON output contract crisp.
  *
  * Supported forms:
- *   - `--flag` (boolean true)
+ *   - `--flag` (boolean true; either declared in BOOLEAN_FLAGS or with no
+ *     non-flag token immediately following)
  *   - `--flag=value`
- *   - `--flag value`  (value cannot itself start with `--`)
+ *   - `--flag value`  (only when `flag` is NOT in BOOLEAN_FLAGS and value
+ *     does not itself start with `--`)
  *   - positional args in declaration order
  *
  * The parser does not know which flags belong to which command; command
@@ -39,6 +61,13 @@ export function parseArgv(argv: string[]): ParsedArgs {
         flags[arg.slice(2, eq)] = arg.slice(eq + 1);
       } else {
         const name = arg.slice(2);
+        // Booleans never consume the next token — protects positional args
+        // from being silently eaten when the user (or a script) writes
+        // `--json <role>`.
+        if (BOOLEAN_FLAGS.has(name)) {
+          flags[name] = true;
+          continue;
+        }
         const next = rest[i + 1];
         if (next !== undefined && !next.startsWith("--")) {
           flags[name] = next;
