@@ -1,16 +1,45 @@
 {
   "name": "multi-agent-coordination",
   "version": "2.0.0-alpha.9",
-  "description": "Agent-agnostic file-system coordination layer for multi-LLM-agent collaboration.",
+  "description": "Agent-agnostic file-system coordination layer for multi-LLM-agent collaboration (Codex, Claude Code, Cursor, ...).",
+  "keywords": [
+    "multi-agent",
+    "agent-coordination",
+    "agentctl",
+    "llm",
+    "llm-agents",
+    "codex",
+    "claude-code",
+    "cursor",
+    "rfc",
+    "task-board",
+    "cli"
+  ],
+  "homepage": "https://github.com/smilezheng/multi-agent-coordination#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smilezheng/multi-agent-coordination.git"
+  },
+  "bugs": {
+    "url": "https://github.com/smilezheng/multi-agent-coordination/issues"
+  },
+  "author": {
+    "name": "smilezheng",
+    "email": "smile_zheng@163.com"
+  },
+  "license": "MIT",
   "bin": {
-    "agentctl": "./bin/agentctl",
-    "multi-agent": "./bin/agentctl",
-    "multi-agent-coordination": "./bin/agentctl"
+    "agentctl": "bin/agentctl",
+    "multi-agent": "bin/agentctl",
+    "multi-agent-coordination": "bin/agentctl"
   },
   "files": [
     "bin/",
     "dist/",
-    "README.md"
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -18,22 +47,23 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "engines": {
     "node": ">=20"
   },
   "type": "commonjs",
-  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "js-yaml": "^4.1.1",
-    "proper-lockfile": "^4.1.2",
     "ulid": "^2.3.0"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.14.0",
-    "@types/proper-lockfile": "^4.1.4",
     "typescript": "^5.5.0",
     "vitest": "^1.6.0"
   }
