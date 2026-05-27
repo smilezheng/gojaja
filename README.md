@@ -1,52 +1,44 @@
-# Multi-Agent Coordination
+# multi-agent-coordination (v2.0 — work in progress)
 
-Agent-agnostic file-system coordination for Codex, Claude Code, Cursor, and other file-capable agents.
+Agent-agnostic file-system coordination layer for multi-LLM-agent collaboration.
 
-## Install
+This is the **v2 rewrite branch**. v0.1 (a bash-script prototype) has been
+removed; nothing on this branch is backwards-compatible with it.
 
-From a project root:
+## Status
 
-```bash
-npx multi-agent-coordination install .
-```
+v2.0.0-alpha. Storage layer, locking, event stream, cursor, and session
+primitives are implemented. The user-facing coordination commands (`claim`,
+`plan`, `ack`, `report`, `worklog`, `rfc *`, `wait`, ...) land in upcoming PRs.
 
-This installs the coordination layer at:
-
-```text
-.multi-agent/
-```
-
-The package maintains one canonical template at:
-
-```text
-templates/multi-agent/
-```
-
-In this repository, `.multi-agent` is a symlink to that template so local testing and packaged installs use the same files.
-
-## Use
-
-Create a role:
+## Try the alpha locally
 
 ```bash
-.multi-agent/scripts/create-role --target codex PM "Product Manager"
+npm install
+npm run build
+npm test
+./bin/agentctl --version
+./bin/agentctl init --root /tmp/some-project
+./bin/agentctl version --root /tmp/some-project --json
 ```
 
-Start an existing role agent:
+## Design
 
-```bash
-.multi-agent/scripts/start-role --target codex PM
-.multi-agent/scripts/start-role --target claude Backend
-.multi-agent/scripts/start-role --target cursor Frontend
-.multi-agent/scripts/start-role --target generic QA
-```
+See `docs/DESIGN.md` (TBD) for the architectural notes. In short:
 
-Runtime commands:
+- One Node CLI talks to a `Store` abstraction; v1 implements it on the local
+  filesystem, v2 will swap in an HTTP transport without command-layer changes.
+- Events and inbox messages live as immutable per-record files named by ULID,
+  not as appended TSV/JSONL — no escaping pitfalls, no torn reads.
+- Per-resource file locks (with lease + PID liveness) replace the v0.1
+  global `mkdir` lock.
+- Cursor advancement requires an explicit ack token issued by `plan`, so an
+  ack cannot accidentally skip past unseen events.
+- RFCs collect opinions; a designated leader role writes the decision.
+  There is no automatic tally.
+- Lifecycle "wait" preserves the v0.1 idea of cheap token-free idle blocking
+  but keeps it out of the ack/exit-code path.
 
-```bash
-.multi-agent/scripts/agentctl sync PM
-.multi-agent/scripts/agentctl ack PM
-.multi-agent/hooks/turn-end PM 10
-```
+## License
 
-Codex users may also install/use `skills/multi-agent-runtime/` for runtime behavior. Installation itself is handled by the `npx` command, not a skill.
+MIT.

@@ -1,7 +1,0 @@
-interface:
-  display_name: "Multi-Agent Runtime"
-  short_description: "Runtime loop for assigned Codex role agents"
-  default_prompt: "Use $multi-agent-runtime to continue as my assigned role agent in this .multi-agent project."
-
-policy:
-  allow_implicit_invocation: true

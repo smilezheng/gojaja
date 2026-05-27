@@ -1,16 +1,38 @@
 {
   "name": "multi-agent-coordination",
-  "version": "0.1.0",
-  "description": "Agent-agnostic file-system coordination layer for Codex, Claude Code, Cursor, and other file-capable agents.",
+  "version": "2.0.0-alpha.0",
+  "description": "Agent-agnostic file-system coordination layer for multi-LLM-agent collaboration.",
   "bin": {
-    "multi-agent": "./bin/multi-agent.js",
-    "multi-agent-coordination": "./bin/multi-agent.js"
+    "agentctl": "./bin/agentctl",
+    "multi-agent": "./bin/agentctl",
+    "multi-agent-coordination": "./bin/agentctl"
   },
   "files": [
     "bin/",
-    "templates/",
-    "skills/multi-agent-runtime/"
+    "dist/",
+    "README.md"
   ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepare": "npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "commonjs",
   "license": "MIT",
-  "type": "commonjs"
+  "dependencies": {
+    "proper-lockfile": "^4.1.2",
+    "ulid": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "typescript": "^5.5.0",
+    "vitest": "^1.6.0"
+  }
 }
