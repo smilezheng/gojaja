@@ -14,6 +14,7 @@ export const Paths = {
   configFile: "config.yaml",
   auditLog: "audit.log",
   taskBoardFile: "state/task_board.yaml",
+  projectStateFile: "state/project_state.md",
 
   protocolDir: "protocol",
   rolesDir: "roles",

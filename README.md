@@ -129,7 +129,7 @@ From here, just chat with the agents normally.
 
 These files are project content. The CLI does not create them; you and your agents fill them as the project evolves.
 
-- **`.multi-agent/state/project_state.md`** — vision, milestones, and per-task acceptance criteria. The tool does NOT create this file. It comes into being the first time someone (you, or an agent whose role has the right `owns`) writes to it. If a project never has it, agents will keep bouncing acceptance questions back to you because the handbook tells them to consult this file before marking anything Done. Suggested minimum:
+- **`.multi-agent/state/project_state.md`** — vision, milestones, and per-task acceptance criteria. `agentctl init` seeds a TBD skeleton with these three sections; **your job is to fill the TBD placeholders**. The product-owner role (typically PM, whoever owns this file per `config.yaml`) keeps it up to date as the project evolves. The handbook tells agents to ask you to fill any section that is still marked TBD before they judge a task Done — so the longer this file stays empty, the more interrupting questions you'll get. Suggested minimum:
 
   ```markdown
   # Project state

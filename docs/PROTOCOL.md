@@ -173,16 +173,56 @@ Commands gated:
 `ForbiddenError` exits 9 (distinct from `UsageError`'s exit 2 so a
 caller can distinguish "you said it wrong" from "you are not allowed").
 
-### `agentctl write-state --file <state/path> [--content <text>]`
+### `agentctl write-state --file <state/path> [mode flags]`
+
+Mode flags (mutually exclusive — pick exactly one; default is overwrite):
+
+```
+# overwrite (default): replace the whole file
+agentctl write-state --file state/foo.md --content '<text>'
+agentctl write-state --file state/foo.md            # content from stdin
+
+# append: add to the end of the file
+agentctl write-state --file state/foo.md --append '<text>'
+
+# replace: literal-string find and replace
+agentctl write-state --file state/foo.md --replace '<old>' --with '<new>'
+agentctl write-state --file state/foo.md --replace '<old>' --with '<new>' --batch
+```
+
+Common rules:
 
 - `--file` must be a relative path under `state/`. Path-traversal
   refused via the standard `resolveInside` check.
-- Content comes from `--content <text>` if given, otherwise from stdin.
 - Identity: agents authenticate via `MA_SESSION` as usual; humans
   running the CLI without a session write as `"SYSTEM"` and bypass the
-  gate.
-- Writes are atomic (write tmp + rename), so a reader is never exposed
-  to partial content.
+  ownership gate.
+- All three modes are atomic (write tmp + rename), so a reader is
+  never exposed to partial content.
+- Ownership/`mustNotEdit`/path canonical-form gates apply equally to
+  every mode.
+
+Mode-specific rules:
+
+- **overwrite** replaces the entire file with the supplied content.
+  Use only when you genuinely intend to rewrite from scratch.
+- **append** concatenates `--append <text>` onto the existing file.
+  Absent files are treated as empty. No automatic newline prefix —
+  the caller decides whether to include one in the value.
+- **replace** does a literal-string find-and-replace (no regex).
+  - 0 matches in the file → USAGE.
+  - 1 match → succeeds; `replacedOccurrences: 1`.
+  - N>1 matches without `--batch` → USAGE with hint to either expand
+    the snippet or pass `--batch`.
+  - N>1 matches with `--batch` → all replaced; `replacedOccurrences: N`.
+  - `--with ""` is allowed (deletes the matched text).
+
+Mutual exclusion is enforced by the CLI; passing more than one of
+`--content`/`--append`/`--replace` produces a USAGE error.
+
+Human output names the mode (`Wrote / Appended / Replaced N
+occurrences`); JSON output carries the `mode` field and, for replace,
+`replacedOccurrences`.
 
 ## Task board
 

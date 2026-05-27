@@ -15,6 +15,51 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   schema-version compatibility check; role-level RFC `decisionScopes`
   is a candidate).
 
+## [2.0.0-alpha.13] — 2026-05-27
+
+### init seeds project_state.md; write-state gains replace/append (PR8f-B)
+
+Two related behaviour additions. Suite 198 -> 214.
+
+- **`agentctl init` now seeds `state/project_state.md` with a TBD
+  skeleton.** Previously the file was not auto-created and the
+  handbook told agents to keep asking the user to make one — a slow
+  failure mode. The new skeleton ships with three sections (Vision,
+  Milestones, Acceptance criteria), each containing a `TBD` marker so
+  it is obvious what to fill. Re-running `initialise` is still
+  refused (existing AlreadyInitializedError), so the user's
+  in-progress edits to the skeleton are never clobbered.
+- **`agentctl write-state` gains `--append` and `--replace`/`--with`
+  modes** alongside the existing `--content` (overwrite). Goal:
+  agents that need to change a small fragment of a long file no
+  longer have to re-emit the whole file (token cost), and accidental
+  ambiguous replacements no longer go through silently.
+  - `--append <text>`: appends to the existing file; absent file is
+    treated as empty. No automatic newline prefix.
+  - `--replace <oldText> --with <newText>`: literal-string find and
+    replace. The default refuses if `oldText` appears 0 or N>1 times,
+    with a clear hint to either expand the snippet or pass
+    `--batch`. `--batch` allows N>1 (replaces all). `--with ""` is a
+    valid deletion. No regex anywhere — purely literal strings, to
+    eliminate the most common misuse class.
+  - Strict mutual exclusion: at most one of `--content`/`--append`/
+    `--replace` per invocation; `--with` requires `--replace`;
+    `--batch` requires `--replace`. Each violation is its own USAGE
+    error with the relevant hint.
+  - Human output names the mode (`Wrote`/`Appended`/`Replaced N
+    occurrences`); JSON output carries `mode` and (for replace)
+    `replacedOccurrences`.
+  - Ownership/`mustNotEdit`/path canonical-form gates all still
+    apply to every mode.
+
+### Cross-cutting
+
+- `Store.writeStateFile` interface widened to a discriminated union.
+- `Paths.projectStateFile` added (`state/project_state.md`).
+- `BOOLEAN_FLAGS` whitelists `batch`.
+- 16 new tests across `tests/init.test.ts` (new) and
+  `tests/write-state.test.ts` (new).
+
 ## [2.0.0-alpha.12] — 2026-05-27
 
 ### First-run UX (PR8e)

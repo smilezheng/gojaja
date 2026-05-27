@@ -156,7 +156,8 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - README.md / README.zh-CN.md rewritten around the user-vs-agent
     boundary (7 sections), including a "what you still write by
     hand" section and a Common-situations troubleshooting block.
-  - SCHEMA.md flags `state/project_state.md` as not auto-created.
+  - SCHEMA.md flagged `state/project_state.md` as not auto-created
+    (later flipped to auto-created skeleton in PR8f-B).
   - `role create` nags about TBD sections in the freshly rendered
     role markdown; `role list` annotates TBD rows; `agentctl
     activate` refuses while the role markdown still has TBD.
@@ -170,6 +171,29 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Handbook gains "Task assignment is push, not pull" + "Multi-role
     task pattern" + hard-don't against `task assign --to <yourself>`.
   - Suite 185 -> 198.
+
+- **PR8f-A — first-run discoverability (docs only).**
+  - `--owns` directory-prefix semantics surfaced in help / README /
+    SCHEMA (the matcher already supported it; users couldn't find it).
+  - `--reports-to` and `--must-not-edit` explained in help, README,
+    SCHEMA, and as inline annotations in `role show` output.
+  - Handbook explains that RFC `--deciders` is per-RFC ad-hoc with
+    no role-level flag; SCHEMA records the absence and points at
+    PR8g as the candidate shortlist.
+  - README / SCHEMA add the "why no `read-state`" rationale.
+  - `roles/<id>.md` template seeds a TBD bullet asking the role to
+    document its expected RFC decision scopes.
+
+- **PR8f-B — init skeleton + write-state replace/append.**
+  - `agentctl init` seeds a TBD skeleton at `state/project_state.md`
+    so the file always exists; the handbook nudges agents to ask the
+    user to fill TBD sections before judging Done.
+  - `agentctl write-state` gains `--append` and `--replace`/`--with`/
+    `--batch` modes alongside the existing `--content` (overwrite).
+    Default replace refuses 0 or N>1 matches; `--batch` allows N>1.
+    All modes still flow through ownership / mustNotEdit / path
+    canonical-form gates and remain atomic.
+  - Suite 198 -> 214.
 
 ### Planned, in priority order
 
@@ -233,7 +257,10 @@ After PR10 we tag `v2.0.0`.
 
 PR1–PR7 + PR8a establish the protocol surface (events, sessions,
 plan/ack, tasks, RFCs, ownership, handbook). PR7a / PR8b / PR8c / PR8d /
-PR8e are correctness + UX hardening that introduce no new protocol
-surface. PR8f–PR10 harden the layer for everyday use; PR8f is the only
-remaining schema-affecting PR before `v2.0.0`. Anything past `v2.0.0`
-only ships after the chaos suite (PR10) is green.
+PR8e / PR8f-A / PR8f-B are correctness + UX hardening that introduce no
+breaking protocol changes (PR8f-B widens `writeStateFile` and adds a
+seeded project_state skeleton — backward-compatible for existing
+projects re-initialised on a fresh root). PR8g–PR10 harden the layer
+for everyday use; PR8g is the only remaining schema-affecting PR
+before `v2.0.0`. Anything past `v2.0.0` only ships after the chaos
+suite (PR10) is green.

@@ -68,6 +68,86 @@ function freshTaskBoard(schemaVersion: string): TaskBoard {
   return { schemaVersion, nextId: 0, tasks: {} };
 }
 
+/**
+ * Read a file, returning the empty string if it does not exist. Used
+ * by the append / replace paths of writeStateFile so writing to a
+ * not-yet-existing file just becomes "write from scratch" rather than
+ * an awkward ENOENT.
+ */
+async function readFileOrEmpty(absolutePath: string): Promise<string> {
+  try {
+    return await fsp.readFile(absolutePath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return "";
+    throw err;
+  }
+}
+
+/**
+ * Count literal occurrences of `needle` in `haystack`. Non-overlapping;
+ * matches the behaviour of `String.prototype.split` and of a literal
+ * search-and-replace. Returns 0 for empty needle (guarded upstream
+ * anyway by the UsageError on empty oldText).
+ */
+function countOccurrences(haystack: string, needle: string): number {
+  if (needle.length === 0) return 0;
+  let count = 0;
+  let from = 0;
+  while (true) {
+    const idx = haystack.indexOf(needle, from);
+    if (idx === -1) break;
+    count += 1;
+    from = idx + needle.length;
+  }
+  return count;
+}
+
+/**
+ * Replace every literal occurrence of `oldText` with `newText`. We do
+ * it via split/join to avoid the regex-escape pitfalls of
+ * `String.prototype.replaceAll`-via-regex.
+ */
+function splitJoin(haystack: string, oldText: string, newText: string): string {
+  return haystack.split(oldText).join(newText);
+}
+
+/**
+ * A skeleton `state/project_state.md` so agents and users always have
+ * a concrete file to read and edit, rather than the previous "file
+ * does not exist yet" mode that left users guessing and agents
+ * repeatedly asking the user to create it. The three sections (Vision,
+ * Milestones, Acceptance criteria) are intentionally TBD; the handbook
+ * tells agents to nag the user to fill them.
+ *
+ * Plain string (not a function of schemaVersion) — this file's shape
+ * is human-edit space, not part of the machine schema.
+ */
+const PROJECT_STATE_SKELETON = `# Project state
+
+> Maintained by the role whose \`config.yaml:owns\` includes
+> \`state/project_state.md\` (typically the product-owner role).
+> Agents consult this file whenever they need to decide whether a task
+> is "Done" — see docs/HANDBOOK.md.
+
+## Vision
+
+TBD — one paragraph. What are we building? For whom? What is
+explicitly out of scope?
+
+## Milestones
+
+- TBD — M1: ... due ...
+- TBD — M2: ...
+
+## Acceptance criteria
+
+> One entry per task that has explicit acceptance criteria. Without
+> entries here, agents will keep bouncing acceptance questions back to
+> the user every time a task reaches Review.
+
+- TBD — T-NNNN <title>: ...
+`;
+
 function formatTaskId(n: number): string {
   return `T-${String(n).padStart(4, "0")}`;
 }
@@ -163,6 +243,13 @@ export class LocalFsStore implements Store {
     await atomicWriteFile(
       this.abs(Paths.taskBoardFile),
       yaml.dump(freshTaskBoard(version), { lineWidth: 100, noRefs: true }),
+    );
+    // PR8f-B: seed a TBD skeleton for project_state.md so it always
+    // exists on disk. The product-owner role is expected to fill the
+    // sections; activate / handbook nudge that along.
+    await atomicWriteFile(
+      this.abs(Paths.projectStateFile),
+      PROJECT_STATE_SKELETON,
     );
   }
 
@@ -949,11 +1036,24 @@ export class LocalFsStore implements Store {
     }
   }
 
-  async writeStateFile(input: {
-    actor: RoleId | "SYSTEM";
+  async writeStateFile(
+    input:
+      | { actor: RoleId | "SYSTEM"; relPath: string; content: string; mode?: "overwrite" }
+      | { actor: RoleId | "SYSTEM"; relPath: string; mode: "append"; appendText: string }
+      | {
+          actor: RoleId | "SYSTEM";
+          relPath: string;
+          mode: "replace";
+          oldText: string;
+          newText: string;
+          batch?: boolean;
+        },
+  ): Promise<{
     relPath: string;
-    content: string;
-  }): Promise<{ relPath: string; absolutePath: string }> {
+    absolutePath: string;
+    bytesWritten: number;
+    replacedOccurrences?: number;
+  }> {
     if (typeof input.relPath !== "string" || input.relPath.length === 0) {
       throw new UsageError("--file must be a non-empty relative path.");
     }
@@ -966,8 +1066,67 @@ export class LocalFsStore implements Store {
     }
     await this.requireOwnership(input.actor, input.relPath);
     const absolutePath = this.abs(input.relPath);
-    await atomicWriteFile(absolutePath, input.content);
-    return { relPath: input.relPath, absolutePath };
+    const mode = input.mode ?? "overwrite";
+
+    if (mode === "overwrite") {
+      const content = (input as { content: string }).content;
+      await atomicWriteFile(absolutePath, content);
+      return {
+        relPath: input.relPath,
+        absolutePath,
+        bytesWritten: Buffer.byteLength(content, "utf8"),
+      };
+    }
+
+    if (mode === "append") {
+      const appendText = (input as { appendText: string }).appendText;
+      const existing = await readFileOrEmpty(absolutePath);
+      const next = existing + appendText;
+      await atomicWriteFile(absolutePath, next);
+      return {
+        relPath: input.relPath,
+        absolutePath,
+        bytesWritten: Buffer.byteLength(appendText, "utf8"),
+      };
+    }
+
+    // mode === "replace"
+    const { oldText, newText, batch } = input as {
+      oldText: string;
+      newText: string;
+      batch?: boolean;
+    };
+    if (typeof oldText !== "string" || oldText.length === 0) {
+      throw new UsageError("--replace requires a non-empty old text.");
+    }
+    if (typeof newText !== "string") {
+      throw new UsageError("--with must be a string (may be empty).");
+    }
+    const existing = await readFileOrEmpty(absolutePath);
+    const count = countOccurrences(existing, oldText);
+    if (count === 0) {
+      throw new UsageError(
+        `Old text not found in ${input.relPath}. ` +
+          `Read the current file and pass an exact-match snippet.`,
+      );
+    }
+    if (count > 1 && !batch) {
+      throw new UsageError(
+        `Old text appears ${count} times in ${input.relPath}; ` +
+          `pass --batch to replace all occurrences, or expand the snippet ` +
+          `so it appears exactly once.`,
+      );
+    }
+    // count === 1 OR (count > 1 && batch). Replace all matches; for
+    // count === 1 this is equivalent to a single replacement.
+    const next = splitJoin(existing, oldText, newText);
+    await atomicWriteFile(absolutePath, next);
+    return {
+      relPath: input.relPath,
+      absolutePath,
+      bytesWritten: Buffer.byteLength(next, "utf8") - Buffer.byteLength(existing, "utf8"),
+      replacedOccurrences: count,
+    };
   }
 
   // ---- task board ---------------------------------------------------------

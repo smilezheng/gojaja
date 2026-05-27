@@ -347,9 +347,50 @@ export interface Store {
    * — the human running the CLI by hand should still be able to repair
    * state files. Doctor (PR9) will flag SYSTEM writes as needing audit.
    */
-  writeStateFile(input: {
-    actor: RoleId | "SYSTEM";
+  /**
+   * Write into a state file under ownership gating. Three modes:
+   *
+   *   - `overwrite` (default): replace the entire file with `content`.
+   *     Use when you genuinely want to rewrite the whole document.
+   *   - `append`: append `appendText` to the existing file. Existing
+   *     content is preserved byte-for-byte; no automatic newline
+   *     prefix — the caller decides how to delimit. Empty file is
+   *     treated as zero existing bytes.
+   *   - `replace`: literal-string find-and-replace. The default
+   *     refuses to act when `oldText` matches anywhere other than
+   *     exactly once (count===0 or count>1); `batch: true` allows
+   *     N>1. `oldText`/`newText` are literal strings — no regex.
+   *
+   * All three modes flow through `requireOwnership` first (owns +
+   * mustNotEdit + path canonical-form gate).
+   */
+  writeStateFile(
+    input:
+      | {
+          actor: RoleId | "SYSTEM";
+          relPath: string;
+          content: string;
+          mode?: "overwrite";
+        }
+      | {
+          actor: RoleId | "SYSTEM";
+          relPath: string;
+          mode: "append";
+          appendText: string;
+        }
+      | {
+          actor: RoleId | "SYSTEM";
+          relPath: string;
+          mode: "replace";
+          oldText: string;
+          newText: string;
+          batch?: boolean;
+        },
+  ): Promise<{
     relPath: string;
-    content: string;
-  }): Promise<{ relPath: string; absolutePath: string }>;
+    absolutePath: string;
+    bytesWritten: number;
+    /** Set when `mode === "replace"`. */
+    replacedOccurrences?: number;
+  }>;
 }

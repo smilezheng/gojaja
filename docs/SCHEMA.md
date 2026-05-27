@@ -47,20 +47,21 @@ ownership, atomicity, and the event-stream audit can be enforced.
 
 What `LocalFsStore.initialise` creates today: every directory listed
 above, plus `VERSION`, a seeded `config.yaml` with an empty `roles` map,
-and a seeded `state/task_board.yaml` with `nextId: 0`. The other state
-files (`project_state.md`, `architecture.md`, `decisions.md`,
-`risks.yaml`) are listed here as the conventional locations the project
-will populate over time; they are not created up front.
+a seeded `state/task_board.yaml` with `nextId: 0`, and a TBD skeleton
+at `state/project_state.md` (PR8f-B). The other state files
+(`architecture.md`, `decisions.md`, `risks.yaml`) are listed here as
+the conventional locations the project will populate over time; they
+are not created up front.
 
-> **`state/project_state.md` is not auto-created.** `agentctl init`
-> does not write this file. It comes into existence the first time
-> someone — the user from their shell, or an agent whose role has the
-> right `owns` — writes to it. If a project never has a
-> `project_state.md`, agents will keep bouncing acceptance-criteria
-> questions back to the user every time a task reaches the "is this
-> Done?" decision, because the handbook tells them to consult this
-> file before deciding. Recommended minimum content: a one-paragraph
-> vision, a milestone list, and a per-task acceptance criterion line.
+> **`state/project_state.md` is auto-created as a TBD skeleton.** The
+> skeleton has three sections (Vision, Milestones, Acceptance criteria),
+> each containing a `TBD` placeholder. The product-owner role
+> (whoever owns this file per `config.yaml`) is expected to fill them
+> in. The handbook tells agents to ask the user to fill any section
+> that is still marked TBD before judging a task Done.
+> Re-running `agentctl init` on a project that already has the
+> skeleton (or a user-edited version of it) is refused via
+> `AlreadyInitializedError`; user edits are never clobbered.
 
 ## `VERSION`
 

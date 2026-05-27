@@ -1,4 +1,5 @@
 import { boolFlag, optionalString, requireString, type ParsedArgs } from "../argv";
+import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveActor } from "../identity";
 
@@ -15,6 +16,26 @@ async function readStdin(): Promise<string> {
   });
 }
 
+/**
+ * `agentctl write-state --file state/<path> ...`
+ *
+ * Three mutually-exclusive write modes:
+ *
+ *   overwrite (default): --content <text> OR pipe to stdin.
+ *                        Replaces the whole file. Use only when you
+ *                        actually intend to rewrite from scratch.
+ *   append:              --append <text>.
+ *                        Adds text at the end; caller provides the
+ *                        newline if they want one. Good for
+ *                        decisions.md / risks.yaml log-style writes.
+ *   replace:             --replace <oldText> --with <newText> [--batch].
+ *                        Literal-string find-and-replace. Default
+ *                        refuses count !== 1 to prevent surprises;
+ *                        --batch allows N>1. No regex.
+ *
+ * Ownership / mustNotEdit / path canonical-form gates apply to all
+ * three modes.
+ */
 export async function runWriteState(args: ParsedArgs): Promise<number> {
   const relPath = requireString(args.flags, "file");
   const json = boolFlag(args.flags, "json");
@@ -27,19 +48,92 @@ export async function runWriteState(args: ParsedArgs): Promise<number> {
   // that would be privilege escalation against the ownership gate.
   const { actor } = await resolveActor(store);
 
-  let content = optionalString(args.flags, "content");
-  if (content === undefined) content = await readStdin();
-  if (typeof content !== "string") content = "";
+  // Decide which mode the caller asked for. We look at the *presence*
+  // of each flag rather than its value so an empty string still counts
+  // as "I'm using this mode" (a deliberate empty replacement is valid).
+  const hasContent = args.flags.content !== undefined;
+  const hasAppend = args.flags.append !== undefined;
+  const hasReplace = args.flags.replace !== undefined;
+  const hasWith = args.flags.with !== undefined;
+  const hasBatch = boolFlag(args.flags, "batch");
 
-  const result = await store.writeStateFile({ actor, relPath, content });
+  // Mutual exclusion: at most one of content / append / replace.
+  const modeFlagsUsed = [hasContent, hasAppend, hasReplace].filter(Boolean).length;
+  if (modeFlagsUsed > 1) {
+    throw new UsageError(
+      "Pick exactly one of --content / --append / --replace. " +
+        "They are mutually exclusive.",
+    );
+  }
+  // --with only makes sense with --replace.
+  if (hasWith && !hasReplace) {
+    throw new UsageError("--with requires --replace.");
+  }
+  if (hasReplace && !hasWith) {
+    throw new UsageError("--replace requires --with.");
+  }
+  // --batch only makes sense with --replace.
+  if (hasBatch && !hasReplace) {
+    throw new UsageError("--batch requires --replace.");
+  }
+
+  let result;
+  let mode: "overwrite" | "append" | "replace";
+
+  if (hasAppend) {
+    mode = "append";
+    const appendText = optionalString(args.flags, "append") ?? "";
+    result = await store.writeStateFile({
+      actor,
+      relPath,
+      mode: "append",
+      appendText,
+    });
+  } else if (hasReplace) {
+    mode = "replace";
+    const oldText = optionalString(args.flags, "replace") ?? "";
+    const newText = optionalString(args.flags, "with") ?? "";
+    result = await store.writeStateFile({
+      actor,
+      relPath,
+      mode: "replace",
+      oldText,
+      newText,
+      batch: hasBatch,
+    });
+  } else {
+    mode = "overwrite";
+    let content = optionalString(args.flags, "content");
+    if (content === undefined) content = await readStdin();
+    if (typeof content !== "string") content = "";
+    result = await store.writeStateFile({
+      actor,
+      relPath,
+      content,
+      mode: "overwrite",
+    });
+  }
 
   if (json) {
     process.stdout.write(
-      JSON.stringify({ status: "wrote", actor, ...result }) + "\n",
+      JSON.stringify({ status: "wrote", mode, actor, ...result }) + "\n",
+    );
+    return 0;
+  }
+
+  if (mode === "overwrite") {
+    process.stdout.write(
+      `Wrote ${result.relPath} (${result.bytesWritten} bytes) as ${actor}.\n`,
+    );
+  } else if (mode === "append") {
+    process.stdout.write(
+      `Appended ${result.bytesWritten} bytes to ${result.relPath} as ${actor}.\n`,
     );
   } else {
+    const n = result.replacedOccurrences ?? 1;
+    const noun = n === 1 ? "occurrence" : "occurrences";
     process.stdout.write(
-      `Wrote ${result.relPath} (${Buffer.byteLength(content)} bytes) as ${actor}.\n`,
+      `Replaced ${n} ${noun} in ${result.relPath} as ${actor}.\n`,
     );
   }
   return 0;
