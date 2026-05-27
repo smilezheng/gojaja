@@ -90,6 +90,18 @@ Default to a report (not RFC) when:
 - The question has a single role that can answer it.
 - The choice is inside your own \`owns\` and you only need acknowledgement.
 
+Picking \`--deciders\` is your job when opening an RFC. deciders are
+**per-RFC**, set at \`rfc new\` time; there is no role-level "I'm
+always a decider" flag. Choose:
+
+- Roles whose \`owns\` overlap the files this decision will touch.
+- The role at the top of the relevant \`reportsTo\` chain for the
+  involved peers (the natural sign-off authority).
+
+Omitting a clearly-relevant role from \`--deciders\` is detectable in
+the audit log and reads as scope-shopping. If unsure, add the role
+listed in your own \`roleReminder.reportsTo\`.
+
 ### Disagreement
 
 - **Disagree with an assignment**: report your concern to the assigner,

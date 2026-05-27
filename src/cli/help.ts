@@ -35,6 +35,16 @@ Setup (you, in your shell — runs once per project unless noted):
                               [--reports-to <r1,r2>] [--must-not-edit <a,b>]
       Register a role. Writes roles/<id>.md (with TBD sections you must
       fill in) and adds the role to config.yaml. Re-run to add more.
+
+      --owns entries are either specific files or directory prefixes;
+        a trailing slash (or any path that exists as a directory)
+        matches every file underneath, recursively. Example:
+        --owns "docs/architecture/,state/project_state.md".
+      --reports-to PM,TL    escalation chain; the handbook tells the
+        agent to escalate via reports up this chain when stuck.
+      --must-not-edit state/architecture.md    hard deny list; overrides
+        --owns. Use to carve specific files out of a broad ownership
+        grant.
   role list
       List configured roles. Rows with "(TBD: fill role markdown)" still
       have unfilled placeholder sections in their contract.
@@ -109,6 +119,9 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
   rfc new <slug> --title <text> --deciders <r1,...>
                  --options <A:summary,B:summary>
                  [--voters <r1,...>] [--deadline <iso>]
+      --deciders is per-RFC; there is no role-level "default decider"
+        flag. Pick roles whose owns overlap the decision, plus the
+        role at the top of the relevant reportsTo chain.
   rfc comment <rfc-id> --rationale <text> [--option <opt>]
   rfc decide  <rfc-id> --option <opt> --rationale <text>
       Calling decide/reject from a role not in the deciders list fails

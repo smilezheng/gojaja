@@ -165,9 +165,18 @@ async function runRoleShow(args: ParsedArgs): Promise<number> {
   process.stdout.write(`# config.yaml: roles.${id}\n\n`);
   process.stdout.write(`title:        ${cfg.title}\n`);
   process.stdout.write(`description:  ${cfg.description || "(empty)"}\n`);
-  process.stdout.write(`owns:         ${cfg.owns.join(", ") || "(none)"}\n`);
-  process.stdout.write(`reportsTo:    ${cfg.reportsTo.join(", ") || "(none)"}\n`);
-  process.stdout.write(`mustNotEdit:  ${cfg.mustNotEdit.join(", ") || "(none)"}\n`);
+  process.stdout.write(
+    `owns:         ${cfg.owns.join(", ") || "(none)"}` +
+      `  # write-allowed paths; entries can be files or directory prefixes\n`,
+  );
+  process.stdout.write(
+    `reportsTo:    ${cfg.reportsTo.join(", ") || "(none)"}` +
+      `  # escalation chain (advisory; used by the handbook)\n`,
+  );
+  process.stdout.write(
+    `mustNotEdit:  ${cfg.mustNotEdit.join(", ") || "(none)"}` +
+      `  # hard deny list; overrides owns\n`,
+  );
   process.stdout.write(`\n# roles/${id}.md\n\n`);
   process.stdout.write(md);
   if (!md.endsWith("\n")) process.stdout.write("\n");

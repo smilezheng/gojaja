@@ -71,7 +71,20 @@ agentctl role create QA      "Quality Assurance"
 
 Each `role create` writes a `.multi-agent/roles/<id>.md` template with two placeholder sections: **Role description** and **Responsibilities**, both marked `TBD`. **Open each file and fill them in** — they are the agent's primary self-introduction. `agentctl role list` flags rows that still contain TBD; `agentctl activate` refuses to proceed until they are filled.
 
-The `--owns` flag controls which files the role may write. Agents using `agentctl` cannot write outside their `owns`; any attempt fails with exit code `9 FORBIDDEN`.
+The `--owns` flag controls which files the role may write. Entries are either specific file paths or directory prefixes — `--owns "docs/architecture/"` matches every file under `docs/architecture/` recursively, so a CTO/TL role can take a whole subtree without listing files one by one. Agents using `agentctl` cannot write outside their `owns`; any attempt fails with exit code `9 FORBIDDEN`.
+
+Two more role-create flags worth knowing about:
+
+- `--reports-to PM,TL` — the role's escalation chain. The handbook tells the agent to escalate stuck work up this chain via `report`. Example: a `Backend` role created with `--reports-to TL,PM` will escalate technical questions to TL and scope/acceptance questions to PM.
+- `--must-not-edit state/architecture.md` — a hard deny list, overrides `--owns`. Use when a role has a broad `owns` grant but you want a few specific files out of bounds (e.g. `Backend --owns "src/" --must-not-edit "src/config/secrets.ts"`).
+
+A worked example with all three flags:
+
+```bash
+agentctl role create PM       "Product Manager"   --owns "state/project_state.md,state/task_board.yaml"
+agentctl role create TL       "Tech Lead"         --owns "state/architecture.md,docs/architecture/" --reports-to PM
+agentctl role create Backend  "Backend Engineer"  --owns "src/" --reports-to TL,PM --must-not-edit "src/config/secrets.ts"
+```
 
 ### Step 3 — Install the runtime for each agent tool you use
 
@@ -263,6 +276,7 @@ Open RFCs requiring a role's attention appear in that role's next `agentctl plan
 - **Doesn't call LLMs.** Coordination only; your existing tool (Cursor / Claude / Codex) is the AI.
 - **Doesn't run a background server.** Every `agentctl` invocation starts and exits.
 - **Doesn't prevent hand-editing files.** Agents through `agentctl` are scoped; anyone with a text editor still has full access.
+- **Doesn't provide a `read-state` command.** Reading is unrestricted (the layer is a shared blackboard) and the agent host already has a file-read tool — wrapping it in `agentctl` would only add token cost. `agentctl` mediates **writes** (which need ownership, atomicity, audit) and **structured operations** (claim / plan / ack / task / rfc / report). Read the files directly.
 - **Doesn't run on Windows yet.** macOS and Linux only.
 
 ---

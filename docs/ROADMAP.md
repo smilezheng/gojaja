@@ -173,12 +173,16 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
 
 ### Planned, in priority order
 
-- **PR8f — schema-level deferments from PR8c.**
+- **PR8g — schema-level deferments.**
   - Task `reviewers` field so a Review handoff can sign off without
     needing task-board ownership.
   - `STATE_UPDATED` event when `state/*` files change.
   - `dependsOn` cycle detection in task board.
   - Schema-version compatibility check on `agentctl plan`.
+  - Candidate: role-level `decisionScopes` so a role becomes a default
+    RFC decider for matching scopes (currently `--deciders` is
+    per-RFC ad-hoc). Promote if PR8f-A's handbook nudge proves
+    insufficient.
 
 - **PR8 — installer & upgrade.**
   - `agentctl upgrade` driving `src/migrations/<from>-<to>.ts`.

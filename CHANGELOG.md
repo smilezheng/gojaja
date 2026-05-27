@@ -10,9 +10,10 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 ### Planned next
 
-- PR8f: schema-level features deferred from PR8c (task `reviewers`
+- PR8g: schema-level features deferred from PR8c (task `reviewers`
   field, `STATE_UPDATED` event, `dependsOn` cycle detection,
-  schema-version compatibility check).
+  schema-version compatibility check; role-level RFC `decisionScopes`
+  is a candidate).
 
 ## [2.0.0-alpha.12] — 2026-05-27
 

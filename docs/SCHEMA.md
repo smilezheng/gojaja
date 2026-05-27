@@ -8,6 +8,13 @@ The on-disk version is recorded in the top-level `VERSION` file. Any
 breaking change to a path, file name, or JSON shape requires bumping
 `SCHEMA_VERSION` in `src/cli/runtime.ts` together with this document.
 
+**Reads are unrestricted, writes are mediated.** Anything under
+`.multi-agent/` can be read directly by any process — the layer is a
+shared blackboard, and the agent host already has a file-read tool.
+There is therefore no `agentctl read-state` command (it would only
+add token cost). Writes go through `agentctl` (or `Store`) so that
+ownership, atomicity, and the event-stream audit can be enforced.
+
 ## Top-level layout
 
 ```
@@ -90,13 +97,19 @@ Field rules:
 
 - `schemaVersion` must match the on-disk `VERSION` file.
 - `roles` is `Record<RoleId, RoleConfig>`.
-- `RoleConfig.owns` is **enforced at write time**. Entries match an
-  exact relative path OR a directory prefix (entries ending with `/`
-  cover the entire subtree).
-- `RoleConfig.mustNotEdit` is also enforced: a path that appears in
-  this list is refused even if it ALSO appears in `owns`. Defence in
-  depth.
-- `reportsTo` is advisory; not enforced.
+- `RoleConfig.owns` is **enforced at write time**. Each entry matches
+  either an exact relative path (`state/project_state.md`) or a
+  directory prefix (`docs/architecture/` or `docs/architecture`, with
+  or without a trailing slash — `target.startsWith(entry + "/")` is
+  the implementation). A whole subtree can be assigned in one entry.
+- `RoleConfig.mustNotEdit` is **also enforced** with the same
+  prefix semantics and takes precedence over `owns`: a path that
+  appears in `mustNotEdit` is refused even if it also appears in
+  `owns`. Use it to carve specific files out of a broad ownership
+  grant (e.g. `--owns "src/" --must-not-edit "src/config/secrets.ts"`).
+- `reportsTo` is **advisory** (not machine-enforced). It names the
+  roles up the escalation chain; the collaboration handbook tells
+  agents to escalate stuck work via `report` along this list.
 
 Created and mutated only through `agentctl role create` (and future
 `agentctl role edit`). Hand edits are allowed but rare; the markdown
@@ -411,6 +424,13 @@ Status state machine (enforced):
 Both terminal in v2. `superseded` is reserved for a future v2.x command.
 Auto-tally based on comments is **not** implemented and is a design
 non-goal — the deciders are responsible for choosing.
+
+Decider scope is **per-RFC**, set at `rfc new` time via `--deciders`.
+There is no role-level "default decider" field on `RoleConfig` today;
+a role becomes a decider only by being named in a specific RFC's
+`deciders` list. A role-level decision-scope field is on the PR8g
+shortlist if pain accumulates (e.g. agents keep omitting clearly-
+relevant roles from `--deciders`).
 
 `comments/<role>.json`:
 

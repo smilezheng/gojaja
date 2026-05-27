@@ -71,7 +71,20 @@ agentctl role create QA      "Quality Assurance"
 
 每个 `role create` 都会生成一份 `.multi-agent/roles/<id>.md` 模板，里面有两段占位符——**Role description** 和 **Responsibilities**，都标着 `TBD`。**打开这两个文件，按角色实际职责填进去**——这是 agent 的自我介绍。`agentctl role list` 会标出哪些角色的契约还没填完；`agentctl activate` 在契约还是 TBD 状态时会直接拒绝执行。
 
-`--owns` 控制这个角色能写哪些文件。agent 通过 `agentctl` 写超出 `owns` 的路径会直接被拒（退出码 `9 FORBIDDEN`）。
+`--owns` 控制这个角色能写哪些文件。条目可以是具体文件，也可以是目录前缀——`--owns "docs/architecture/"` 会自动匹配 `docs/architecture/` 下所有文件（递归），CTO / 技术 leader 这类整段托管子树的角色不用一个个列文件名。agent 通过 `agentctl` 写超出 `owns` 的路径会直接被拒（退出码 `9 FORBIDDEN`）。
+
+`role create` 还有两个值得了解的参数：
+
+- `--reports-to PM,TL` —— 角色的升级链。handbook 会教 agent 卡住时按这条链向上 `report`。比如 `Backend` 角色 `--reports-to TL,PM` 表示：技术问题升级给 TL，范围 / 验收问题升级给 PM。
+- `--must-not-edit state/architecture.md` —— 硬黑名单，优先级高于 `--owns`。用法是：某个角色拿到了一大段 `--owns`（比如整个 `src/`），但你不希望它碰其中几个特殊文件（比如 `src/config/secrets.ts`）。
+
+一个把三个参数都用上的例子：
+
+```bash
+agentctl role create PM       "Product Manager"   --owns "state/project_state.md,state/task_board.yaml"
+agentctl role create TL       "Tech Lead"         --owns "state/architecture.md,docs/architecture/" --reports-to PM
+agentctl role create Backend  "Backend Engineer"  --owns "src/" --reports-to TL,PM --must-not-edit "src/config/secrets.ts"
+```
 
 ### 第 3 步 —— 给每种 agent 工具装一次 runtime
 
@@ -263,6 +276,7 @@ agentctl rfc decide RFC-0001 --option A --rationale "Agreed. Proceed."
 - **不调 LLM**。它只做协调，AI 由你的 Cursor / Claude / Codex 提供。
 - **不跑后台服务**。每次 `agentctl` 命令都是起来执行完就退出。
 - **拦不住手工改文件**。agent 走 `agentctl` 是受 `owns` 约束的，但你打开编辑器仍然能随意改。
+- **没有 `read-state` 命令**。读取本身就是不受限的（这层是共享黑板），且 agent 宿主自带 file-read 工具——再包一层 `agentctl` 只会徒增 token 消耗。`agentctl` 管的是**写入**（需要 ownership / 原子性 / 审计）和**结构化操作**（claim / plan / ack / task / rfc / report）。读文件直接读就行。
 - **暂不支持 Windows**。目前只在 macOS 和 Linux 上跑。
 
 ---
