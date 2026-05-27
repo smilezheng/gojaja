@@ -73,6 +73,49 @@ describe("Store.openOrCreatePlan", () => {
     expect(isUlid(m.ackToken)).toBe(true);
   });
 
+  it("includes a compact roleReminder anchored on every plan", async () => {
+    // Without a config entry, the reminder still has id/title/protocol.
+    const m1 = await ctx.store.openOrCreatePlan("PM");
+    expect(m1.roleReminder.id).toBe("PM");
+    expect(m1.roleReminder.title).toBe("PM Agent");
+    expect(m1.roleReminder.protocol).toMatch(/plan/);
+    expect(m1.roleReminder.protocol).toMatch(/ack/);
+    expect(m1.roleReminder.protocol).toMatch(/never hand-edit/);
+    // Empty fields must NOT be serialised — keep manifests tight.
+    expect(m1.roleReminder.owns).toBeUndefined();
+    expect(m1.roleReminder.mustNotEdit).toBeUndefined();
+    expect(m1.roleReminder.reportsTo).toBeUndefined();
+  });
+
+  it("reminder picks up config.yaml fields when set, still omits empty ones", async () => {
+    await ctx.store.createRole({
+      id: "Backend",
+      title: "Backend Engineer",
+      owns: ["src/api/", "src/db/"],
+      reportsTo: ["TL", "PM"],
+      mustNotEdit: [], // intentionally empty
+    });
+    const m = await ctx.store.openOrCreatePlan("Backend");
+    expect(m.roleReminder.id).toBe("Backend");
+    expect(m.roleReminder.title).toBe("Backend Engineer");
+    expect(m.roleReminder.owns).toEqual(["src/api/", "src/db/"]);
+    expect(m.roleReminder.reportsTo).toEqual(["TL", "PM"]);
+    expect(m.roleReminder.mustNotEdit).toBeUndefined();
+  });
+
+  it("reminder serialised size stays small (<300 bytes for a fully-populated reminder)", async () => {
+    await ctx.store.createRole({
+      id: "Backend",
+      title: "Backend Engineer",
+      owns: ["src/api/", "src/db/"],
+      reportsTo: ["TL"],
+      mustNotEdit: ["state/architecture.md"],
+    });
+    const m = await ctx.store.openOrCreatePlan("Backend");
+    const bytes = Buffer.byteLength(JSON.stringify(m.roleReminder));
+    expect(bytes).toBeLessThan(300);
+  });
+
   it("filters events by recipient (to == role || to == '*'), excludes self-sent", async () => {
     await ctx.store.publishReport({ from: "PM", to: "TL", message: "for TL only" });
     await ctx.store.publishReport({ from: "PM", to: "Backend", message: "for BE only" });

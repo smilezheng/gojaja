@@ -47,6 +47,35 @@ export interface CursorState {
 }
 
 /**
+ * Compact identity + protocol reminder for a role. Embedded into every
+ * manifest so a context-compressed agent can re-anchor itself simply by
+ * re-running `agentctl plan` — without paying the cost of a full role
+ * file read on every turn.
+ *
+ * Fields are omitted when empty (e.g. an empty `owns` list is not
+ * serialised) to keep agent prompts tight.
+ */
+export interface RoleReminder {
+  id: RoleId;
+  title: string;
+  /** Files this role may write. Omitted if empty. */
+  owns?: string[];
+  /** Files this role must not write. Omitted if empty. */
+  mustNotEdit?: string[];
+  /** Default report recipients. Omitted if empty. */
+  reportsTo?: RoleId[];
+  /** One-line protocol summary; identical for every role. */
+  protocol: string;
+}
+
+/**
+ * The canonical protocol one-liner. Kept very short by design — it ships in
+ * every manifest and we do not want to inflate agent prompts.
+ */
+export const PROTOCOL_ONE_LINER =
+  "Loop: plan -> ack --token <t> -> wait. All writes via agentctl; never hand-edit .multi-agent/.";
+
+/**
  * Snapshot of work pending for a role, produced by `plan` and consumed by
  * `ack`. The manifest is the only thing that can advance a cursor: ack
  * never reads "current latest event", it only advances to
@@ -68,6 +97,8 @@ export interface Manifest {
   fromCursor: string;
   /** All events the role should attend to, oldest first. */
   events: Event[];
+  /** Self-anchoring identity + protocol summary. */
+  roleReminder: RoleReminder;
 }
 
 /** Payload shape for type=REPORT events. */

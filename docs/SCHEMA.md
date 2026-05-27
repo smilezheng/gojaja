@@ -185,7 +185,15 @@ token and advance the cursor deterministically.
   "generatedAt": "2026-05-27T05:23:00Z",
   "fromCursor": "01HX...PREVCURSOR",  // empty string before first ack
   "advanceCursorTo": "01HX...EVTLATEST",
-  "events": [ /* Event records, oldest first, filtered for this role */ ]
+  "events": [ /* Event records, oldest first, filtered for this role */ ],
+  "roleReminder": {
+    "id": "PM",
+    "title": "Product Manager",
+    "owns": ["state/project_state.md"],          // omitted if empty
+    "mustNotEdit": ["state/architecture.md"],    // omitted if empty
+    "reportsTo": ["TL"],                          // omitted if empty
+    "protocol": "Loop: plan -> ack --token <t> -> wait. All writes via agentctl; never hand-edit .multi-agent/."
+  }
 }
 ```
 
@@ -198,8 +206,12 @@ Invariants:
 - `advanceCursorTo` reflects the latest event id in the global stream at
   plan time. It may be greater than the largest id in `events` because
   the filter excludes events the role sent itself.
+- `roleReminder` re-anchors the role's identity on every plan, so a
+  context-compressed agent only needs to re-run `agentctl plan` to
+  recover. Fields read from `config.yaml`; empty lists are intentionally
+  omitted to keep the manifest tight.
 
-`tasks` and `rfcs_pending_action` sections are reserved for PR4.
+`tasks` is reserved for PR5; `rfcsPendingAction` is reserved for PR6.
 
 ## `comms/sessions/<role>.json`
 

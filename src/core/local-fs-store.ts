@@ -30,14 +30,16 @@ import {
 import { validateRoleId } from "./role-id";
 import { renderRoleMarkdown } from "./role-template";
 import type { Store } from "./store";
-import type {
-  CursorState,
-  Event,
-  Manifest,
-  ProjectConfig,
-  RoleConfig,
-  RoleId,
-  SessionInfo,
+import {
+  PROTOCOL_ONE_LINER,
+  type CursorState,
+  type Event,
+  type Manifest,
+  type ProjectConfig,
+  type RoleConfig,
+  type RoleId,
+  type RoleReminder,
+  type SessionInfo,
 } from "./types";
 
 function freshConfig(schemaVersion: string): ProjectConfig {
@@ -404,6 +406,7 @@ export class LocalFsStore implements Store {
         advanceCursorTo,
         fromCursor: cursor.ackedThrough,
         events: filtered,
+        roleReminder: await this.buildRoleReminder(role),
       };
       await atomicWriteJson(this.abs(manifestPath(role, ackToken)), manifest);
       const updated: CursorState = {
@@ -414,6 +417,35 @@ export class LocalFsStore implements Store {
       await atomicWriteJson(this.abs(rolePaths(role).cursorFile), updated);
       return manifest;
     });
+  }
+
+  /**
+   * Build the compact RoleReminder. Empty fields are omitted from the
+   * serialised JSON to keep agent prompts small. If the role is not yet
+   * registered in `config.yaml` (e.g. unit-test paths that exercise the
+   * Store directly without going through `agentctl role create`), we
+   * synthesise a minimal reminder rather than failing — `plan` is
+   * read-only and should never crash an otherwise-valid window.
+   */
+  private async buildRoleReminder(role: RoleId): Promise<RoleReminder> {
+    let cfg: RoleConfig | undefined;
+    try {
+      const config = await this.readConfig();
+      cfg = config.roles[role];
+    } catch {
+      cfg = undefined;
+    }
+    const reminder: RoleReminder = {
+      id: role,
+      title: cfg?.title ?? `${role} Agent`,
+      protocol: PROTOCOL_ONE_LINER,
+    };
+    if (cfg) {
+      if (cfg.owns.length > 0) reminder.owns = cfg.owns;
+      if (cfg.mustNotEdit.length > 0) reminder.mustNotEdit = cfg.mustNotEdit;
+      if (cfg.reportsTo.length > 0) reminder.reportsTo = cfg.reportsTo;
+    }
+    return reminder;
   }
 
   async ackManifest(

@@ -55,14 +55,14 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - 25 new vitest cases (`tests/role.test.ts`, `tests/prompt.test.ts`,
     `tests/wait.test.ts`); 64/64 total.
 
-### Planned, in priority order
+- **PR4 — manifest self-anchoring.**
+  - `agentctl plan` output now embeds a compact `roleReminder`
+    (`id`, `title`, optional `owns`/`mustNotEdit`/`reportsTo`, plus a
+    95-char protocol one-liner). Empty fields are omitted.
+  - Goal: a context-compressed agent recovers full identity by
+    running `agentctl plan` once.
 
-- **PR4 — manifest self-anchoring + role reminder.**
-  - `agentctl plan` output includes a `roleReminder` block built from
-    `config.yaml` so a context-compressed agent re-anchors identity on
-    every plan.
-  - Auto-default of `--json` when stdout is not a TTY.
-  - `from` / `to` validation against the configured role set.
+### Planned, in priority order
 
 - **PR5 — task board.**
   - `state/task_board.yaml` schema with id / status / owner / priority /

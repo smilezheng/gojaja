@@ -10,8 +10,28 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 ### Planned next
 
-- PR4: manifest `roleReminder` (so context-compressed agents re-anchor
-  identity on every `plan`).
+- PR6: RFC state machine (`rfc new / comment / decide / status`).
+
+## [2.0.0-alpha.3] — 2026-05-27
+
+### Added (PR4 — manifest self-anchoring)
+
+- `Manifest.roleReminder`: a compact identity block embedded in every
+  `agentctl plan` output. Carries `id`, `title`, optional `owns`,
+  `mustNotEdit`, `reportsTo`, plus a 95-char `protocol` one-liner.
+  Empty fields are intentionally omitted to keep agent prompts tight
+  (a fully populated reminder serialises to under 300 bytes).
+- `PROTOCOL_ONE_LINER` constant in `src/core/types.ts` — the single
+  source of truth for the protocol string the reminder embeds.
+- Test coverage: reminder presence, content from `config.yaml`,
+  empty-field omission, and serialised-size budget.
+
+### Rationale
+
+A context-compressed agent that has lost its role contract can now
+recover its identity by running `agentctl plan` once. The reminder
+trades ~250 bytes per manifest for an order-of-magnitude reduction
+in "agent forgot which role it is" failure modes.
 
 ## [2.0.0-alpha.2] — 2026-05-27
 

@@ -70,12 +70,19 @@ no event observed by `plan` can be silently skipped by `ack`.
 - Reads the current cursor and computes a `Manifest`:
   - all events with `id > cursor.ackedThrough`
     where `to ∈ {role, "*"}` AND `from !== role`,
-  - tasks the role is assigned (PR4, not yet emitted),
-  - RFCs awaiting action from the role (PR4, not yet emitted).
+  - a compact `roleReminder` re-anchoring identity (id, title, owns,
+    mustNotEdit, reportsTo, one-line protocol; empty fields omitted),
+  - tasks the role is assigned (PR5),
+  - RFCs awaiting action from the role (PR6, not yet emitted).
 - Writes the manifest to `comms/pending/<role>/<ack-token>.json`.
 - Updates the cursor with `pendingManifest = <ack-token>` (the cursor's
   `ackedThrough` is **not** moved).
 - Prints the manifest to stdout (as JSON when `--json`).
+
+The `roleReminder` is intentionally tiny — a fully populated reminder
+serialises to under 300 bytes. It exists so that a context-compressed
+agent can recover its full operating identity by running `plan` once;
+it does not duplicate the full role contract or protocol docs.
 
 If a previous manifest is outstanding (`pendingManifest != null`), `plan`
 returns the existing manifest verbatim and does not generate a new one.
