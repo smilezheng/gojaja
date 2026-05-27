@@ -54,10 +54,10 @@ file-only_ agents safe to combine.
 
 ## Status
 
-**v2.0.0-alpha.** The storage core is implemented and tested. The
-end-user CLI commands (`claim`, `plan`, `ack`, `report`, `wait`, `rfc …`)
-are landing PR by PR — see [docs/ROADMAP](./docs/ROADMAP.md). What you
-can run today is described under [Quickstart](#quickstart) below.
+**v2.0.0-alpha.1.** The storage core and the per-turn agent loop
+(`claim` / `plan` / `ack` / `report` / `worklog` / `release`) are
+implemented and covered by 39 tests. Still to come: `wait`, RFCs,
+ownership enforcement, doctor — see [docs/ROADMAP](./docs/ROADMAP.md).
 
 If you want to follow along, watch the `v2` branch.
 
@@ -141,32 +141,36 @@ agentctl version --json
 # {"cli":"2.0.0-alpha.0","schema":"2.0.0"}
 ```
 
-### Preview: the full agent workflow (coming in PR2)
+### 4. Walk through a two-role scenario
 
-Once PR2 lands, the day-to-day loop for each agent window will be:
+Open two shells in the same project to see PM and TL collaborate.
+
+**Shell A (PM):**
 
 ```bash
-# Once per window, in the project root:
-agentctl claim PM                       # → assigns this window the PM role
-export MA_SESSION=<session-id from claim>
-
-# Each turn:
-agentctl plan PM                        # → JSON of unread events, inbox, tasks
-# …agent processes the items…
-agentctl ack PM --token <ack-token>     # → safely advances the cursor
-
-# To send a directed message:
-agentctl report --to TL --message "Goals locked in"
-
-# To log progress for the team to see:
-agentctl worklog --message "Drafted acceptance criteria for T-0001"
-
-# To stay alive between turns without burning tokens:
-agentctl wait PM --idle 10
+agentctl claim PM                           # prints a session id
+export MA_SESSION=<paste session id>
+agentctl report  --to TL --message "Goals locked in for Q3"
+agentctl worklog --message "Drafted acceptance for T-0001"
 ```
 
-The exact wire-level contract is documented now in
-[docs/PROTOCOL.md](./docs/PROTOCOL.md) so you can design against it.
+**Shell B (TL):**
+
+```bash
+agentctl claim TL
+export MA_SESSION=<paste session id>
+agentctl plan                               # see PM's report + worklog
+# … process the events …
+agentctl ack --token <ack-token from plan>  # advances TL's cursor
+agentctl plan                               # now empty
+```
+
+Every step is atomic and recorded under `.multi-agent/comms/events/`.
+The agent loop preview that used to live here is now real; only
+`agentctl wait` (the cheap-keepalive primitive) is still scheduled — see
+the [roadmap](#roadmap-highlights).
+
+The wire-level contract is in [docs/PROTOCOL.md](./docs/PROTOCOL.md).
 
 ---
 
@@ -238,8 +242,8 @@ If any of these are a deal-breaker, see
 | Milestone | What lands | Status |
 | --- | --- | --- |
 | PR1 | Storage core, locks, events, cursors, sessions | **Done** |
-| PR2 | `claim` / `plan` / `ack` / `report` / `worklog` | Next up |
-| PR3 | `wait` for cheap token-free keepalive | Planned |
+| PR2 | `claim` / `plan` / `ack` / `report` / `worklog` | **Done** |
+| PR3 | `wait` for cheap token-free keepalive | Next up |
 | PR4 | RFC state machine (comments + leader decides) | Planned |
 | PR5 | `config.yaml`-driven role ownership enforcement | Planned |
 | PR6 | Installer, `upgrade`, `reset`, AGENTS.md bridge | Planned |

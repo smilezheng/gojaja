@@ -51,10 +51,10 @@ CrewAI 之类托管的多 agent 框架，那本项目解决的不是你的问题
 
 ## 当前状态
 
-**v2.0.0-alpha**。存储核心已经实现并通过测试。面向终端用户的命令
-（`claim` / `plan` / `ack` / `report` / `wait` / `rfc …`）正在按 PR
-逐个落地，详见 [docs/ROADMAP](./docs/ROADMAP.md)。今天能跑的内容在
-下面 [快速上手](#快速上手) 中演示。
+**v2.0.0-alpha.1**。存储核心和每回合 agent 循环（`claim` / `plan` /
+`ack` / `report` / `worklog` / `release`）都已实现，由 39 个测试覆盖。
+还在排队的：`wait`、RFC、可写域强制、`doctor`——详见
+[docs/ROADMAP](./docs/ROADMAP.md)。
 
 跟进进度请关注 `v2` 分支。
 
@@ -137,32 +137,36 @@ agentctl version --json
 # {"cli":"2.0.0-alpha.0","schema":"2.0.0"}
 ```
 
-### 预览：完整的 agent 工作流（PR2 即将上线）
+### 4. 走一遍两角色场景
 
-PR2 落地后，每个 agent 窗口的日常循环会是这样：
+在同一个项目下开两个 shell，亲眼看 PM 和 TL 协作。
+
+**Shell A（PM）：**
 
 ```bash
-# 每个窗口启动时跑一次：
-agentctl claim PM                       # 把这个窗口认领为 PM 角色
-export MA_SESSION=<claim 返回的 session-id>
-
-# 每一回合：
-agentctl plan PM                        # JSON 输出：未读事件、收件、任务
-# …agent 处理这些内容…
-agentctl ack PM --token <ack-token>     # 安全推进游标
-
-# 发送定向消息：
-agentctl report --to TL --message "Goals locked in"
-
-# 记录进展，全队可见：
-agentctl worklog --message "Drafted acceptance criteria for T-0001"
-
-# 不消耗 token 地保活，等下一轮：
-agentctl wait PM --idle 10
+agentctl claim PM                           # 打印 session id
+export MA_SESSION=<把 session id 粘进来>
+agentctl report  --to TL --message "Goals locked in for Q3"
+agentctl worklog --message "Drafted acceptance for T-0001"
 ```
 
-完整的 wire-level 契约已经写在
-[docs/PROTOCOL.md](./docs/PROTOCOL.md)，你可以现在就按它做对接。
+**Shell B（TL）：**
+
+```bash
+agentctl claim TL
+export MA_SESSION=<把 session id 粘进来>
+agentctl plan                               # 看到 PM 的 report 和 worklog
+# … 处理这些事件 …
+agentctl ack --token <plan 输出里的 token>   # 推进 TL 的游标
+agentctl plan                               # 现在为空
+```
+
+每一步都是原子的，所有事件都落在
+`.multi-agent/comms/events/` 下。之前这里的"工作流预览"现在已经
+是真命令；唯一还没实现的是 `agentctl wait`（无 token 消耗的保活
+原语），见 [路线图](#路线图概览)。
+
+Wire-level 契约见 [docs/PROTOCOL.md](./docs/PROTOCOL.md)。
 
 ---
 
@@ -226,8 +230,8 @@ agentctl wait PM --idle 10
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
 | PR1 | 存储核心：锁、事件、游标、会话 | **完成** |
-| PR2 | `claim` / `plan` / `ack` / `report` / `worklog` | 即将开始 |
-| PR3 | `wait`：无 token 消耗的保活 | 计划中 |
+| PR2 | `claim` / `plan` / `ack` / `report` / `worklog` | **完成** |
+| PR3 | `wait`：无 token 消耗的保活 | 即将开始 |
 | PR4 | RFC 状态机（意见 + leader 决定） | 计划中 |
 | PR5 | `config.yaml` 驱动的角色可写域强制 | 计划中 |
 | PR6 | 安装器、`upgrade`、`reset`、AGENTS.md 注入 | 计划中 |

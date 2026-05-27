@@ -24,23 +24,24 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Session claim/release/heartbeat with `SESSION_TAKEOVER` events.
   - Strict path / role-id / lock-key validation.
   - CLI skeleton: `agentctl --version | help | init | version`.
-  - 19 vitest cases covering concurrency, monotonicity, lock recovery,
-    session lifecycle, validation.
-  - Docs scaffolding: DESIGN, SCHEMA, PROTOCOL, ROADMAP.
+
+- **PR2 — claim / plan / ack / report / worklog.**
+  - `agentctl claim <role>` / `agentctl release`.
+  - `MA_SESSION` environment-variable identity, resolved via
+    `Store.findSessionById`.
+  - `agentctl plan [<role>]` with manifest emission,
+    `pendingManifest` stamp, idempotent across retry.
+  - `agentctl ack [<role>] --token <t>` with bounded cursor advance —
+    fixes the v0.1 "ack races concurrent write" loss.
+  - `agentctl report --to <role> --message <text> [--ref <id>]`.
+  - `agentctl worklog --message <text>` plus a markdown copy under
+    `worklog/<role>/<id>.md`.
+  - Design simplification: inbox is now a derived filter on the event
+    stream, not a separate file tree. See
+    [SCHEMA: Inbox is a derived view](./SCHEMA.md#inbox-is-a-derived-view-not-files).
+  - 39 vitest cases across storage, plan/ack, and identity resolution.
 
 ### Planned, in priority order
-
-- **PR2 — plan / ack / report / worklog.**
-  - `agentctl claim <role>`, `agentctl release <role>`.
-  - `MA_SESSION` environment-variable identity for follow-up commands.
-  - `agentctl plan <role>` (manifest emission, pendingManifest stamp,
-    idempotent across retry).
-  - `agentctl ack <role> --token <t>` (bounded cursor advance).
-  - `agentctl report --to <role> [--ref <id>] --message <text>` with
-    dual events+inbox write.
-  - `agentctl worklog --message <text>` with broadcast + worklog file.
-  - Property tests: concurrent plan/ack never loses events; token
-    replay rejected; report visible in target's next plan.
 
 - **PR3 — wait / lifecycle.**
   - `agentctl wait <role> [--idle <min>] [--mode block|exit]`.

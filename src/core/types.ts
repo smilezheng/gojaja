@@ -46,6 +46,40 @@ export interface CursorState {
   updatedAt: string;
 }
 
+/**
+ * Snapshot of work pending for a role, produced by `plan` and consumed by
+ * `ack`. The manifest is the only thing that can advance a cursor: ack
+ * never reads "current latest event", it only advances to
+ * `advanceCursorTo`. This pins down exactly which events the agent has
+ * been shown and prevents the v0.1 "ack races concurrent writes" loss.
+ */
+export interface Manifest {
+  /** ULID, also the file name under comms/pending/<role>/. */
+  ackToken: string;
+  role: RoleId;
+  generatedAt: string;
+  /**
+   * The ULID the cursor will be set to on successful ack. May be larger
+   * than the largest event id in `events` when the manifest also covers
+   * filtered-out events (e.g. ones the role sent itself).
+   */
+  advanceCursorTo: string;
+  /** Pre-cursor event id (the value of cursor.ackedThrough at plan time). */
+  fromCursor: string;
+  /** All events the role should attend to, oldest first. */
+  events: Event[];
+}
+
+/** Payload shape for type=REPORT events. */
+export interface ReportPayload {
+  message: string;
+}
+
+/** Payload shape for type=WORKLOG events. */
+export interface WorklogPayload {
+  message: string;
+}
+
 /** Role lease metadata. */
 export interface SessionInfo {
   role: RoleId;

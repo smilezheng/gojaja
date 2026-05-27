@@ -10,7 +10,50 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 ### Planned next
 
-- PR2: `claim`, `plan`, `ack`, `report`, `worklog`, `release`.
+- PR3: `wait` (cheap token-free keepalive).
+
+## [2.0.0-alpha.1] — 2026-05-27
+
+### Added (PR2 — claim / plan / ack / report / worklog)
+
+- `agentctl claim <role> [--ttl <s>] [--force]` leases a role for the
+  current shell and prints the session id.
+- `agentctl release [<role>]` ends the current session.
+- `agentctl plan [<role>]` produces a JSON `Manifest` of unread events
+  scoped to the role, persists it under
+  `comms/pending/<role>/<ack-token>.json`, and stamps
+  `cursor.pendingManifest`. Idempotent: calling twice in a row returns
+  the same manifest with the same `ackToken`.
+- `agentctl ack [<role>] --token <t>` advances the cursor exactly to
+  the manifest's `advanceCursorTo`. Token mismatch is rejected;
+  events that arrived between `plan` and `ack` are preserved unread.
+- `agentctl report --to <role> --message <text> [--ref <id>]`
+  publishes a REPORT event. `from` is derived from `MA_SESSION`; the
+  agent cannot impersonate another role.
+- `agentctl worklog --message <text>` broadcasts a WORKLOG event and
+  also writes `worklog/<role>/<id>.md` for git-readable history.
+- `MA_SESSION` environment variable carries identity between commands;
+  `src/cli/identity.ts:resolveIdentity` enforces it.
+- New `Store` methods: `findSessionById`, `publishReport`,
+  `publishWorklog`, `openOrCreatePlan`, `ackManifest`.
+- New types: `Manifest`, `ReportPayload`, `WorklogPayload`.
+- 20 additional vitest cases (`tests/plan-ack.test.ts`,
+  `tests/identity.test.ts`) — 39/39 total. Key regression tests:
+  - `does NOT skip events that arrived after plan` — covers the
+    v0.1 ack-race bug.
+  - `is idempotent across retry` — covers crash-and-restart.
+  - `never loses an event across a fast publish/plan/ack loop` —
+    30-event property test.
+  - `filters events by recipient, excludes self-sent` — sender does
+    not re-process its own broadcasts.
+
+### Changed
+
+- Inbox is now a derived view (filter on the event stream by
+  `to ∈ {role, "*"} && from !== role`). The `comms/inbox/<role>/`
+  directory and the `Paths.inboxDir` constant are gone. See
+  [docs/SCHEMA.md → Inbox is a derived view](./docs/SCHEMA.md#inbox-is-a-derived-view-not-files)
+  for the rationale.
 
 ## [2.0.0-alpha.0] — 2026-05-27
 

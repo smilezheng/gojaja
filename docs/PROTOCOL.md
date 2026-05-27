@@ -22,29 +22,26 @@ There are three identity domains:
 An agent window asserts a role identity by holding a fresh session id
 for that role.
 
-## Role lifecycle (today: storage primitives only; CLI lands PR2)
+## Role lifecycle
 
 ```
 agentctl claim <role>           → SessionInfo (sessionId, leaseTtlSeconds)
 [ export MA_SESSION=<sessionId> ]
 
 loop:
-  agentctl plan <role>          → Manifest JSON (events, inbox, ...)
+  agentctl plan                 → Manifest JSON (events, ackToken, ...)
                                    stamps cursor.pendingManifest=<token>
-  ... agent processes manifest items ...
-  agentctl ack <role> --token <token>
-                                → cursor advances exactly to
+  ... agent processes manifest events ...
+  agentctl ack --token <token>  → cursor advances exactly to
                                   manifest.advanceCursorTo
 
-  (optional) agentctl wait <role> [--mode block|exit] [--idle <min>]
+  (optional, between turns) agentctl wait [--mode block|exit] [--idle <min>]
 
-agentctl release <role>         → clears the session
+agentctl release                → clears the session
 ```
 
-Until the CLI for `claim`/`plan`/`ack` lands, the same primitives are
-available through the `Store` interface for tests and integration:
-`store.claimSession(role, ttl)`, `store.readCursor(role)`,
-`store.updateCursor(role, mutator)`, `store.releaseSession(role, id)`.
+`claim`, `release`, `plan`, `ack`, `report`, `worklog` are implemented
+in v2.0.0-alpha.1. `wait` lands in PR3.
 
 ## Claim
 
@@ -66,24 +63,27 @@ subsequent commands can verify identity.
 This is the only correct loop to consume work. It is designed so that
 no event observed by `plan` can be silently skipped by `ack`.
 
-### `agentctl plan <role>`
+### `agentctl plan [<role>]`
 
+- Resolves the role: from `MA_SESSION` if set, or from the optional
+  positional argument (the two must agree if both are present).
 - Reads the current cursor and computes a `Manifest`:
-  - all events with `id > cursor.ackedThrough` and `to ∈ {role, "*"}`,
-  - inbox files in `comms/inbox/<role>/` with `id > cursor.ackedThrough`,
-  - tasks the role is assigned (PR4),
-  - RFCs awaiting action from the role (PR4).
+  - all events with `id > cursor.ackedThrough`
+    where `to ∈ {role, "*"}` AND `from !== role`,
+  - tasks the role is assigned (PR4, not yet emitted),
+  - RFCs awaiting action from the role (PR4, not yet emitted).
 - Writes the manifest to `comms/pending/<role>/<ack-token>.json`.
 - Updates the cursor with `pendingManifest = <ack-token>` (the cursor's
   `ackedThrough` is **not** moved).
-- Prints the manifest to stdout as JSON.
+- Prints the manifest to stdout (as JSON when `--json`).
 
 If a previous manifest is outstanding (`pendingManifest != null`), `plan`
 returns the existing manifest verbatim and does not generate a new one.
 This makes the operation idempotent across crash-and-retry.
 
-### `agentctl ack <role> --token <ack-token>`
+### `agentctl ack [<role>] --token <ack-token>`
 
+- Same role resolution as `plan`.
 - Validates `<ack-token> == cursor.pendingManifest`. Mismatch → `UsageError`,
   exit 2. The agent must `plan` again to get the current token.
 - Advances `cursor.ackedThrough = manifest.advanceCursorTo`.
@@ -92,7 +92,8 @@ This makes the operation idempotent across crash-and-retry.
 
 Cursor advancement is bounded by the manifest, not by "current latest".
 Any event with `id > manifest.advanceCursorTo` is still unread after
-ack.
+ack — see the regression test
+`tests/plan-ack.test.ts → "does NOT skip events that arrived after plan"`.
 
 ### What the agent must do between plan and ack
 
@@ -105,18 +106,20 @@ ack.
 
 ## Sending
 
-### `agentctl report --to <role> [--ref <id>] --message <text>`
+### `agentctl report --to <role> --message <text> [--ref <id>]`
 
 - `from` is derived from `MA_SESSION` (i.e. the session's role); the agent
   cannot pass an arbitrary `--from`.
-- Writes one event record into `comms/events/` AND a copy into
-  `comms/inbox/<to>/`. The two records share the same ULID id.
-- Refuses to report to an unknown role.
+- Writes one event record into `comms/events/`. Recipients see it via
+  their next `plan`, which filters the global event stream by `to`.
+- Refuses an empty message or an unknown recipient role.
+- Returns the created event (full record when `--json`).
 
 ### `agentctl worklog --message <text>`
 
 - Broadcast event (`to = "*"`).
-- Also creates a `worklog/<role>/<ulid>.md` file with the body.
+- Also creates a `worklog/<role>/<ulid>.md` file with the body, for
+  git-readable browsing by humans.
 - Designed to be small and frequent; reserve large narratives for
   reports or RFC comments.
 

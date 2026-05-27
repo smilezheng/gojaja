@@ -1,4 +1,10 @@
-import type { CursorState, Event, SessionInfo } from "./types";
+import type {
+  CursorState,
+  Event,
+  Manifest,
+  RoleId,
+  SessionInfo,
+} from "./types";
 
 /**
  * Storage abstraction. All command-layer code talks to a Store; the local
@@ -89,5 +95,60 @@ export interface Store {
 
   readSession(role: string): Promise<SessionInfo | null>;
 
+  /**
+   * Scan all session files and return the one whose `sessionId` matches.
+   * Returns `null` if no live session has that id. Used to translate the
+   * `MA_SESSION` environment variable back into a role identity.
+   */
+  findSessionById(sessionId: string): Promise<SessionInfo | null>;
+
   touchHeartbeat(role: string, sessionId: string): Promise<void>;
+
+  // ---- composite operations -----------------------------------------------
+
+  /**
+   * Publish a REPORT event targeted at `to`. The event is the source of
+   * truth; recipients see it via their next `openOrCreatePlan` call (which
+   * filters the global event stream by recipient role).
+   */
+  publishReport(input: {
+    from: RoleId;
+    to: RoleId;
+    ref?: string;
+    message: string;
+  }): Promise<Event>;
+
+  /**
+   * Publish a WORKLOG event (broadcast to "*") AND write a markdown copy
+   * to `worklog/<role>/<id>.md` for human-readable browsing in git.
+   */
+  publishWorklog(input: { from: RoleId; message: string }): Promise<Event>;
+
+  /**
+   * Generate a manifest for the role, or return the outstanding one.
+   *
+   * If `cursor.pendingManifest` is non-null and the underlying file is
+   * readable, that exact manifest is returned (idempotency across retry).
+   * Otherwise, a fresh manifest is built from events with `id > cursor`
+   * filtered by `to ∈ {role, "*"} && from !== role`, persisted under
+   * `comms/pending/<role>/<token>.json`, and the cursor is stamped with
+   * the new `pendingManifest` token.
+   */
+  openOrCreatePlan(role: RoleId): Promise<Manifest>;
+
+  /**
+   * Consume an outstanding manifest. Validates the token against the
+   * cursor's `pendingManifest`. On success, advances `ackedThrough` to
+   * the manifest's `advanceCursorTo`, clears `pendingManifest`, and
+   * removes the manifest file.
+   *
+   * The returned `previousCursor` is the `ackedThrough` value before the
+   * advance, for caller observability.
+   */
+  ackManifest(role: RoleId, token: string): Promise<{
+    role: RoleId;
+    previousCursor: string;
+    ackedThrough: string;
+    eventsAcked: number;
+  }>;
 }

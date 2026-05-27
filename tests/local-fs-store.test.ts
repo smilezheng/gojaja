@@ -30,7 +30,6 @@ describe("LocalFsStore.initialise", () => {
       "roles",
       "state",
       "comms/events",
-      "comms/inbox",
       "comms/cursors",
       "comms/pending",
       "comms/sessions",

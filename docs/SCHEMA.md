@@ -33,7 +33,6 @@ breaking change to a path, file name, or JSON shape requires bumping
   worklog/<role>/<ulid>.md             ← one entry file per worklog entry
   comms/
     events/<ulid>.json                  ← immutable event stream
-    inbox/<role>/<ulid>.json           ← role-directed messages
     cursors/<role>.json                ← per-role consumer cursor
     pending/<role>/<ack-token>.json    ← outstanding manifests
     sessions/<role>.json               ← role lease metadata
@@ -102,18 +101,19 @@ Event types currently emitted:
 Records are append-only at the directory level. There is no in-place
 modification; corrections are expressed as later events.
 
-## `comms/inbox/<role>/<ulid>.json`
+## Inbox is a derived view, not files
 
-Same layout as event files, but tied to one recipient role. Each
-directed `report` writes BOTH an event in `comms/events/` AND a copy in
-the recipient's inbox directory. Plan/ack treat the two streams in
-parallel: an event with a `to` of `PM` becomes both an entry in `events`
-and an inbox file under `inbox/PM/`. Cursors track the union; readers
-de-duplicate by id.
+A role's "inbox" is the subset of the event stream where
+`to ∈ {role, "*"}` and `from !== role`. `plan` performs that filter
+on the fly; there are no separate `comms/inbox/<role>/` files in v2.0.
 
-The rationale for duplication: events are the linear audit log; inbox
-directories let a recipient query "all messages for me" in O(N_unread)
-without scanning the global stream.
+Rationale: events are already globally visible (the audit stream is not
+ACL'd), so a per-role inbox file would be pure duplication with its own
+consistency-window. Filtering at read time keeps the write path single,
+crash-safe, and free of dual-write races.
+
+If a future version introduces ACLs on event visibility, this decision
+will be revisited; today's filter rule is the contract.
 
 ## `comms/cursors/<role>.json`
 
@@ -142,23 +142,31 @@ Invariants:
 
 ## `comms/pending/<role>/<ack-token>.json`
 
-Planned (PR2). The output of `agentctl plan <role>`, archived so `ack`
-can validate the token and advance the cursor deterministically.
+The output of `agentctl plan <role>`, archived so `ack` can validate the
+token and advance the cursor deterministically.
 
 ```jsonc
 {
   "ackToken": "01HX...",
   "role": "PM",
   "generatedAt": "2026-05-27T05:23:00Z",
+  "fromCursor": "01HX...PREVCURSOR",  // empty string before first ack
   "advanceCursorTo": "01HX...EVTLATEST",
-  "events": [ /* Event records */ ],
-  "inbox":  [ /* Event records (subset, recipient=role) */ ],
-  "tasks":  [ /* Task records assigned to this role */ ],
-  "rfcs":   [ /* RFC summaries needing this role's action */ ]
+  "events": [ /* Event records, oldest first, filtered for this role */ ]
 }
 ```
 
-A manifest file is deleted after a successful `ack` with its token.
+Invariants:
+
+- The file name stem equals `ackToken`.
+- The cursor's `pendingManifest` equals `ackToken` while the manifest is
+  outstanding.
+- A manifest file is removed after a successful `ack` with its token.
+- `advanceCursorTo` reflects the latest event id in the global stream at
+  plan time. It may be greater than the largest id in `events` because
+  the filter excludes events the role sent itself.
+
+`tasks` and `rfcs_pending_action` sections are reserved for PR4.
 
 ## `comms/sessions/<role>.json`
 

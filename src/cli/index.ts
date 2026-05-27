@@ -1,7 +1,13 @@
 import { parseArgv } from "./argv";
 import { AgentctlError, UsageError } from "../core/errors";
+import { runAck } from "./commands/ack";
+import { runClaim } from "./commands/claim";
 import { runInit } from "./commands/init";
+import { runPlan } from "./commands/plan";
+import { runRelease } from "./commands/release";
+import { runReport } from "./commands/report";
 import { runVersion } from "./commands/version";
+import { runWorklog } from "./commands/worklog";
 import { HELP_TEXT } from "./help";
 
 async function dispatch(): Promise<number> {
@@ -23,6 +29,18 @@ async function dispatch(): Promise<number> {
       return runInit(args);
     case "version":
       return runVersion(args);
+    case "claim":
+      return runClaim(args);
+    case "release":
+      return runRelease(args);
+    case "plan":
+      return runPlan(args);
+    case "ack":
+      return runAck(args);
+    case "report":
+      return runReport(args);
+    case "worklog":
+      return runWorklog(args);
     default:
       throw new UsageError(`Unknown command: ${args.command}`);
   }

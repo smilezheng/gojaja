@@ -5,15 +5,32 @@ export const HELP_TEXT = `agentctl ${CLI_VERSION}
 Usage:
   agentctl <command> [options]
 
-Commands:
-  init                       Initialise a .multi-agent layer in the current project.
-  version                    Print the schema version of the current layer.
-  help                       Show this help.
+Bootstrap:
+  init [--root <path>]           Initialise a .multi-agent layer.
+  version                        Print CLI and schema version.
+
+Session lifecycle:
+  claim <role> [--ttl <s>] [--force]
+                                 Lease a role for this shell.
+                                 Print the session id; export it as MA_SESSION.
+  release [<role>]               End the current session.
+
+Per-turn loop (require MA_SESSION):
+  plan [<role>]                  Fetch unread events as a JSON manifest with
+                                 an ack token. Idempotent across retry.
+  ack  [<role>] --token <t>      Confirm a manifest; advance the cursor only
+                                 to that manifest's snapshot point.
+
+Messaging (require MA_SESSION):
+  report --to <role> --message <text> [--ref <id>]
+                                 Send a directed event to another role.
+  worklog --message <text>       Broadcast a worklog entry; also writes
+                                 worklog/<role>/<id>.md for humans.
 
 Global options:
-  --root <path>              Override project root (default: walk up from CWD).
-  --json                     Force JSON output where supported.
+  --root <path>                  Override project root (default: walk up).
+  --json                         Force JSON output where supported.
 
-This is v2.0.0-alpha. Many subcommands (claim, plan, ack, report, rfc, ...) are
-not yet implemented; they will land in upcoming PRs.
+Unimplemented (planned, see docs/ROADMAP.md):
+  wait, rfc *, role *, doctor, upgrade, reset
 `;

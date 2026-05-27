@@ -23,7 +23,6 @@ export const Paths = {
   locksDir: "locks",
 
   eventsDir: "comms/events",
-  inboxDir: "comms/inbox",
   cursorsDir: "comms/cursors",
   pendingDir: "comms/pending",
   sessionsDir: "comms/sessions",
@@ -33,7 +32,6 @@ export const Paths = {
 export function rolePaths(role: string) {
   return {
     roleFile: path.posix.join(Paths.rolesDir, `${role}.md`),
-    inboxDir: path.posix.join(Paths.inboxDir, role),
     cursorFile: path.posix.join(Paths.cursorsDir, `${role}.json`),
     pendingDir: path.posix.join(Paths.pendingDir, role),
     sessionFile: path.posix.join(Paths.sessionsDir, `${role}.json`),
@@ -41,6 +39,18 @@ export function rolePaths(role: string) {
     worklogDir: path.posix.join(Paths.worklogDir, role),
     lockFile: path.posix.join(Paths.locksDir, `role-${role}.lock`),
   };
+}
+
+export function manifestPath(role: string, ackToken: string): string {
+  return path.posix.join(Paths.pendingDir, role, `${ackToken}.json`);
+}
+
+export function eventPath(eventId: string): string {
+  return path.posix.join(Paths.eventsDir, `${eventId}.json`);
+}
+
+export function worklogEntryPath(role: string, eventId: string): string {
+  return path.posix.join(Paths.worklogDir, role, `${eventId}.md`);
 }
 
 /**

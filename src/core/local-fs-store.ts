@@ -17,10 +17,22 @@ import {
 } from "./atomic";
 import { withFileLock } from "./file-lock";
 import { freshId, isUlid, newId } from "./ids";
-import { Paths, resolveInside, rolePaths } from "./paths";
+import {
+  Paths,
+  manifestPath,
+  resolveInside,
+  rolePaths,
+  worklogEntryPath,
+} from "./paths";
 import { validateRoleId } from "./role-id";
 import type { Store } from "./store";
-import type { CursorState, Event, SessionInfo } from "./types";
+import type {
+  CursorState,
+  Event,
+  Manifest,
+  RoleId,
+  SessionInfo,
+} from "./types";
 
 /**
  * Filesystem-backed Store. Operates against a `.multi-agent` directory rooted
@@ -53,7 +65,6 @@ export class LocalFsStore implements Store {
       Paths.rolesDir,
       Paths.stateDir,
       Paths.eventsDir,
-      Paths.inboxDir,
       Paths.cursorsDir,
       Paths.pendingDir,
       Paths.sessionsDir,
@@ -284,6 +295,167 @@ export class LocalFsStore implements Store {
         heartbeatAt: new Date().toISOString(),
       };
       await atomicWriteJson(file, updated);
+    });
+  }
+
+  async findSessionById(sessionId: string): Promise<SessionInfo | null> {
+    if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+    const dir = this.abs(Paths.sessionsDir);
+    let names: string[];
+    try {
+      names = await fsp.readdir(dir);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
+    }
+    for (const name of names) {
+      if (!name.endsWith(".json") || name.startsWith(".")) continue;
+      const session = await readJsonFileOrNull<SessionInfo>(
+        path.join(dir, name),
+      );
+      if (session && session.sessionId === sessionId) return session;
+    }
+    return null;
+  }
+
+  // ---- composite operations -----------------------------------------------
+
+  async publishReport(input: {
+    from: RoleId;
+    to: RoleId;
+    ref?: string;
+    message: string;
+  }): Promise<Event> {
+    validateRoleId(input.from);
+    validateRoleId(input.to);
+    if (typeof input.message !== "string" || input.message.length === 0) {
+      throw new UsageError("Report message must be a non-empty string.");
+    }
+    return this.recordEventInternal({
+      type: "REPORT",
+      from: input.from,
+      to: input.to,
+      ref: input.ref,
+      payload: { message: input.message },
+    });
+  }
+
+  async publishWorklog(input: { from: RoleId; message: string }): Promise<Event> {
+    validateRoleId(input.from);
+    if (typeof input.message !== "string" || input.message.length === 0) {
+      throw new UsageError("Worklog message must be a non-empty string.");
+    }
+    const event = await this.recordEventInternal({
+      type: "WORKLOG",
+      from: input.from,
+      to: "*",
+      payload: { message: input.message },
+    });
+    // Best-effort markdown copy for git-friendly browsing. If this fails the
+    // canonical record (the event file) is already durable.
+    const mdPath = this.abs(worklogEntryPath(input.from, event.id));
+    const body =
+      `# Worklog entry ${event.id}\n\n` +
+      `- Role: ${event.from}\n` +
+      `- Time: ${event.ts}\n\n` +
+      `${input.message}\n`;
+    await atomicWriteFile(mdPath, body);
+    return event;
+  }
+
+  async openOrCreatePlan(role: RoleId): Promise<Manifest> {
+    validateRoleId(role);
+    return this.withLock(`cursor-${role}`, async () => {
+      const cursor = await this.readCursor(role);
+      if (cursor.pendingManifest) {
+        const existing = await readJsonFileOrNull<Manifest>(
+          this.abs(manifestPath(role, cursor.pendingManifest)),
+        );
+        if (existing && existing.role === role && existing.ackToken === cursor.pendingManifest) {
+          return existing;
+        }
+        // Pending pointer is stale; fall through and regenerate.
+      }
+      const events = await this.listEventsAfter(cursor.ackedThrough);
+      const filtered = events.filter(
+        (e) => e.from !== role && (e.to === role || e.to === "*"),
+      );
+      const advanceCursorTo =
+        events.length > 0 ? events[events.length - 1].id : cursor.ackedThrough;
+      const ackToken = newId();
+      const manifest: Manifest = {
+        ackToken,
+        role,
+        generatedAt: new Date().toISOString(),
+        advanceCursorTo,
+        fromCursor: cursor.ackedThrough,
+        events: filtered,
+      };
+      await atomicWriteJson(this.abs(manifestPath(role, ackToken)), manifest);
+      const updated: CursorState = {
+        ...cursor,
+        pendingManifest: ackToken,
+        updatedAt: new Date().toISOString(),
+      };
+      await atomicWriteJson(this.abs(rolePaths(role).cursorFile), updated);
+      return manifest;
+    });
+  }
+
+  async ackManifest(
+    role: RoleId,
+    token: string,
+  ): Promise<{
+    role: RoleId;
+    previousCursor: string;
+    ackedThrough: string;
+    eventsAcked: number;
+  }> {
+    validateRoleId(role);
+    if (!isUlid(token)) {
+      throw new UsageError(`Ack token must be a ULID, got '${token}'.`);
+    }
+    return this.withLock(`cursor-${role}`, async () => {
+      const cursor = await this.readCursor(role);
+      if (!cursor.pendingManifest) {
+        throw new UsageError(
+          `Role '${role}' has no outstanding manifest to ack. Run 'agentctl plan' first.`,
+        );
+      }
+      if (cursor.pendingManifest !== token) {
+        throw new UsageError(
+          `Ack token mismatch for '${role}': pending '${cursor.pendingManifest}', ` +
+            `provided '${token}'. Re-run 'agentctl plan' to get the current token.`,
+        );
+      }
+      const manifestFile = this.abs(manifestPath(role, token));
+      const manifest = await readJsonFileOrNull<Manifest>(manifestFile);
+      if (!manifest) {
+        throw new StateCorruptionError(
+          `Pending manifest for '${role}' is missing on disk: ${manifestFile}`,
+        );
+      }
+      const previousCursor = cursor.ackedThrough;
+      const advanceTo = manifest.advanceCursorTo;
+      if (advanceTo && advanceTo < previousCursor) {
+        throw new StateCorruptionError(
+          `Manifest advanceCursorTo '${advanceTo}' is older than current cursor '${previousCursor}'.`,
+        );
+      }
+      const updated: CursorState = {
+        ...cursor,
+        ackedThrough: advanceTo || previousCursor,
+        pendingManifest: null,
+        updatedAt: new Date().toISOString(),
+      };
+      await atomicWriteJson(this.abs(rolePaths(role).cursorFile), updated);
+      await safeUnlink(manifestFile);
+      return {
+        role,
+        previousCursor,
+        ackedThrough: updated.ackedThrough,
+        eventsAcked: manifest.events.length,
+      };
     });
   }
 
