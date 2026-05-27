@@ -13,7 +13,7 @@ breaking change to a path, file name, or JSON shape requires bumping
 ```
 .multi-agent/
   VERSION                              ← schema version, plain text
-  config.yaml                          ← project config (planned, not yet emitted)
+  config.yaml                          ← project config (roles, ownership, RFC counter)
   audit.log                            ← JSONL audit trail (planned)
 
   protocol/                            ← human-authored protocol docs

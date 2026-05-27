@@ -16,8 +16,8 @@ There are three identity domains:
 - **Role id** — long-lived, human-meaningful (`PM`, `TL`, `Backend`).
   Stable across sessions.
 - **Session id** — issued by `claim`; valid only while the lease is held.
-  All authenticated commands carry the session id (currently via the
-  `MA_SESSION` environment variable; planned for PR2).
+  All authenticated commands carry the session id via the `MA_SESSION`
+  environment variable.
 - **Ack token** — issued by `plan`; valid until the next `plan` for that
   role or until consumed by `ack`.
 
@@ -42,8 +42,8 @@ loop:
 agentctl release                → clears the session
 ```
 
-`claim`, `release`, `plan`, `ack`, `report`, `worklog` are implemented
-in v2.0.0-alpha.1. `wait` lands in PR3.
+`claim`, `release`, `plan`, `ack`, `report`, `worklog`, and `wait` are
+all implemented.
 
 ## Claim
 
@@ -74,8 +74,8 @@ no event observed by `plan` can be silently skipped by `ack`.
     where `to ∈ {role, "*"}` AND `from !== role`,
   - a compact `roleReminder` re-anchoring identity (id, title, owns,
     mustNotEdit, reportsTo, one-line protocol; empty fields omitted),
-  - tasks the role is assigned (PR5),
-  - RFCs awaiting action from the role (PR6, not yet emitted).
+  - active tasks owned by the role,
+  - open RFCs that need the role's comment or decision.
 - Writes the manifest to `comms/pending/<role>/<ack-token>.json`.
 - Updates the cursor with `pendingManifest = <ack-token>` (the cursor's
   `ackedThrough` is **not** moved).
@@ -116,10 +116,10 @@ ack — see the regression test
 
 - Read every item in the manifest. Items the agent ignores are still
   acked — they will not appear in the next `plan`.
-- Side effects on framework state should be performed through agentctl
-  subcommands; raw filesystem edits skip ownership checks and are not
-  reflected in the event stream until the next mutation. The store does
-  not enforce this yet; ownership enforcement is on the roadmap.
+- All writes to framework state must go through `agentctl` subcommands.
+  Direct file edits bypass ownership checks (exit 9 from `agentctl`
+  means the caller lacks the configured permission) and are not
+  reflected in the event stream.
 
 ## Sending
 

@@ -86,8 +86,14 @@ v2 stores each record as its own JSON file named by a ULID:
 ```
 comms/events/01HX7T0Z6K7Z4S9W3GQ7M2C2KD.json
 comms/events/01HX7T0Z6K9MR8K2N6Q3X1V4XE.json
-comms/inbox/PM/01HX7T0Z6KCJ1B0FQ2K5MNT0DA.json
+worklog/PM/01HX7T0Z6KCJ1B0FQ2K5MNT0DA.md
 ```
+
+Note: there is no separate `comms/inbox/` directory. Role inboxes are
+derived views — a role's "unread messages" are simply the events in
+`comms/events/` where `to == role || to == "*"` and `from != role`,
+filtered by the role's cursor position. `agentctl plan` computes this
+filter on demand.
 
 Properties this buys:
 
@@ -140,10 +146,11 @@ A naïve `ack` implementation reads "current latest event id" and writes
 it to the cursor. That race silently loses any event that arrived between
 `sync` and `ack`. v2 closes the race with an explicit manifest:
 
-1. `agentctl plan <role>` snapshots all unread events and inbox messages,
-   writes the snapshot to `comms/pending/<role>/<ack-token>.json`, stamps
-   the cursor's `pendingManifest = ack-token`, and prints the snapshot as
-   JSON for the agent to act on.
+1. `agentctl plan <role>` snapshots all unread events (filtered to those
+   addressed to the role), writes the snapshot to
+   `comms/pending/<role>/<ack-token>.json`, stamps the cursor's
+   `pendingManifest = ack-token`, and prints the snapshot as JSON for
+   the agent to act on.
 2. The agent processes the listed items.
 3. `agentctl ack <role> --token <ack-token>` validates that the token is
    the cursor's current `pendingManifest`, then advances `ackedThrough` to
@@ -156,9 +163,6 @@ any mutation that moves `ackedThrough` backwards. The combination of
 visible to a `plan` is either processed before ack or remains unread; it
 cannot be silently skipped.
 
-Note: this PR establishes the cursor invariants in storage. The `plan` and
-`ack` CLI commands land in PR2.
-
 ## Sessions and leases
 
 Two agent windows cannot both claim role `PM`. `claimSession(role, ttl)`
@@ -169,11 +173,11 @@ performs the analogous O_EXCL+lease dance on `comms/sessions/<role>.json`:
 - `release` requires the session id, so a successor cannot accidentally
   release the previous holder's session.
 
-The session id is a ULID returned by `claim`. Future CLI commands will pin
-it into an environment variable (`MA_SESSION`) so that follow-up commands
-in the same shell automatically identify themselves; this makes
-impersonation of `from-role` cost an explicit override rather than a
-silent ambiguity.
+The session id is a ULID returned by `claim`. Follow-up commands in the
+same shell read it from `MA_SESSION`, which ties identity to the
+environment rather than to an argument the agent could accidentally omit
+or forge. Impersonating a different role requires an explicit `claim` and
+is recorded in the event stream.
 
 ## Wait / lifecycle
 
@@ -185,31 +189,33 @@ exit codes to mean "more work" vs "idle".
 v2 cleanly separates:
 
 - **`ack`** — fast, atomic; only touches the cursor.
-- **`wait <role>`** (planned in PR3) — pure keepalive. Two modes:
-  - `--mode block` (default for Codex/Claude shells): shell-level `sleep`
-    for `idle` minutes, then a single re-check. New events → exit 0 with
-    "attention" hint, no new events → exit 0 with "idle" hint. Never uses
-    exit 1 to mean "normal more-work outcome".
-  - `--mode exit` (for Cursor and similar hosts that timeout shell turns):
-    write a `pending_wait` sentinel and exit immediately; an external
-    trigger or the next user message resumes the loop.
+- **`wait`** — pure keepalive. Two modes:
+  - `--mode block` (default): shell-level `sleep` for `--idle` minutes,
+    then a single read-only check. Prints `ATTENTION` if new events
+    arrived, `IDLE` if none. Exits 0 either way.
+  - `--mode exit` (for hosts with short shell timeouts): writes a
+    `.wait` sentinel and exits immediately; the next user message or
+    external scheduler resumes the loop.
 
-The blocking sleep is the cheap part: zero LLM tokens consumed while
-asleep. Keeping it independent from `ack` means a host with a short shell
-timeout can opt out of the sleep without losing safe cursor semantics.
+The blocking sleep costs zero LLM tokens. Keeping it independent from
+`ack` means a short-timeout host can opt out of the sleep without
+compromising cursor safety.
 
 ## RFC: opinions in, leader decision out
 
 Real engineering teams gather opinions, then a tech lead or PM picks.
-v2's RFC model (planned in PR4) mirrors that:
+v2's RFC model mirrors that:
 
-- `rfc new <slug>` creates a structured proposal.
-- `rfc comment <id> --option <a|b|...> --rationale <text>` records any
-  role's opinion in `rfcs/<id>/comments/<role>.json`.
-- `rfc decide <id> --by <leader-role> --option <id> --rationale <text>`
-  is the only command that can transition the RFC state to
-  `accepted` / `rejected`. The `--by` role must appear in
-  `config.yaml`'s `rfc.decision_makers`, otherwise the call is refused.
+- `rfc new <slug>` creates a structured proposal with explicit `voters`
+  (who should comment) and `deciders` (who can close it).
+- `rfc comment <id> --rationale <text> [--option <opt>]` records any
+  role's opinion. Non-voters may also comment — the framework does not
+  restrict who can leave input.
+- `rfc decide <id> --option <id> --rationale <text>` transitions the RFC
+  to `accepted`. Only a role in the proposal's `deciders` list may call
+  this; everyone else is refused.
+- `rfc reject <id> --rationale <text>` transitions to `rejected`, same
+  deciders gate.
 
 There is no quorum function, no automatic tally, no implicit acceptance.
 This avoids the v0.1 mistake of pretending to have a state machine while
@@ -273,6 +279,3 @@ non-zero (cf. v0.1's `turn-end` returning 1 for the normal busy case).
 - **Heartbeat watcher.** A separate `agentctl watch` process that scans
   heartbeats and downgrades stale sessions, independent of any agent
   window.
-- **`config.yaml`-driven ownership enforcement.** All `write-state` calls
-  will validate `roles[caller].owns` includes the target file. The schema
-  is sketched but not yet enforced.
