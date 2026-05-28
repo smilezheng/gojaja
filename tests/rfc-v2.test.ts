@@ -214,12 +214,15 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
   });
 
   it("all required roles ack → decide proceeds", async () => {
+    // PR8t: NEW_RFC.createdBy === "Backend", so Backend is auto-added
+    // to voters and must ack alongside DevOps + PM before TL can decide.
     const r = await ctx.store.createRfc(NEW_RFC);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
     await ctx.store.ackRfc({ rfcId: r.id, role: "DevOps" });
     await ctx.store.ackRfc({ rfcId: r.id, role: "PM" });
+    await ctx.store.ackRfc({ rfcId: r.id, role: "Backend" });
     const d = await ctx.store.decideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "all acked",
     });
@@ -227,6 +230,8 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
   });
 
   it("mix of ack and object also unblocks decide", async () => {
+    // PR8t: Backend (createdBy) must respond too — mix in an object
+    // from the creator alongside DevOps ack + PM object.
     const r = await ctx.store.createRfc(NEW_RFC);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
@@ -235,6 +240,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
     await ctx.store.objectRfc({
       rfcId: r.id, role: "PM", rationale: "prefer B", preferredOption: "B",
     });
+    await ctx.store.ackRfc({ rfcId: r.id, role: "Backend" });
     // Decider knows PM objected (visible in comments); still allowed
     // to decide A. Audit trail is preserved.
     const d = await ctx.store.decideRfc({
@@ -557,6 +563,8 @@ describe("PR8g — Manifest visibility for new states", () => {
   });
 
   it("PR8g.1: pre-decision surfaces in manifest with myAckOwed for required roles; status stays 'open'", async () => {
+    // PR8t: NEW_RFC.createdBy === "Backend", so Backend is auto-added
+    // to voters and is in the required-ACK set.
     const r = await ctx.store.createRfc(NEW_RFC);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
@@ -568,13 +576,17 @@ describe("PR8g — Manifest visibility for new states", () => {
     expect(ePM?.pendingPreDecision?.chosenOption).toBe("A");
     expect(ePM?.pendingPreDecision?.decidedBy).toBe("TL");
     expect(ePM?.pendingPreDecision?.myAckOwed).toBe(true);
-    expect(ePM?.pendingPreDecision?.awaitingAckFrom?.sort()).toEqual(["DevOps", "PM"]);
+    expect(ePM?.pendingPreDecision?.awaitingAckFrom?.sort()).toEqual(
+      ["Backend", "DevOps", "PM"],
+    );
     // TL (the pre-decider) sees the pre-decision but doesn't owe ACK
     // themselves (they're the one waiting).
     const mTL = await ctx.store.openOrCreatePlan("TL");
     const eTL = mTL.rfcs.find((x) => x.id === r.id);
     expect(eTL?.pendingPreDecision?.myAckOwed).toBe(false);
-    expect(eTL?.pendingPreDecision?.awaitingAckFrom?.sort()).toEqual(["DevOps", "PM"]);
+    expect(eTL?.pendingPreDecision?.awaitingAckFrom?.sort()).toEqual(
+      ["Backend", "DevOps", "PM"],
+    );
   });
 
   it("PR8g.1: voter ack shrinks awaitingAckFrom (from decider's view) and drops voter from their own manifest", async () => {
@@ -583,10 +595,13 @@ describe("PR8g — Manifest visibility for new states", () => {
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
     await ctx.store.ackRfc({ rfcId: r.id, role: "DevOps" });
-    // Decider sees PM still outstanding.
+    // Decider sees Backend + PM still outstanding (PR8t: Backend is
+    // the creator and thus an auto-voter).
     const mTL = await ctx.store.openOrCreatePlan("TL");
     const eTL = mTL.rfcs.find((x) => x.id === r.id);
-    expect(eTL?.pendingPreDecision?.awaitingAckFrom).toEqual(["PM"]);
+    expect(eTL?.pendingPreDecision?.awaitingAckFrom?.sort()).toEqual(
+      ["Backend", "PM"],
+    );
     // DevOps (who acked) drops out of their own manifest — nothing
     // more for them to do on this RFC until either a new pre-decide
     // or the RFC decides/rejects.
@@ -787,5 +802,89 @@ describe("PR8l — brainstorm-mode RFC (empty options)", () => {
         ],
       }),
     ).rejects.toMatchObject({ code: "USAGE" });
+  });
+});
+
+// ---------- PR8t: creator is auto-added to voters ----------
+
+describe("PR8t — RFC creator is automatically a voter", () => {
+  let ctx: { root: string; store: LocalFsStore };
+  beforeEach(async () => { ctx = await freshStore(); });
+  afterEach(async () => { await fsp.rm(ctx.root, { recursive: true, force: true }); });
+
+  it("createRfc auto-adds createdBy to voters when not already listed", async () => {
+    const r = await ctx.store.createRfc({
+      slug: "creator-voter", title: "x",
+      voters: ["DevOps"], deciders: ["TL"],
+      options: [{ id: "A", summary: "do a" }],
+      createdBy: "Backend",
+    });
+    expect(r.voters).toEqual(["DevOps", "Backend"]);
+  });
+
+  it("passing createdBy explicitly in --voters does not double-list", async () => {
+    const r = await ctx.store.createRfc({
+      slug: "no-dupe", title: "x",
+      voters: ["Backend", "DevOps"], deciders: ["TL"],
+      options: [{ id: "A", summary: "do a" }],
+      createdBy: "Backend",
+    });
+    expect(r.voters).toEqual(["Backend", "DevOps"]);
+  });
+
+  it("SYSTEM-created RFCs do NOT add SYSTEM as a voter", async () => {
+    const r = await ctx.store.createRfc({
+      slug: "system-created", title: "x",
+      voters: ["DevOps"], deciders: ["TL"],
+      options: [{ id: "A", summary: "do a" }],
+      createdBy: "SYSTEM",
+    });
+    expect(r.voters).toEqual(["DevOps"]);
+  });
+
+  it("creator must ack before decide can succeed (ACK gate includes creator)", async () => {
+    const r = await ctx.store.createRfc({
+      slug: "ack-includes-creator", title: "x",
+      voters: ["DevOps"], deciders: ["TL"],
+      options: [{ id: "A", summary: "do a" }],
+      createdBy: "Backend",
+    });
+    await ctx.store.preDecideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
+    });
+    await ctx.store.ackRfc({ rfcId: r.id, role: "DevOps" });
+    // Backend (creator) has NOT acked yet — decide must refuse.
+    await expect(
+      ctx.store.decideRfc({
+        rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "go",
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+    // Once Backend acks, decide proceeds.
+    await ctx.store.ackRfc({ rfcId: r.id, role: "Backend" });
+    const d = await ctx.store.decideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "all in",
+    });
+    expect(d.outcome).toBe("accepted");
+  });
+
+  it("creator who is also the pre-decider does NOT owe themselves an ack", async () => {
+    // PM creates the RFC and is in deciders; PM pre-decides; the gate
+    // excludes the pre-decider, so PM does not ack themselves.
+    const r = await ctx.store.createRfc({
+      slug: "creator-is-decider", title: "x",
+      voters: ["DevOps"], deciders: ["PM"],
+      options: [{ id: "A", summary: "do a" }],
+      createdBy: "PM",
+    });
+    expect(r.voters).toEqual(["DevOps", "PM"]);
+    await ctx.store.preDecideRfc({
+      rfcId: r.id, decidedBy: "PM", chosenOption: "A", rationale: "lean A",
+    });
+    await ctx.store.ackRfc({ rfcId: r.id, role: "DevOps" });
+    // Only DevOps was required; PM is excluded as pre-decider.
+    const d = await ctx.store.decideRfc({
+      rfcId: r.id, decidedBy: "PM", chosenOption: "A", rationale: "go",
+    });
+    expect(d.outcome).toBe("accepted");
   });
 });

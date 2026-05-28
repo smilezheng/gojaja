@@ -61,9 +61,17 @@ Each RFC partitions the project's roles at **creation time**:
 
 | Bucket          | Set by                                                  | What they can do                                                                                  |
 |-----------------|---------------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| **creator**     | implicit (`GOJAJA_SESSION` role, or `SYSTEM`)               | call `rfc new`; rewrite via `rfc edit` while `revising`.                                          |
-| **voters**      | `--voters X,Y` (optional, may be empty)                 | should comment; **must `ack` or `object` whenever there is an active pre-decision** (see §3).     |
+| **creator**     | implicit (`GOJAJA_SESSION` role, or `SYSTEM`)               | call `rfc new`; rewrite via `rfc edit` while `revising`. **PR8t: also added to `voters` automatically** (see below). |
+| **voters**      | `--voters X,Y` ∪ `{creator}` (deduped; creator always included unless `SYSTEM`) | should comment; **must `ack` or `object` whenever there is an active pre-decision** (see §3).     |
 | **deciders**    | `--deciders Z` (required, non-empty)                    | the **only** roles that can call `rfc pre-decide` / `rfc decide` / `rfc reject` / `rfc revise`. **Must also `ack` or `object` when another decider pre-decides** (see §3). |
+
+PR8t: opening an RFC asserts interest in its outcome, so the creator
+is automatically a voter (no opt-out). They see manifest events for
+the RFC AND owe an ack/object on any pre-decision (unless they are
+themselves the pre-decider, in which case the ACK gate excludes them
+as usual). SYSTEM-created RFCs don't auto-include SYSTEM because
+SYSTEM isn't a role; the voters list is then exactly what was passed
+in `--voters`.
 
 Roles in none of these buckets do not see the RFC in their manifest.
 They can still inspect with `gojaja rfc show <id>` (reads are

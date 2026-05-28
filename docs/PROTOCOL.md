@@ -417,6 +417,16 @@ superseded), worked example, and rationale live in
 - Emits `RFC_CREATED` (broadcast).
 - The actor (`GOJAJA_SESSION` role, or `"SYSTEM"` if no session) is recorded
   as the event's `from` and the proposal's `createdBy`.
+- **PR8t: the creator is automatically and unconditionally added to
+  `voters`** (deduped against `--voters` so a caller that lists
+  themselves explicitly does not double-list). Opening an RFC asserts
+  interest in its outcome — the creator both sees manifest events for
+  it AND is required to ack/object on a pre-decision (the ACK gate is
+  computed over `voters ∪ deciders` by definition). SYSTEM-created
+  RFCs (no `GOJAJA_SESSION`) do NOT auto-include SYSTEM, since SYSTEM
+  is not a role and cannot ack/object. There is no opt-out: if you
+  genuinely intend to be a relay, run the command from the role that
+  should be on record, not as a side-channel for someone else.
 
 ### `gojaja rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]`
 

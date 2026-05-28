@@ -2033,7 +2033,20 @@ export class LocalFsStore implements Store {
       }
       optionIds.add(o.id);
     }
-    const voters = input.voters.map((r) => validateRoleId(r));
+    const rawVoters = input.voters.map((r) => validateRoleId(r));
+    // PR8t: the RFC creator is always a participant. Semantically, the
+    // act of opening an RFC asserts interest in its outcome — the
+    // creator should both see manifest events for it (already true via
+    // PR8n's `createdBy` in the visibility set) AND be required to
+    // ack/object on a pre-decision. Dedup so passing `--voters` that
+    // explicitly contains the creator does not double-list. SYSTEM-
+    // created RFCs (no MA_SESSION; CLI driven by the user directly)
+    // do NOT auto-include SYSTEM as a voter, because SYSTEM is not a
+    // role and cannot ack/object.
+    const voters: RoleId[] = [...rawVoters];
+    if (input.createdBy !== "SYSTEM" && !voters.includes(input.createdBy)) {
+      voters.push(input.createdBy);
+    }
     const deciders = input.deciders.map((r) => validateRoleId(r));
     if (deciders.length === 0) {
       throw new UsageError("RFC must have at least one decider.");

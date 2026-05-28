@@ -25,6 +25,44 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   `config.yaml`, so an HR/Admin role can be granted role-creation
   authority via the normal ownership model.
 
+## [2.0.0-alpha.25] — 2026-05-28
+
+### RFC creator is automatically a voter (PR8t)
+
+`createRfc` now unconditionally adds the creator (`createdBy`) to the
+`voters` set (deduped against `--voters` so explicitly listing the
+creator does not double-list). Semantically: opening an RFC asserts
+interest in its outcome — the creator both sees manifest events for
+the RFC AND owes an ack/object on any pre-decision (the ACK gate is
+computed over `voters ∪ deciders`).
+
+> **Behaviour change (alpha-only).** Pre-PR8t RFCs where the creator
+> was deliberately omitted from voters had a quirky property: PM
+> could open an RFC with deciders=[TL] and voters=[Backend, DevOps],
+> then TL could pre-decide + Backend/DevOps could ack and TL would
+> decide — with PM completely outside the audit trail of the final
+> consensus. PR8t closes this; PM is now a required participant.
+
+Edge cases handled:
+
+- Creator passing themselves in `--voters` explicitly: deduplicated,
+  no double-listing.
+- SYSTEM-created RFCs (no `GOJAJA_SESSION`, CLI run by the user
+  directly): SYSTEM is NOT auto-added — it's not a role and cannot
+  ack/object. The voters list is exactly what was passed in.
+- Creator who is also the pre-decider: the ACK gate still excludes
+  the pre-decider, so they don't owe themselves an ack.
+- Creator who is also a decider: same as above, normal decider rules.
+
+No opt-out. If a creator genuinely is a relay, run the command from
+the role that should be on record, not as a side-channel.
+
+5 new tests in `rfc-v2.test.ts` cover the auto-add, dedup, SYSTEM
+exclusion, ACK gate inclusion, and pre-decider exclusion paths. 4
+existing tests updated where they hard-asserted the old voter set.
+
+Suite 316 -> 321.
+
 ## [2.0.0-alpha.24] — 2026-05-28
 
 ### Fix dead doc references in user-facing artifacts (PR8s)

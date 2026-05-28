@@ -59,7 +59,9 @@ wait verdicts (each prints the next command to run):
 Picking \`--deciders\` for an RFC: roles whose \`owns\` overlap the
 decision plus the top of the relevant \`reportsTo\`. deciders are
 **per-RFC**, never role-level; omitting a clearly-relevant role reads
-as scope-shopping in the audit log.
+as scope-shopping in the audit log. The **creator is automatically a
+voter** — opening an RFC asserts interest, so you also owe an
+ack/object on any pre-decision.
 
 ### RFC multi-round discussion
 
