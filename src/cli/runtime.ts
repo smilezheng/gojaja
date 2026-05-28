@@ -7,29 +7,6 @@ const PACKAGE_VERSION = require("../../package.json").version as string;
 export const CLI_VERSION: string = PACKAGE_VERSION;
 
 /** The on-disk schema version embedded in the .gojaja/VERSION file. */
-// Bumped in PR8g (RFC v2 — comments shape moved from per-role JSONs
-// to a single threaded comments.yaml ledger; proposal.yaml gained
-// description / relatedTasks / preDecision; new RFC_* event types).
-// Bumped again in PR8g.1: pre-decide collapsed back to a comment kind
-// with a hard ACK gate. proposal.yaml `status: pre-decide` and
-// `preDecision` field are removed; comments carry a structured `kind`
-// (pre-decision / ack / object). Old shapes are detected on read and
-// refused with a migration hint.
-// Bumped again in PR8i: the `.wait` sentinel is gone; `wait` writes a
-// session record at `comms/pending/<role>/wait.json` and survives host
-// shell timeouts via chunked polling with explicit deadlines.
-// Bumped again in PR8j: Task records gained `parent` (hierarchy),
-// `assignedBy` (audit), `assets` / `deliverables` (reference materials
-// + gated hard outputs), `tags` (filter labels). `setTaskStatus(Done)`
-// refuses when file-kind deliverables are missing on disk; bypass via
-// `--force-incomplete` emits `TASK_DELIVERABLE_BYPASSED`.
-// Bumped in PR8n: manifest `events` is now a per-role projection of
-// the global event stream. Broadcast events (`to: "*"`) only land in
-// the manifests of roles that are stakeholders for that event type
-// (RFC participants, task stakeholders, task-board owners, ...).
-// Operational events (SESSION_*, LOCK_BROKEN, RFC_REPAIRED,
-// ROLE_DELETED) never appear in any manifest — they stay in
-// `comms/events/` for audit + future `gojaja doctor`.
 export const SCHEMA_VERSION = "2.0.0-manifest-filter";
 
 export const LAYER_DIRNAME = ".gojaja";

@@ -18,13 +18,11 @@ export type EventType =
   | "RFC_COMMENT"
   | "RFC_DECIDED"
   | "RFC_REPAIRED"
-  // PR8g (RFC v2)
   | "RFC_OPTION_ADDED"
   | "RFC_REVISION_REQUESTED"
   | "RFC_REVISED"
   | "RFC_TASK_LINKED"
   | "RFC_TASK_UNLINKED"
-  // PR8j (task model expansion)
   | "TASK_DELIVERABLE_BYPASSED"
   | "SESSION_CLAIMED"
   | "SESSION_RELEASED"
@@ -204,17 +202,17 @@ export const ACTIVE_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
 ]);
 
 /**
- * PR8j: maximum depth of the `parent` chain. `createTask` refuses
- * anything that would create a chain longer than this. Five layers
- * cover CTO -> PM -> epic -> story -> subtask; deeper trees usually
- * mean a task that should be split into siblings, not nested.
+ * Maximum depth of the `parent` chain. `createTask` refuses anything
+ * that would create a chain longer than this. Five layers cover
+ * CTO -> PM -> epic -> story -> subtask; deeper trees usually mean a
+ * task that should be split into siblings, not nested.
  */
 export const MAX_TASK_DEPTH = 5;
 
 /**
- * PR8j: pointer to a reference material the task owner needs to read
- * to do the work. Pure information; framework never auto-resolves URLs
- * or requires files to exist.
+ * Pointer to a reference material the task owner needs to read to do
+ * the work. Pure information; framework never auto-resolves URLs or
+ * requires files to exist.
  *   - kind="file" : repo-relative path; refused if the path tries to
  *     escape the repo via `..`. NOT refused for not-yet-existing files.
  *   - kind="url"  : opaque external link; framework treats as a string.
@@ -226,7 +224,7 @@ export interface TaskAsset {
 }
 
 /**
- * PR8j: hard output the task MUST produce before it can be marked Done.
+ * Hard output the task MUST produce before it can be marked Done.
  *   - kind="file"   : repo-relative path. `setTaskStatus(... Done)`
  *     refuses unless the path exists on disk; `--force-incomplete`
  *     bypasses with a logged `TASK_DELIVERABLE_BYPASSED` event.
@@ -256,8 +254,6 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
 
-  // ---- PR8j fields ------------------------------------------------------
-
   /**
    * Parent task id, or null for top-level tasks. Forms a tree; cycles
    * and chains longer than `MAX_TASK_DEPTH` are refused at write time.
@@ -265,14 +261,12 @@ export interface Task {
    */
   parent: string | null;
   /**
-   * PR8u: role that originally created the task. SYSTEM for tasks
-   * created by the CLI with no active session. `null` for legacy
-   * task records (pre-PR8u, no `creator` and no legacy
-   * `assignedBy`). Immutable after creation — `assignTask` does NOT
-   * update it; reassignment history lives in the event stream.
-   * (Was `assignedBy` in PR8j; renamed for clarity.)
+   * Role that originally created the task. `"SYSTEM"` for tasks
+   * created by the CLI with no active session. Immutable after
+   * creation — `assignTask` does NOT update it; reassignment history
+   * lives in the event stream.
    */
-  creator: RoleId | "SYSTEM" | null;
+  creator: RoleId | "SYSTEM";
   /** Reference materials (design docs, Figma links, ...). */
   assets: TaskAsset[];
   /** Required outputs; file-kind entries are gated on Done. */
@@ -280,17 +274,15 @@ export interface Task {
   /** Free-form labels for filtering / grouping. */
   tags: string[];
 
-  // ---- PR8u fields ------------------------------------------------------
-
   /**
-   * PR8u: roles authorised to mark this task `Done` even when they
-   * are not the task's owner. Reviewers are also automatic
-   * stakeholders for the task's lifecycle — `TASK_STATUS_CHANGED`
-   * events surface to them in their manifest without the owner
-   * needing to send an explicit report.
+   * Roles authorised to mark this task `Done` even when they are not
+   * the task's owner. Reviewers are also automatic stakeholders for
+   * the task's lifecycle — `TASK_STATUS_CHANGED` events surface to
+   * them in their manifest without the owner needing to send an
+   * explicit report.
    *
-   * Empty array means "no review hop"; the legacy task-board-owner
-   * protocol still works as a fallback.
+   * Empty array means "no review hop"; the task-board-owner role
+   * remains a fallback for sign-off.
    */
   reviewers: RoleId[];
 }
@@ -314,7 +306,7 @@ export interface TaskSummary {
   /** Subset of dependsOn that are not yet `Done`. */
   blockedBy: string[];
 
-  // ---- PR8j additions (omitted in JSON when empty / N/A) ----
+  // ---- Task-tree fields (omitted in JSON when empty / N/A) ----
 
   /** Parent task id, when this task is a subtask. */
   parent?: string;
@@ -338,8 +330,8 @@ export interface TaskSummary {
   unmetDeliverables?: number;
   /** Tags, when non-empty. */
   tags?: string[];
-  /** PR8u: reviewers list, when non-empty. Lets the agent see at a
-   *  glance who can mark the task Done besides themselves. */
+  /** Reviewers list, when non-empty. Lets the agent see at a glance
+   *  who can mark the task Done besides themselves. */
   reviewers?: RoleId[];
 }
 
@@ -366,7 +358,7 @@ export interface TaskStatusChangedPayload {
 }
 
 /**
- * PR8j: payload for `TASK_DELIVERABLE_BYPASSED` events. Emitted by
+ * Payload for `TASK_DELIVERABLE_BYPASSED` events. Emitted by
  * `setTaskStatus` immediately BEFORE the `TASK_STATUS_CHANGED` event
  * when `--force-incomplete` is used to mark a task Done while one or
  * more `kind: "file"` deliverables are still missing on disk. The
@@ -382,18 +374,7 @@ export interface TaskDeliverableBypassedPayload {
 }
 
 /**
- * RFC lifecycle. Intentionally minimal:
- *
- *   open        -> accepted | rejected
- *   accepted    -> (terminal in v2; superseded via a future v2.x command)
- *   rejected    -> (terminal)
- *
- * The state machine is enforced; transitions outside this graph are
- * refused. We deliberately do NOT auto-compute acceptance from comments:
- * `decide` and `reject` are explicit acts by a role in the deciders list.
- */
-/**
- * RFC lifecycle (PR8g.1 walked back the PR8g pre-decide status):
+ * RFC lifecycle:
  *
  *   open ─── rfc comment / ack / object / add-option / pre-decide (comment) ──▶ open
  *   open ─── rfc decide (ACK gate) ──▶ accepted (terminal)
@@ -403,10 +384,9 @@ export interface TaskDeliverableBypassedPayload {
  *   revising ─── rfc edit ──▶ open
  *   revising ─── rfc reject ──▶ rejected (terminal)
  *
- * PR8g had a `pre-decide` status that auto-flipped on comment. PR8g.1
- * collapses pre-decide back to a comment (`kind: "pre-decision"`) and
- * enforces consensus via a strict ACK gate inside `decideRfc` instead
- * of via state transitions. See docs/RFC.md.
+ * Pre-decide is a structured `kind: "pre-decision"` comment, not a
+ * status. Consensus is enforced via a strict ACK gate inside
+ * `decideRfc`, not via state transitions. See docs/RFC.md.
  */
 export type RfcStatus =
   | "open"
@@ -437,16 +417,14 @@ export interface RfcProposal {
   /** Role or "SYSTEM" — recorded as the event's `from`. */
   createdBy: RoleId | "SYSTEM";
 
-  // ---- PR8g fields ------------------------------------------------------
-
   /**
    * Free-form context. The creator is responsible for making the RFC
    * legible to anyone who has not been in the conversation: problem
    * statement, constraints, what the options actually entail. Decider
    * is expected to `rfc revise` if this is too thin to act on.
    *
-   * Optional in PR8g (a soft warning is printed if empty) so existing
-   * v1 RFCs round-trip; PR8h promotes it to required.
+   * Soft-required: a warning is printed if empty. A future release
+   * will promote this to a hard requirement.
    */
   description: string;
 
@@ -459,9 +437,8 @@ export interface RfcProposal {
 }
 
 /**
- * PR8g.1: a comment carries one of three structured "kinds" that drive
- * the ACK gate, or no kind at all (regular discussion). Pre-PR8g.1
- * comments (no kind field on disk) are treated as regular discussion.
+ * A comment carries one of three structured "kinds" that drive the
+ * ACK gate, or no kind at all (regular discussion).
  */
 export type RfcCommentKind = "pre-decision" | "ack" | "object";
 
@@ -487,11 +464,11 @@ export interface RfcComment {
   replyTo: string | null;
   rationale: string;
   /**
-   * PR8g.1: structured kind. Undefined/absent on a regular discussion
-   * comment. Only `ack` and `object` comments count toward the
-   * `decideRfc` ACK gate; a regular comment from a required role does
-   * NOT advance the gate (you must explicitly state your position via
-   * `rfc ack` or `rfc object`).
+   * Structured kind. Undefined/absent on a regular discussion comment.
+   * Only `ack` and `object` comments count toward the `decideRfc` ACK
+   * gate; a regular comment from a required role does NOT advance the
+   * gate (you must explicitly state your position via `rfc ack` or
+   * `rfc object`).
    */
   kind?: RfcCommentKind;
 }
@@ -522,7 +499,7 @@ export interface RfcCommentPayload {
   role: RoleId;
   preferred: string;
   rationale: string;
-  /** PR8g.1: lets `grep payload.kind` find pre-decision / ack / object posts. */
+  /** Lets `grep payload.kind` find pre-decision / ack / object posts. */
   kind?: RfcCommentKind;
   commentId?: string;
   replyTo?: string | null;
@@ -537,7 +514,7 @@ export interface RfcDecidedPayload {
   rationale: string;
 }
 
-// ---- PR8g RFC v2 event payloads ----------------------------------------
+// ---- RFC event payloads ------------------------------------------------
 
 export interface RfcOptionAddedPayload {
   rfcId: string;
@@ -583,13 +560,13 @@ export interface RfcSummary {
   /** Tasks linked to this RFC (resolved-against-task-board ids). */
   relatedTasks: string[];
   /**
-   * PR8g.1: present iff a `kind: "pre-decision"` comment is the latest
+   * Present iff a `kind: "pre-decision"` comment is the latest
    * pre-decision AND has no subsequent `RFC_OPTION_ADDED` event
    * invalidating it. Tells voters / non-pre-decider deciders what
    * has been proposed AND who is still expected to ack / object.
    *
-   * Silence does NOT count as consent in PR8g.1 — `decideRfc` is
-   * gated on `awaitingAckFrom` being empty.
+   * Silence does NOT count as consent — `decideRfc` is gated on
+   * `awaitingAckFrom` being empty.
    */
   pendingPreDecision?: {
     decidedBy: RoleId;
@@ -623,7 +600,7 @@ export interface SessionInfo {
   leaseTtlSeconds: number;
 }
 
-// ---- PR8i wait-until -----------------------------------------------------
+// ---- wait-until ----------------------------------------------------------
 
 /**
  * The "what am I waiting for" predicate selector. `attention` triggers

@@ -28,7 +28,6 @@ import {
   rfcCommentsFile,
   rfcDecisionPath,
   rfcDir,
-  rfcLegacyCommentsDir,
   rfcProposalPath,
   rfcReadCursorPath,
   rolePaths,
@@ -76,37 +75,23 @@ function freshTaskBoard(schemaVersion: string): TaskBoard {
 }
 
 /**
- * PR8j: populate Task fields that were added after the original schema
- * with safe defaults. Mutates in place. Callers should re-emit YAML
- * with these fields present after the first read so legacy boards
- * naturally migrate forward.
+ * Defensive defaults for Task fields. Mutates in place. Used when
+ * reading YAML the framework wrote — these fields are always emitted
+ * by the writer, so the only way they can be missing is a hand-edit.
  */
 function backfillTaskFields(t: Task): void {
   if (!Array.isArray(t.dependsOn)) t.dependsOn = [];
   if (typeof t.acceptance !== "string") t.acceptance = "";
   if (t.parent === undefined) t.parent = null;
-  // PR8u: assignedBy → creator rename. Promote any legacy field, then
-  // drop it from the in-memory record so subsequent writes use the new
-  // shape. Legacy tasks with neither field land as creator=null;
-  // setTaskStatus(... Done) treats null as "no creator restriction" so
-  // existing alpha task boards keep working for owner-Done.
-  const legacy = t as unknown as { assignedBy?: RoleId | "SYSTEM" | null };
-  if (t.creator === undefined) {
-    t.creator = legacy.assignedBy ?? null;
-  }
-  if ("assignedBy" in (t as object)) {
-    delete (t as unknown as Record<string, unknown>).assignedBy;
-  }
+  if (t.creator === undefined) t.creator = "SYSTEM";
   if (!Array.isArray(t.assets)) t.assets = [];
   if (!Array.isArray(t.deliverables)) t.deliverables = [];
   if (!Array.isArray(t.tags)) t.tags = [];
-  // PR8u: reviewers default to empty list. Legacy tasks fall through
-  // to the task-board-owner protocol for Done sign-off.
   if (!Array.isArray(t.reviewers)) t.reviewers = [];
 }
 
 /**
- * PR8j: walk the parent graph of every task and refuse anything that
+ * walk the parent graph of every task and refuse anything that
  * forms a cycle or exceeds the depth limit. Runs once on read so a
  * hand edit that introduces a cycle stops the world early instead of
  * silently looping anywhere that walks the chain (manifest summaries,
@@ -139,7 +124,7 @@ function detectParentCycles(board: TaskBoard): void {
 }
 
 /**
- * PR8j: validate a `kind: "file"` ref is a repo-relative path that
+ * validate a `kind: "file"` ref is a repo-relative path that
  * stays inside the project tree AND outside the `.gojaja/` layer.
  * Refs are kept as POSIX-style strings on disk; we normalise here only
  * to detect escape attempts (`..`), not to mutate the stored value.
@@ -172,7 +157,7 @@ function validateFileRef(ref: string, fieldName: string, projectRoot: string, la
 }
 
 /**
- * PR8n: is `role` a "stakeholder" of `taskId`? Used by the manifest
+ * is `role` a "stakeholder" of `taskId`? Used by the manifest
  * visibility filter to decide whether `TASK_STATUS_CHANGED` and
  * friends should land in this role's manifest.
  *
@@ -196,7 +181,7 @@ function isTaskStakeholder(role: RoleId, taskId: string, board: TaskBoard): bool
   for (const other of Object.values(board.tasks)) {
     if (other.owner === role && other.dependsOn.includes(taskId)) return true;
   }
-  // PR8u: reviewers are also stakeholders. TASK_STATUS_CHANGED on a
+  // reviewers are also stakeholders. TASK_STATUS_CHANGED on a
   // task they review (most importantly: the transition to Review)
   // surfaces in their manifest without the owner needing to send an
   // explicit report.
@@ -284,7 +269,7 @@ function splitJoin(haystack: string, oldText: string, newText: string): string {
 }
 
 /**
- * PR8g.1 helper: given a comments ledger (already sorted by ts) and
+ * helper: given a comments ledger (already sorted by ts) and
  * the timestamps of all RFC_OPTION_ADDED events for the same RFC,
  * compute whether there is currently an "active pre-decision".
  *
@@ -429,7 +414,7 @@ export class LocalFsStore implements Store {
   }
 
   /**
-   * PR8j: the project tree (the directory CONTAINING `.gojaja/`).
+   * the project tree (the directory CONTAINING `.gojaja/`).
    * Used to resolve `kind: "file"` deliverable refs for the existence
    * gate on `setTaskStatus(... Done)`. We rely on the convention that
    * the layer directory lives at the project root; if that ever
@@ -474,7 +459,7 @@ export class LocalFsStore implements Store {
       this.abs(Paths.taskBoardFile),
       yaml.dump(freshTaskBoard(version), { lineWidth: 100, noRefs: true }),
     );
-    // PR8f-B: seed a TBD skeleton for project_state.md so it always
+    // -B: seed a TBD skeleton for project_state.md so it always
     // exists on disk. The product-owner role is expected to fill the
     // sections; activate / handbook nudge that along.
     await atomicWriteFile(
@@ -566,7 +551,7 @@ export class LocalFsStore implements Store {
   }
 
   /**
-   * PR8n: project the global event stream onto the slice that should
+   * project the global event stream onto the slice that should
    * land in `<role>`'s next manifest. The events file under
    * `comms/events/` always carries the full stream (audit, git
    * history, future `gojaja doctor`); per-role projection happens
@@ -1026,7 +1011,7 @@ export class LocalFsStore implements Store {
         this.safetyMarginMs > 0
           ? events.filter((e) => decodeUlidTimestamp(e.id) <= watermarkMs)
           : events;
-      // PR8n: filter by what THIS role actually cares about. The events
+      // filter by what THIS role actually cares about. The events
       // stream stays full (audit / git / gojaja doctor); the manifest
       // projects only the slice that needs the role's attention. This
       // keeps the LLM turn from being noisy when the project produces
@@ -1395,7 +1380,7 @@ export class LocalFsStore implements Store {
     });
   }
 
-  // ---- wait state (PR8i) --------------------------------------------------
+  // ---- wait state --------------------------------------------------
 
   async readWaitState(role: RoleId): Promise<WaitState | null> {
     validateRoleId(role);
@@ -1611,10 +1596,9 @@ export class LocalFsStore implements Store {
     const board = parsed as TaskBoard;
     if (!board.tasks || typeof board.tasks !== "object") board.tasks = {};
     if (typeof board.nextId !== "number" || !Number.isFinite(board.nextId)) board.nextId = 0;
-    // PR8j: backfill new fields with safe defaults so legacy yaml
-    // (pre-2.0.0-task-v2) round-trips cleanly. Then run a cycle check
-    // across the parent graph — hand-edited boards could otherwise
-    // poison every subsequent operation that walks the chain.
+    // Backfill defensive defaults, then run a cycle check across the
+    // parent graph — hand-edited boards could otherwise poison every
+    // subsequent operation that walks the chain.
     for (const t of Object.values(board.tasks)) {
       backfillTaskFields(t as Task);
     }
@@ -1668,7 +1652,7 @@ export class LocalFsStore implements Store {
     const assets = input.assets ?? [];
     const deliverables = input.deliverables ?? [];
     const tags = (input.tags ?? []).map((t) => String(t));
-    // PR8u: reviewers validated like owner — each must be a registered
+    // Reviewers validated like owner — each must be a registered
     // role. We dedup to keep the audit log tidy; duplicate listings
     // would otherwise show up in `task show` and confuse readers.
     const rawReviewers = (input.reviewers ?? []).map((r) => validateRoleId(r));
@@ -1684,9 +1668,9 @@ export class LocalFsStore implements Store {
     }
     const reviewers: RoleId[] = [...reviewerSet];
 
-    // PR8j: validate asset / deliverable refs up front so the user
-    // gets a single error per invocation rather than discovering
-    // problems at status Done time.
+    // Validate asset / deliverable refs up front so the user gets a
+    // single error per invocation rather than discovering problems
+    // at status Done time.
     const projectRoot = this.projectRoot();
     for (const a of assets) validateAsset(a, projectRoot, this.root);
     for (const d of deliverables) validateDeliverable(d, projectRoot, this.root);
@@ -1696,9 +1680,9 @@ export class LocalFsStore implements Store {
     return this.withLock("task-board", async () => {
       const board = await this.readTaskBoard();
 
-      // PR8j: parent must exist, must not create a cycle (impossible
-      // for a brand-new task since it has no children yet, but check
-      // depth + existence), must not exceed the depth limit.
+      // Parent must exist, must not create a cycle (impossible for a
+      // brand-new task since it has no children yet, but we still
+      // check depth + existence), and must not exceed the depth limit.
       if (parent !== null) {
         if (!board.tasks[parent]) {
           throw new UsageError(
@@ -1836,16 +1820,13 @@ export class LocalFsStore implements Store {
       if (!task) {
         throw new UsageError(`Unknown task '${input.taskId}'.`);
       }
-      // PR8u permission model:
+      // Permission model:
       //
       //   For Done transitions (sign-off act):
       //     - SYSTEM: allowed (CLI run by the human user directly).
       //     - actor in task.reviewers: allowed (explicit review hop).
       //     - actor === task.owner AND actor === task.creator: allowed
       //       (self-managed — you created and own this task).
-      //     - actor === task.owner AND task.creator === null: allowed
-      //       (legacy alpha task without a creator field on disk;
-      //       back-compat with pre-PR8u boards).
       //     - else: fall through to requireOwnership(task_board.yaml).
       //
       //   For non-Done transitions (normal work):
@@ -1863,25 +1844,17 @@ export class LocalFsStore implements Store {
       if (input.newStatus === "Done") {
         if (isSystem) permitted = true;
         else if (isReviewer) permitted = true;
-        else if (isTaskOwner && (isCreator || task.creator === null)) permitted = true;
+        else if (isTaskOwner && isCreator) permitted = true;
       } else {
         if (isSystem) permitted = true;
         else if (isTaskOwner) permitted = true;
         else if (isReviewer) permitted = true;
       }
       if (!permitted) {
-        // Last resort: task-board-owner can do anything (legacy
-        // coordinator protocol). requireOwnership throws ForbiddenError
-        // (exit 9) if the actor is not on the owns list either.
-        if (
-          input.newStatus === "Done" &&
-          isTaskOwner &&
-          !isCreator &&
-          task.creator !== null
-        ) {
-          // Special-case the most common new failure mode so the
-          // error is informative: owner trying to Done a task they
-          // did not create AND with no reviewers configured.
+        if (input.newStatus === "Done" && isTaskOwner && !isCreator) {
+          // Special-case the most common failure mode so the error is
+          // informative: owner trying to Done a task they did not
+          // create AND with no reviewers configured.
           throw new ForbiddenError(
             `Role '${input.actor}' is the owner of ${task.id} but not its creator. ` +
               `Done is a sign-off act; ask a reviewer or task-board owner to accept. ` +
@@ -1892,12 +1865,15 @@ export class LocalFsStore implements Store {
                   `that owns state/task_board.yaml.`),
           );
         }
+        // Last resort: task-board-owner can do anything. requireOwnership
+        // throws ForbiddenError (exit 9) if the actor is not on the
+        // owns list either.
         await this.requireOwnership(input.actor, Paths.taskBoardFile);
       }
       const previousStatus = task.status;
       if (previousStatus === input.newStatus) return task;
 
-      // PR8j: deliverable gate on Done. Every `kind: "file"` deliverable
+      // Deliverable gate on Done. Every `kind: "file"` deliverable
       // must point at an existing file in the project tree, otherwise
       // we refuse the transition with a clear list. `forceIncomplete`
       // bypasses with an audit event so the trail explains "this was
@@ -1954,7 +1930,7 @@ export class LocalFsStore implements Store {
   }
 
   /**
-   * PR8j: list `kind: "file"` deliverables on `task` whose `ref` does
+   * list `kind: "file"` deliverables on `task` whose `ref` does
    * not exist in the project tree. Honours the same path-escape rules
    * as `validateFileRef`; an asset that should have been rejected at
    * create time is logged as "missing" here (defence in depth).
@@ -1997,7 +1973,7 @@ export class LocalFsStore implements Store {
       matching.push(t);
     }
 
-    // PR8j: compute children grouped by parent id once so we can attach
+    // compute children grouped by parent id once so we can attach
     // childCounts to every matching task that has children, without
     // re-scanning per task.
     const childrenByParent = new Map<string, Task[]>();
@@ -2008,7 +1984,7 @@ export class LocalFsStore implements Store {
       childrenByParent.set(t.parent, arr);
     }
 
-    // PR8j: cache fs.access results for the duration of this manifest
+    // cache fs.access results for the duration of this manifest
     // generation. A long-tail epic with shared deliverable paths across
     // children would otherwise re-stat the same file repeatedly.
     const existenceCache = new Map<string, boolean>();
@@ -2102,7 +2078,7 @@ export class LocalFsStore implements Store {
     validateSlug(input.slug);
     const title = String(input.title ?? "").trim();
     if (title.length === 0) throw new UsageError("RFC title must be non-empty.");
-    // PR8l: empty options are now allowed. An RFC created without any
+    // empty options are now allowed. An RFC created without any
     // option starts in brainstorm mode — voters post comments freely
     // until someone calls `rfc add-option` to introduce concrete
     // choices, at which point the RFC effectively upgrades into a
@@ -2122,10 +2098,10 @@ export class LocalFsStore implements Store {
       optionIds.add(o.id);
     }
     const rawVoters = input.voters.map((r) => validateRoleId(r));
-    // PR8t: the RFC creator is always a participant. Semantically, the
+    // the RFC creator is always a participant. Semantically, the
     // act of opening an RFC asserts interest in its outcome — the
     // creator should both see manifest events for it (already true via
-    // PR8n's `createdBy` in the visibility set) AND be required to
+    // 's `createdBy` in the visibility set) AND be required to
     // ack/object on a pre-decision. Dedup so passing `--voters` that
     // explicitly contains the creator does not double-list. SYSTEM-
     // created RFCs (no MA_SESSION; CLI driven by the user directly)
@@ -2208,7 +2184,7 @@ export class LocalFsStore implements Store {
       };
       const dir = this.abs(rfcDir(id, input.slug));
       await fsp.mkdir(dir, { recursive: true });
-      // PR8g: comments live in a single threaded ledger now, not per-role
+      // comments live in a single threaded ledger now, not per-role
       // JSONs. Seed an empty ledger so readers don't have to special-case
       // a missing file.
       await atomicWriteFile(
@@ -2243,7 +2219,7 @@ export class LocalFsStore implements Store {
     const rationale = String(input.rationale ?? "").trim();
     const kind = input.kind;
     // For regular discussion comments, rationale is required (as in
-    // PR8g). For ack, rationale is optional ("yes" is meaningful on
+    // ). For ack, rationale is optional ("yes" is meaningful on
     // its own). For object / pre-decision, rationale is required
     // (you must say why you object / propose).
     if (kind !== "ack" && rationale.length === 0) {
@@ -2256,7 +2232,7 @@ export class LocalFsStore implements Store {
 
     return this.withLock(`rfc-${input.rfcId}`, async () => {
       const { proposal, comments } = await this.readRfcUnchecked(input.rfcId);
-      // PR8g.1: pre-decide is no longer a status. Only `open` and
+      // pre-decide is no longer a status. Only `open` and
       // `revising` allow comments. Regular discussion is allowed in
       // both; structured kinds (ack / object) are only meaningful when
       // there is an active pre-decision, which can only exist in
@@ -2267,7 +2243,7 @@ export class LocalFsStore implements Store {
         );
       }
       if (preferred.length > 0 && !proposal.options.find((o) => o.id === preferred)) {
-        // PR8l: a brainstorm-mode RFC (options empty) gets a friendlier
+        // a brainstorm-mode RFC (options empty) gets a friendlier
         // hint pointing at `rfc add-option`. The general "unknown
         // option" error survives for the case where the RFC has
         // options but the caller named a non-existent one.
@@ -2290,7 +2266,7 @@ export class LocalFsStore implements Store {
         }
       }
 
-      // PR8g.1 kind-specific validation.
+      // kind-specific validation.
       if (kind === "pre-decision") {
         if (!proposal.deciders.includes(input.role)) {
           throw new ForbiddenError(
@@ -2309,7 +2285,7 @@ export class LocalFsStore implements Store {
             "pre-decision requires a non-empty option id (--option).",
           );
         }
-        // PR8l: explicit, friendlier error when the RFC is in brainstorm
+        // explicit, friendlier error when the RFC is in brainstorm
         // mode (no options yet) — pre-decision has nothing concrete to
         // lock in until at least one option exists.
         if (proposal.options.length === 0) {
@@ -2392,7 +2368,7 @@ export class LocalFsStore implements Store {
           kind,
         },
       });
-      // PR8g: the commenter has by definition seen everything up to
+      // the commenter has by definition seen everything up to
       // and including their own comment. Advance their read cursor so
       // they don't appear in their own manifest as having "unread
       // discussion" right after they spoke.
@@ -2404,7 +2380,7 @@ export class LocalFsStore implements Store {
   }
 
   /**
-   * PR8g.1 helper: list timestamps of RFC_OPTION_ADDED events for a
+   * helper: list timestamps of RFC_OPTION_ADDED events for a
    * specific RFC. Used by computeActivePreDecisionInLedger to detect
    * "add-option after a pre-decision invalidates that pre-decision".
    * Kept private; reaches into the event stream once per call (RFCs
@@ -2461,7 +2437,7 @@ export class LocalFsStore implements Store {
 
     return this.withLock(`rfc-${args.rfcId}`, async () => {
       const { proposal, comments } = await this.readRfcUnchecked(args.rfcId);
-      // PR8g.1: decide is valid from `open`. reject is additionally
+      // decide is valid from `open`. reject is additionally
       // valid from `revising` (decider may give up on the topic
       // instead of waiting for a rewrite). reject is also the only
       // escape from an ACK-stalled pre-decision.
@@ -2482,7 +2458,7 @@ export class LocalFsStore implements Store {
         );
       }
       if (args.outcome === "accepted") {
-        // PR8l: brainstorm-mode RFCs (proposal.options is empty) accept
+        // brainstorm-mode RFCs (proposal.options is empty) accept
         // without a chosen option — the rationale carries the takeaway.
         // RFCs that DO have options still require a pick, exactly as
         // before. The two modes are mutually exclusive: you cannot pass
@@ -2508,7 +2484,7 @@ export class LocalFsStore implements Store {
             );
           }
         }
-        // PR8g.1 ACK gate: if an active pre-decision exists, every
+        // ACK gate: if an active pre-decision exists, every
         // role in (voters ∪ deciders) − {pre-decider} must have
         // posted a kind=ack or kind=object comment AFTER the
         // pre-decision's ts before decide is allowed. Silence is NOT
@@ -2543,7 +2519,7 @@ export class LocalFsStore implements Store {
           }
         }
       }
-      // PR8g.1: reject bypasses the ACK gate by design — it is the
+      // reject bypasses the ACK gate by design — it is the
       // only escape from an ACK-stalled pre-decision.
       const decision: RfcDecision = {
         rfcId: proposal.id,
@@ -2582,7 +2558,7 @@ export class LocalFsStore implements Store {
     });
   }
 
-  // ---- PR8g: RFC v2 state transitions ------------------------------------
+  // ---- RFC v2 state transitions ------------------------------------------
 
   async addRfcOption(input: {
     rfcId: string;
@@ -2609,7 +2585,7 @@ export class LocalFsStore implements Store {
 
     return this.withLock(`rfc-${input.rfcId}`, async () => {
       const { proposal } = await this.readRfcUnchecked(input.rfcId);
-      // PR8g.1: allowed in non-terminal states (`open` / `revising`).
+      // allowed in non-terminal states (`open` / `revising`).
       // Pre-decide is no longer a status; if an active pre-decision
       // exists, this add-option silently invalidates it (see
       // `computeActivePreDecisionInLedger`). The decider can re-issue
@@ -2658,7 +2634,7 @@ export class LocalFsStore implements Store {
     chosenOption: string;
     rationale: string;
   }): Promise<RfcComment> {
-    // PR8g.1: pre-decide is a structured comment with kind=pre-decision.
+    // pre-decide is a structured comment with kind=pre-decision.
     // commentRfc enforces decider gate + chosenOption-exists + rationale
     // non-empty, so this is a thin wrapper. RFC status stays `open`;
     // the ACK gate inside decideRfc is what makes pre-decide meaningful.
@@ -2677,7 +2653,7 @@ export class LocalFsStore implements Store {
     role: RoleId;
     rationale?: string;
   }): Promise<RfcComment> {
-    // PR8g.1: structured ACK. commentRfc enforces caller-is-required
+    // structured ACK. commentRfc enforces caller-is-required
     // + active-pre-decision-exists + caller-is-not-pre-decider, plus
     // forces `preferred` to the active pre-decision's chosenOption.
     return this.commentRfc({
@@ -2696,7 +2672,7 @@ export class LocalFsStore implements Store {
     rationale: string;
     preferredOption?: string;
   }): Promise<RfcComment> {
-    // PR8g.1: structured objection. rationale required (enforced by
+    // structured objection. rationale required (enforced by
     // commentRfc); preferredOption optional ("just not the proposed
     // one") or any existing option id (validated by commentRfc).
     return this.commentRfc({
@@ -2877,7 +2853,7 @@ export class LocalFsStore implements Store {
       throw new UsageError("link-task requires a non-empty --task.");
     }
     // Validate the task exists; better to fail at link time than at
-    // read time. PR8g.
+    // read time.
     const board = await this.readTaskBoard();
     if (!board.tasks[taskId]) {
       throw new UsageError(
@@ -3086,65 +3062,6 @@ export class LocalFsStore implements Store {
         `proposal.yaml for ${rfcId} is not valid YAML: ${(err as Error).message}`,
       );
     }
-    // PR8g.1 back-compat: detect proposal.yaml shapes produced by
-    // PR8g that PR8g.1 walked back. Two markers:
-    //   - status: "pre-decide" (status enum no longer includes it)
-    //   - preDecision: {...} on the proposal (now lives in the
-    //     comments ledger as a kind=pre-decision comment)
-    // Refuse to proceed instead of silently treating these as
-    // arbitrary status / extra field; the agent needs to be told the
-    // schema moved on.
-    const proposalRecord = proposal as unknown as Record<string, unknown>;
-    if (proposalRecord.status === "pre-decide") {
-      throw new UsageError(
-        `RFC ${rfcId} has status "pre-decide" from PR8g; PR8g.1 collapsed ` +
-          `pre-decide back to a comment kind. Either re-init a fresh project ` +
-          `with \`gojaja init\` (in a clean directory) or manually edit ` +
-          `proposal.yaml to set status: "open" — the pre-decision data will ` +
-          `be lost and agents should re-issue \`gojaja rfc pre-decide\`. ` +
-          `Migration notes: https://github.com/smilezheng/gojaja/blob/main/docs/RFC.md`,
-      );
-    }
-    if (proposalRecord.preDecision !== undefined) {
-      throw new UsageError(
-        `RFC ${rfcId} carries a "preDecision" field on proposal.yaml from PR8g; ` +
-          `PR8g.1 stores pre-decisions in the comments ledger instead. ` +
-          `Either re-init a fresh project or manually edit proposal.yaml to ` +
-          `remove the "preDecision" field — the pre-decision data will be ` +
-          `lost and agents should re-issue \`gojaja rfc pre-decide\`. ` +
-          `Migration notes: https://github.com/smilezheng/gojaja/blob/main/docs/RFC.md`,
-      );
-    }
-    // PR8g back-compat: detect the old per-role comments directory and
-    // refuse to proceed silently. Alpha-stage hard cut; the user must
-    // migrate by hand or `gojaja init` a fresh project. We deliberately
-    // do NOT auto-migrate: comment timestamps + threading would need to
-    // be synthesised and that risks silently destroying audit detail.
-    const legacyDir = this.abs(rfcLegacyCommentsDir(rfcId, slug));
-    if (await exists(legacyDir)) {
-      // Only error if the legacy dir contains role JSONs; an empty
-      // `comments/` directory left over from `mkdir -p` is harmless.
-      try {
-        const legacyNames = await fsp.readdir(legacyDir);
-        const legacyJsons = legacyNames.filter(
-          (n) => n.endsWith(".json") && !n.startsWith("."),
-        );
-        if (legacyJsons.length > 0) {
-          throw new UsageError(
-            `RFC ${rfcId} has a pre-PR8g comments layout at ` +
-              `${rfcLegacyCommentsDir(rfcId, slug)}/ (per-role JSON files). ` +
-              `PR8g uses a single threaded ledger at ${rfcCommentsFile(rfcId, slug)}. ` +
-              `Migrate by hand (no auto-migrator) or open a fresh project with ` +
-              `\`gojaja init\`. See CHANGELOG 2.0.0-alpha.15 for the new shape.`,
-          );
-        }
-      } catch (err) {
-        // Re-throw the UsageError we just raised; swallow other errors
-        // (e.g. directory disappeared between exists and readdir).
-        if (err instanceof UsageError) throw err;
-      }
-    }
-    // PR8g comments ledger.
     let comments: RfcComment[] = [];
     const commentsFile = this.abs(rfcCommentsFile(rfcId, slug));
     if (await exists(commentsFile)) {
@@ -3214,7 +3131,7 @@ export class LocalFsStore implements Store {
   }
 
   private async rfcSummariesForRole(role: RoleId): Promise<RfcSummary[]> {
-    // PR8g.1 visibility rules. Active = open / revising (pre-decide
+    // visibility rules. Active = open / revising (pre-decide
     // is no longer a status; it's a comment kind that produces a
     // computed `pendingPreDecision` summary).
     const active: RfcProposal[] = [
@@ -3238,7 +3155,7 @@ export class LocalFsStore implements Store {
           : comments.length - (comments.findIndex((c) => c.id === lastSeen) + 1)
         : comments.length;
 
-      // PR8g.1 pre-decision computation. If there's an active
+      // pre-decision computation. If there's an active
       // pre-decision (latest kind=pre-decision comment, not
       // invalidated by a later add-option), compute who still needs
       // to ACK and whether THIS role owes one.
@@ -3267,7 +3184,7 @@ export class LocalFsStore implements Store {
         };
       }
 
-      // PR8g.1 per-status filtering rules.
+      // per-status filtering rules.
       switch (p.status) {
         case "open": {
           // If a pre-decision is pending AND this role still owes an

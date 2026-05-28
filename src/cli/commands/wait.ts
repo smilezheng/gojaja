@@ -17,10 +17,8 @@ import type {
 import type { Store } from "../../core/store";
 
 /**
- * Default deadline when neither `--until` nor `--in` is supplied. Mirrors
- * the pre-PR8i `--idle 10` block-mode default so handbook muscle memory
- * keeps working: bare `gojaja wait` still buys ~10 minutes of patience
- * for new attention.
+ * Default deadline when neither `--until` nor `--in` is supplied:
+ * bare `gojaja wait` buys ~10 minutes of patience for new attention.
  */
 const DEFAULT_WAIT_MS = 10 * 60 * 1000;
 
@@ -38,16 +36,16 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Errors flagged here all map to USAGE. We surface the new shape so a
- * scripted caller that passed a removed flag (`--mode`, `--idle`) sees
- * the migration path inline.
+ * Reject flags from earlier wait shapes so a scripted caller passing
+ * them sees a clear pointer at the current surface rather than the
+ * `--mode` / `--idle` flag being silently ignored.
  */
 function rejectRemovedFlags(args: ParsedArgs): void {
   const removed = ["mode", "idle", "idle-seconds"];
   for (const name of removed) {
     if (args.flags[name] !== undefined) {
       throw new UsageError(
-        `--${name} was removed in PR8i. Use \`gojaja wait --in <duration>\` ` +
+        `--${name} is not a wait flag. Use \`gojaja wait --in <duration>\` ` +
           `or \`--until <ISO>\` instead; see \`gojaja wait -h\`.`,
       );
     }
@@ -109,11 +107,9 @@ function formatConditionToken(cond: WaitCondition): string {
  * ULID) or null. `attention` produces ATTENTION; the other kinds
  * produce CONDITION_MET.
  *
- * PR8n note: for `kind: "attention"`, the upstream `findFirstHit` pre-
- * filters events through `Store.filterVisibleEventsForRole`, so this
- * function only sees events that would actually appear in the role's
- * manifest. The simple to/from check is the historical equivalent and
- * is kept for back-compat when the filter is unavailable.
+ * For `kind: "attention"`, the upstream `findFirstHit` pre-filters
+ * events through `Store.filterVisibleEventsForRole`, so this function
+ * only sees events that would actually appear in the role's manifest.
  */
 function matchEvent(
   e: Event,
@@ -155,7 +151,7 @@ async function findFirstHit(
   cond: WaitCondition,
 ): Promise<{ event: Event; count: number } | null> {
   let events = (await store.listEventsAfter(cursor)) as Event[];
-  // PR8n: for `--for attention`, pre-filter through the same projection
+  // for `--for attention`, pre-filter through the same projection
   // that builds `manifest.events`. Otherwise wait would wake the role
   // for broadcast events that plan would have hidden — a guaranteed
   // useless turn.
@@ -303,7 +299,7 @@ export async function runWait(args: ParsedArgs): Promise<number> {
 
   // Refuse to wait while a plan manifest is outstanding — without this
   // guard every event in the pending manifest would re-trigger ATTENTION,
-  // looping the agent. Pre-PR8i behaviour, preserved.
+  // looping the agent.
   const cursorState = await store.readCursor(role);
   if (cursorState.pendingManifest !== null) {
     throw new UsageError(

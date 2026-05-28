@@ -131,7 +131,7 @@ no event observed by `plan` can be silently skipped by `ack`.
   `ackedThrough` is **not** moved).
 - Prints the manifest to stdout (as JSON when `--json`).
 
-#### Manifest event projection (PR8n)
+#### Manifest event projection
 
 The global event stream (`comms/events/*.json`) records every event,
 broadcast or directed, for audit and future `gojaja doctor`. The
@@ -253,9 +253,8 @@ Commands gated:
   status. This lets engineering roles update progress without
   blanket task-board write access.
 - `gojaja state edit --file <state/path>` — generic state editor
-  gated by `owns`; `--file` must live under `state/`. Renamed from
-  `gojaja write-state` in PR8f-C; see the `state edit` section below
-  for the full mode specification.
+  gated by `owns`; `--file` must live under `state/`. See the
+  `state edit` section below for the full mode specification.
 
 `ForbiddenError` exits 9 (distinct from `UsageError`'s exit 2 so a
 caller can distinguish "you said it wrong" from "you are not allowed").
@@ -326,23 +325,22 @@ The full schema is documented in
 - `from` for the events is the actor's role (from `GOJAJA_SESSION`) when
   available, otherwise `"SYSTEM"` (so a human one-off invocation still
   produces audit events). The same actor is recorded as the task's
-  `creator` (PR8u, renamed from PR8j's `assignedBy`); `assignTask`
-  does NOT update this field.
-- `--parent` (PR8j) attaches the new task as a subtask. Parent must
-  exist on the board; the chain is cycle-checked at read time and
-  refused if it would exceed depth 5. Parent status is NOT auto-derived
-  from children; epic owners read aggregated counts via
+  `creator`; `assignTask` does NOT update this field.
+- `--parent` attaches the new task as a subtask. Parent must exist on
+  the board; the chain is cycle-checked at read time and refused if
+  it would exceed depth 5. Parent status is NOT auto-derived from
+  children; epic owners read aggregated counts via
   `manifest.tasks[].childCounts`.
-- `--tag` (PR8j) is repeatable; each value lands in `task.tags`. Used
-  for filtered listing via `task list --tag <label>`.
-- `--reviewer` (PR8u) is repeatable; each value lands in
-  `task.reviewers`. Reviewers are the roles authorised to mark this
-  task `Done` regardless of ownership AND they become automatic
-  stakeholders for the task — `TASK_STATUS_CHANGED` events surface in
-  their manifest without the owner needing to send an explicit report.
-  Duplicates are deduped at create time; each reviewer must be a
-  registered role (USAGE if not).
-- `--asset` / `--deliverable` (PR8j) accept `kind:ref` or
+- `--tag` is repeatable; each value lands in `task.tags`. Used for
+  filtered listing via `task list --tag <label>`.
+- `--reviewer` is repeatable; each value lands in `task.reviewers`.
+  Reviewers are the roles authorised to mark this task `Done`
+  regardless of ownership AND they become automatic stakeholders for
+  the task — `TASK_STATUS_CHANGED` events surface in their manifest
+  without the owner needing to send an explicit report. Duplicates
+  are deduped at create time; each reviewer must be a registered
+  role (USAGE if not).
+- `--asset` / `--deliverable` accept `kind:ref` or
   `kind:ref::description`. `::` is the separator so URLs survive
   intact. Kinds:
     - asset       — `file` (repo-relative path, validated for `..`
@@ -366,12 +364,10 @@ The full schema is documented in
 - v2 does not enforce status transitions; any role with write access
   may move any task between any two statuses. A constrained state
   machine is on the roadmap if it proves necessary.
-- **PR8u: who is allowed to call this.** Authority is split between
-  Done (sign-off) and other statuses:
+- **Who is allowed to call this.** Authority is split between Done
+  (sign-off) and other statuses:
     - Done: SYSTEM OR actor in `task.reviewers` OR (actor === owner
       AND actor === creator) OR actor owns `state/task_board.yaml`.
-      Legacy tasks where `creator === null` (no `creator` field on
-      disk, pre-PR8u boards) keep owner-Done by design for back-compat.
     - Other transitions: SYSTEM OR actor === owner (owner-exception)
       OR actor in `task.reviewers` (reviewer-exception, so reviewers
       can push back to InProgress without an extra report-then-revert
@@ -379,26 +375,25 @@ The full schema is documented in
     - A non-permitted actor for Done gets a clear `FORBIDDEN` error
       listing the configured reviewers (or recommending escalation
       if none are configured).
-- PR8j: on Done transitions, every `kind: "file"` deliverable on the
-  task must point at an existing file in the project tree. Missing
-  files refuse the transition with USAGE listing every absent ref.
-- `--force-incomplete` (PR8j) bypasses the deliverable gate. The
-  bypass is NOT silent: a `TASK_DELIVERABLE_BYPASSED` event is
-  emitted with the missing refs and the actor BEFORE the
-  `TASK_STATUS_CHANGED` event, so the durable audit log shows
-  "approval given, then status moved". Note `--force-incomplete`
-  does NOT bypass the new PR8u permission gate; it only bypasses the
-  deliverable check.
+- On Done transitions, every `kind: "file"` deliverable on the task
+  must point at an existing file in the project tree. Missing files
+  refuse the transition with USAGE listing every absent ref.
+- `--force-incomplete` bypasses the deliverable gate. The bypass is
+  NOT silent: a `TASK_DELIVERABLE_BYPASSED` event is emitted with
+  the missing refs and the actor BEFORE the `TASK_STATUS_CHANGED`
+  event, so the durable audit log shows "approval given, then status
+  moved". Note `--force-incomplete` does NOT bypass the permission
+  gate; it only bypasses the deliverable check.
 
 ### `gojaja task list [--owner <role>] [--status <s>] [--tag <label> ...]` and `gojaja task show <id>`
 
 - Read-only. Useful for humans browsing the project. The agent's
   per-turn view of its tasks is `manifest.tasks`; explicit list/show
   are for ad-hoc inspection.
-- `--tag` (PR8j) filters with OR semantics; a task matches if any tag
+- `--tag` filters with OR semantics; a task matches if any tag
   matches any value.
 - `task show` renders parent, immediate children, assets, deliverables
-  with on-disk markers (`[x]` / `[ ]` / `[?]`), plus PR8u's `creator`
+  with on-disk markers (`[x]` / `[ ]` / `[?]`), plus the `creator`
   and `reviewers` fields when present.
 
 ## RFCs
@@ -406,7 +401,7 @@ The full schema is documented in
 The goal is "every relevant role records an opinion; a designated leader
 picks; the decision is durable". There is no automatic tally.
 
-PR8g made the RFC mechanism multi-round: comments are threaded
+The RFC mechanism is multi-round: comments are threaded
 (`replyTo`), options can be added mid-discussion, deciders can run a
 pre-decide ACK round, and deciders can send a proposal back for
 rewrite (`revise` + `edit`) without rejecting the topic.
@@ -422,21 +417,21 @@ superseded), worked example, and rationale live in
 - The store assigns the next sequential `RFC-NNNN` id under a `rfcs` lock
   (`rfcCounter` lives in `config.yaml`, so deleting an RFC dir does not
   recycle its id).
-- `--options` is **optional** (PR8l). Omitting it opens the RFC in
+- `--options` is **optional**. Omitting it opens the RFC in
   **brainstorm mode** — voters comment freely, no concrete choices on
   the table. Anyone (typically a voter or the decider) can later run
   `rfc add-option` to introduce a pickable choice; that upgrades the
   RFC into a decision flow. `rfc decide` refuses `--option` on a
   brainstorm-mode RFC and requires it once options exist.
-- `--description` is soft-required in PR8g (warns if empty; PR8h
-  hardens to required). It is the channel where the creator gives
-  non-participants enough context to weigh in.
+- `--description` is soft-required (warns if empty; will become
+  hard-required in a future release). It is the channel where the
+  creator gives non-participants enough context to weigh in.
 - `--task` links one or more existing task ids; each is validated
   against `state/task_board.yaml` and refused if not found.
 - Emits `RFC_CREATED` (broadcast).
 - The actor (`GOJAJA_SESSION` role, or `"SYSTEM"` if no session) is recorded
   as the event's `from` and the proposal's `createdBy`.
-- **PR8t: the creator is automatically and unconditionally added to
+- **The creator is automatically and unconditionally added to
   `voters`** (deduped against `--voters` so a caller that lists
   themselves explicitly does not double-list). Opening an RFC asserts
   interest in its outcome — the creator both sees manifest events for
@@ -461,31 +456,31 @@ superseded), worked example, and rationale live in
 - **Append-only ledger.** Multiple comments per role are preserved in
   `comments.yaml`. The commenter's read cursor for this RFC is
   automatically advanced to the just-written comment.
-- **PR8g.1**: a regular `rfc comment` from a required-ACK role does
-  NOT advance the `decideRfc` ACK gate. To register a position, use
-  `rfc ack` / `rfc object` (which post `kind: ack` / `kind: object`
-  comments). Discussion comments are welcome but do not count as
-  consensus signals.
+- A regular `rfc comment` from a required-ACK role does NOT advance
+  the `decideRfc` ACK gate. To register a position, use `rfc ack` /
+  `rfc object` (which post `kind: ack` / `kind: object` comments).
+  Discussion comments are welcome but do not count as consensus
+  signals.
 - Emits `RFC_COMMENT` (broadcast). Payload includes
   `kind: undefined` for regular comments; `kind: "pre-decision" |
   "ack" | "object"` for the structured commands documented below.
 
-### `gojaja rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>` (PR8g)
+### `gojaja rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>`
 
 - Any session can add. Allowed in `open` or `revising`. Refused in
   terminal states (`accepted`, `rejected`, `superseded`).
 - Option id must be unique within the RFC.
-- **PR8g.1**: if there is an active pre-decision, add-option silently
-  invalidates it (voters were ACKing an outdated option set). The
-  decider can re-issue `rfc pre-decide` on the new option set. The
+- If there is an active pre-decision, add-option silently invalidates
+  it (voters were ACKing an outdated option set). The decider can
+  re-issue `rfc pre-decide` on the new option set. The
   `RFC_OPTION_ADDED` event is the audit signal.
 - Emits `RFC_OPTION_ADDED`.
 
-### `gojaja rfc pre-decide <rfc-id> --option <opt> --rationale <text>` (PR8g, reshaped in PR8g.1)
+### `gojaja rfc pre-decide <rfc-id> --option <opt> --rationale <text>`
 
 - Decider gate (FORBIDDEN otherwise). Valid only from `open`.
-- **PR8g.1**: posts a structured comment with `kind: "pre-decision"`;
-  does NOT change RFC status. The `decideRfc` ACK gate is what makes
+- Posts a structured comment with `kind: "pre-decision"`; does NOT
+  change RFC status. The `decideRfc` ACK gate is what makes
   pre-decide load-bearing.
 - Required-ACK set: `(voters ∪ deciders) − {pre-decider}`.
 - Surface in `manifest.rfcs[*].pendingPreDecision` with
@@ -494,7 +489,7 @@ superseded), worked example, and rationale live in
   responses — every required role must respond again.
 - Emits `RFC_COMMENT` with `payload.kind = "pre-decision"`.
 
-### `gojaja rfc ack <rfc-id> [--rationale <text>]` (PR8g.1)
+### `gojaja rfc ack <rfc-id> [--rationale <text>]`
 
 - Caller must be in `(voters ∪ deciders) − {pre-decider}`. Pre-decider
   cannot ack their own pre-decision.
@@ -503,7 +498,7 @@ superseded), worked example, and rationale live in
 - Rationale optional ("yes" is meaningful).
 - Emits `RFC_COMMENT` with `payload.kind = "ack"`.
 
-### `gojaja rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]` (PR8g.1)
+### `gojaja rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]`
 
 - Same caller-set + active-required gates as `ack`.
 - Rationale required. `--option` optional; when set, must be an
@@ -515,12 +510,12 @@ superseded), worked example, and rationale live in
 ### `gojaja rfc decide <rfc-id> [--option <opt>] --rationale <text>`
 
 - Deciders gate. Valid from `open`.
-- **PR8l: `--option` is conditional.** When `proposal.options.length > 0`,
+- **`--option` is conditional.** When `proposal.options.length > 0`,
   `--option` is required and must reference an existing option id.
   When `proposal.options.length === 0` (brainstorm-mode RFC),
   `--option` must **not** be passed and the decision records
   `chosenOption: null` — the rationale carries the takeaway.
-- **PR8g.1 ACK gate**: if there is an active pre-decision (latest
+- **ACK gate**: if there is an active pre-decision (latest
   `kind: "pre-decision"` comment, not invalidated by a later
   add-option), every role in `(voters ∪ deciders) − {pre-decider}`
   must have posted `ack` or `object`. Outstanding roles → USAGE with
@@ -540,14 +535,14 @@ superseded), worked example, and rationale live in
 - Status -> `rejected`; writes `decision.json` with `outcome="rejected"`
   and `chosenOption=null`; emits `RFC_DECIDED`.
 
-### `gojaja rfc revise <rfc-id> --rationale <text>` (PR8g)
+### `gojaja rfc revise <rfc-id> --rationale <text>`
 
 - Deciders gate. Valid from `open`.
 - Status -> `revising`; emits `RFC_REVISION_REQUESTED` carrying the
   rationale (which is the "what to fix" message to the creator).
 - Comments are preserved untouched.
 
-### `gojaja rfc edit <rfc-id> --rationale <text> [--title <text>] [--description <text>] [--options A:summary,B:summary] [--deadline <iso>]` (PR8g)
+### `gojaja rfc edit <rfc-id> --rationale <text> [--title <text>] [--description <text>] [--options A:summary,B:summary] [--deadline <iso>]`
 
 - Allowed only in `revising`. Actor must be the original `createdBy`
   OR a role in `deciders`. Other voters cannot rewrite.
@@ -557,14 +552,14 @@ superseded), worked example, and rationale live in
   including which fields changed.
 - Comments preserved untouched.
 
-### `gojaja rfc link-task <rfc-id> --task T-NNNN` (PR8g)
+### `gojaja rfc link-task <rfc-id> --task T-NNNN`
 
 - Any session. Refused in terminal states.
 - Task id must exist on the board (USAGE otherwise).
 - Idempotent: linking an already-linked task is a no-op.
 - Emits `RFC_TASK_LINKED`.
 
-### `gojaja rfc unlink-task <rfc-id> --task T-NNNN` (PR8g)
+### `gojaja rfc unlink-task <rfc-id> --task T-NNNN`
 
 - Counterpart to `link-task`. Idempotent.
 - Emits `RFC_TASK_UNLINKED`.
@@ -572,7 +567,7 @@ superseded), worked example, and rationale live in
 ### `gojaja rfc list [--status open|pre-decide|revising|accepted|rejected|superseded]` and `gojaja rfc show <rfc-id> [--no-mark-seen]`
 
 - Read-only.
-- `rfc show` side effect (PR8g): advances this role's per-RFC read
+- `rfc show` side effect: advances this role's per-RFC read
   cursor to the latest comment, so a subsequent `plan` reports
   `unreadComments: 0` for this RFC until new discussion arrives.
   Pass `--no-mark-seen` (e.g. from a script) to inspect without
@@ -584,10 +579,9 @@ An agent window that has nothing to do should stay alive — discussions,
 reviews, blocker messages may arrive from other agents — but should not
 consume tokens while idle. `wait` is the cheap-keepalive primitive.
 
-PR8i redesigned `wait` from a `--mode block | exit` dichotomy into a
-single deadline-driven, chunked, resumable primitive. The `.wait`
-sentinel is gone; a session record lives at
-`comms/pending/<role>/wait.json` (see [SCHEMA](./SCHEMA.md)).
+`wait` is a single deadline-driven, chunked, resumable primitive. A
+session record lives at `comms/pending/<role>/wait.json`
+(see [SCHEMA](./SCHEMA.md)).
 
 ### `gojaja wait [<role>] [--until <iso> | --in <dur>] [--for <condition>] [--poll-interval <dur>] [--json]`
 
@@ -646,11 +640,11 @@ Exit code is `0` for all four verdicts. Use `--json` to get
 `{ status: "attention" | "condition_met" | "resume" | "timeout", ... }`
 when machine-parsing.
 
-Two cardinal rules — both fix v0.1 bugs:
+Two cardinal rules:
 
-- **No exit-code overloading.** Exit 0 in every normal outcome. Non-zero
-  is for genuine usage errors (e.g. unknown role, removed `--mode`
-  flag, ISO without an offset).
+- **No exit-code overloading.** Exit 0 in every normal outcome.
+  Non-zero is for genuine usage errors (e.g. unknown role, ISO
+  without an offset).
 - **No cursor mutation.** `wait` is a pure read; only `plan` + `ack`
   may move the cursor.
 

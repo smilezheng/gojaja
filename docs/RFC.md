@@ -1,4 +1,4 @@
-# RFC mechanism — end-to-end guide (v2.1, PR8g.1)
+# RFC mechanism — end-to-end guide
 
 Cross-references: [PROTOCOL](./PROTOCOL.md) for exact command semantics,
 [SCHEMA](./SCHEMA.md) for on-disk shapes, [HANDBOOK](./HANDBOOK.md) for
@@ -6,28 +6,15 @@ when (not) to open an RFC.
 
 This document is the narrative companion to those references. It covers
 the model, the lifecycle, the on-disk layout, the per-role visibility
-rules, and a worked end-to-end simulation that exercises the full PR8g.1
+rules, and a worked end-to-end simulation that exercises the full RFC
 surface: structured pre-decision comments, mandatory ACK gate,
 multi-round discussion with threading, mid-discussion add-option, and a
 revise → edit cycle.
 
-> **PR8g.1 walk-back.** PR8g modelled `pre-decide` as a status
-> transition with silence-as-consent. That turned out to be the wrong
-> abstraction: silence is unreliable in an async LLM agent fleet
-> (agent may be offline, may have not run plan, may have skipped). PR8g.1
-> walks pre-decide back to being a structured **comment kind** with a
-> hard **ACK gate** on `decide`: every required role must explicitly
-> `rfc ack` or `rfc object` before the decider can finalise. Silence
-> never counts as consent.
-
-> **Migration notice (alpha-only, no users).** Two PR8g shapes are
-> detected and refused on read:
-> - `proposal.yaml` with `status: pre-decide`
-> - `proposal.yaml` with a `preDecision` field
->
-> Either re-init a fresh project or manually edit the proposal.yaml
-> (status → `open`, drop `preDecision`); the pre-decision data is lost
-> and agents should re-issue `rfc pre-decide`.
+Pre-decide is modelled as a structured **comment kind** with a hard
+**ACK gate** on `decide`: every required role must explicitly
+`rfc ack` or `rfc object` before the decider can finalise. Silence
+never counts as consent.
 
 ---
 
@@ -61,13 +48,13 @@ Each RFC partitions the project's roles at **creation time**:
 
 | Bucket          | Set by                                                  | What they can do                                                                                  |
 |-----------------|---------------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| **creator**     | implicit (`GOJAJA_SESSION` role, or `SYSTEM`)               | call `rfc new`; rewrite via `rfc edit` while `revising`. **PR8t: also added to `voters` automatically** (see below). |
+| **creator**     | implicit (`GOJAJA_SESSION` role, or `SYSTEM`)               | call `rfc new`; rewrite via `rfc edit` while `revising`. **Also added to `voters` automatically** (see below). |
 | **voters**      | `--voters X,Y` ∪ `{creator}` (deduped; creator always included unless `SYSTEM`) | should comment; **must `ack` or `object` whenever there is an active pre-decision** (see §3).     |
 | **deciders**    | `--deciders Z` (required, non-empty)                    | the **only** roles that can call `rfc pre-decide` / `rfc decide` / `rfc reject` / `rfc revise`. **Must also `ack` or `object` when another decider pre-decides** (see §3). |
 
-PR8t: opening an RFC asserts interest in its outcome, so the creator
-is automatically a voter (no opt-out). They see manifest events for
-the RFC AND owe an ack/object on any pre-decision (unless they are
+Opening an RFC asserts interest in its outcome, so the creator is
+automatically a voter (no opt-out). They see manifest events for the
+RFC AND owe an ack/object on any pre-decision (unless they are
 themselves the pre-decider, in which case the ACK gate excludes them
 as usual). SYSTEM-created RFCs don't auto-include SYSTEM because
 SYSTEM isn't a role; the voters list is then exactly what was passed
@@ -82,7 +69,7 @@ role-level "default decider" flag.
 
 ---
 
-## 3. The ACK gate (heart of PR8g.1)
+## 3. The ACK gate (heart of the RFC mechanism)
 
 Pre-decide is a structured **comment** with `kind: "pre-decision"`. It
 does NOT change RFC status; status stays `open`. What it does:
@@ -177,7 +164,7 @@ The framework does NOT auto-expire open RFCs. `deadline` is decorative.
 `RFC-NNNN` is allocated atomically from `config.yaml:rfcCounter` under
 the shared `config-yaml` lock. `slug` is checked for global uniqueness.
 
-A representative `proposal.yaml` (PR8g.1 shape — note: no `preDecision` field):
+A representative `proposal.yaml` (note: no `preDecision` field — see §3):
 
 ```yaml
 id: RFC-0001
@@ -205,8 +192,8 @@ description: |
 relatedTasks: [T-0042]
 ```
 
-A representative `comments.yaml` (PR8g.1: now carries `kind` on
-position-statement comments):
+A representative `comments.yaml` (position-statement comments carry
+`kind`):
 
 ```yaml
 - id: 01HZA000000000000000COMM1
@@ -270,10 +257,10 @@ Event types (all broadcast `to: "*"`):
 | `RFC_REVISED`                  | `gojaja rfc edit`                                                                                   |
 | `RFC_DECIDED`                  | `gojaja rfc decide` / `rfc reject`                                                                  |
 | `RFC_TASK_LINKED` / `RFC_TASK_UNLINKED` | `gojaja rfc link-task` / `unlink-task`                                                     |
-| `RFC_REPAIRED`                 | self-heal when a half-written decide is detected on read (PR8c)                                       |
+| `RFC_REPAIRED`                 | self-heal when a half-written decide is detected on read                                              |
 
-PR8g had `RFC_PRE_DECISION` and `RFC_PRE_DECISION_OBJECTED`; PR8g.1
-collapsed both into `RFC_COMMENT` with `payload.kind`.
+Pre-decision and objection signals piggyback on `RFC_COMMENT` via
+`payload.kind` rather than dedicated event types.
 
 ---
 
@@ -306,8 +293,7 @@ ACK gate refusals.
 
 ## 7. What appears in `gojaja plan`
 
-`plan` returns `manifest.rfcs: RfcSummary[]` per role. The rules
-(PR8g.1):
+`plan` returns `manifest.rfcs: RfcSummary[]` per role. The rules:
 
 1. Consider RFCs whose `status ∈ {open, revising}`.
 2. Drop any RFC where the role is in none of `voters`, `deciders`, or
@@ -321,7 +307,7 @@ ACK gate refusals.
    - **`open`** + no pending pre-decision → standard rule: drop voter (not also decider) who has commented AND has zero unread.
    - **`revising`** → keep creator + deciders; drop other voters.
 
-Each entry shape (PR8g.1):
+Each entry shape:
 
 ```ts
 {
@@ -526,8 +512,8 @@ RFC_DECIDED                                     (TL, accepted, option C)
 
 ## 9. Edges that bite
 
-1. **`--description` is soft-required in PR8g.1.** Empty descriptions
-   pass with a warning; PR8h will harden to required.
+1. **`--description` is soft-required.** Empty descriptions pass
+   with a warning; a future release will harden to required.
 2. **Regular comment from required-ACK role does NOT advance the gate.**
    Discussion is welcome; you still owe a structured `ack` or `object`.
 3. **Re-publishing `rfc pre-decide` invalidates ALL prior ACKs**, even
@@ -543,10 +529,8 @@ RFC_DECIDED                                     (TL, accepted, option C)
 7. **No override.** If a required role is unreachable, the only escape
    is `rfc reject` + open a new RFC without that role in voters/deciders.
 8. **`relatedTasks` must point at real tasks.** Validated at write time.
-9. **`superseded` has no command in v2.** Document supersession in a
-   new RFC's rationale.
-10. **Pre-PR8g and PR8g on-disk shapes are refused.** See the migration
-    block at the top.
+9. **`superseded` has no command.** Document supersession in a new
+   RFC's rationale.
 
 ---
 
@@ -576,7 +560,7 @@ Within an RFC:
   inadequate.
 - Use **`--reply-to`** when reacting to a specific point.
 
-### Brainstorm mode (PR8l: RFC with no options)
+### Brainstorm mode (RFC with no options)
 
 When the question is "what should we even do about X?" — no concrete
 choices on the table yet — open an RFC **without** `--options`:

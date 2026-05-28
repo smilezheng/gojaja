@@ -194,9 +194,9 @@ v2 cleanly separates:
 - **`ack`** — fast, atomic; only touches the cursor.
 - **`wait`** — pure keepalive, deadline-driven, resumable.
 
-### Why deadline-driven (PR8i) instead of block / exit modes
+### Why deadline-driven instead of block / exit modes
 
-The PR8a–PR8c shape exposed a `--mode block | exit` dichotomy: block
+An earlier design exposed a `--mode block | exit` dichotomy: block
 slept inside the same shell process; exit dropped a `.wait` sentinel
 and returned immediately, deferring resumption to the host. Two modes
 existed because Cursor's chat-mode shell kills any long-running tool
@@ -205,7 +205,8 @@ generic shells can sleep through minutes without complaint. The agent
 had to know which mode to use, and the runtime body had to be
 target-specific.
 
-PR8i collapses both into one primitive. Every `wait` invocation:
+The current design collapses both into one primitive. Every `wait`
+invocation:
 
 1. Resolves a deadline (`--until <ISO>` or `--in <duration>`).
 2. Sleeps at most `min(deadline - now, --poll-interval)` (default
@@ -214,11 +215,11 @@ PR8i collapses both into one primitive. Every `wait` invocation:
    role), CONDITION_MET (the specific thing fired), RESUME (chunk
    over but deadline still in the future), TIMEOUT (deadline reached).
 
-RESUME is the recovery mechanism that replaces the `.wait` sentinel:
-the next chunk is just another `wait` invocation pointing at the same
-deadline. Host kills the shell mid-chunk? The next chunk reads the
-same deadline off the command line and continues. Disk session record
-at `comms/pending/<role>/wait.json` makes the `--for task-assigned`
+RESUME is the recovery mechanism: the next chunk is just another
+`wait` invocation pointing at the same deadline. Host kills the
+shell mid-chunk? The next chunk reads the same deadline off the
+command line and continues. Disk session record at
+`comms/pending/<role>/wait.json` makes the `--for task-assigned`
 idle worklog one-shot across resumes, but the wait itself does not
 depend on the file — losing it at worst causes one duplicate worklog.
 
@@ -236,7 +237,7 @@ chunked wait early, they end the chat / kill the shell themselves;
 the agent will not auto-resume because the next user message
 implicitly redirects the runtime loop.
 
-## Per-role manifest is a projection, not the source of truth (PR8n)
+## Per-role manifest is a projection, not the source of truth
 
 `comms/events/*.json` is the durable event log: append-only, every
 event ever produced lives there, audit-friendly, eventually read by
@@ -253,18 +254,19 @@ Two layers because of two competing forces:
    "should I react?" decision. Broadcasting indiscriminately turns a
    busy project into thousands of per-event LLM calls of noise.
 
-PR1–PR8m treated the manifest as "everything since my cursor, filtered
-only by `from !== self` + `to ∈ {self, '*'}`". That collapsed both
-layers into one. In a 6-role project a typical day produced ~70
-broadcast events / role / day; each broadcast triggered an LLM turn
-on every other agent. The Frontend agent reading 50 worklogs about
-backend work was the predictable failure mode.
+An earlier shape treated the manifest as "everything since my
+cursor, filtered only by `from !== self` + `to ∈ {self, '*'}`".
+That collapsed both layers into one. In a 6-role project a typical
+day produces ~70 broadcast events / role / day; each broadcast
+triggers an LLM turn on every other agent. The Frontend agent
+reading 50 worklogs about backend work was the predictable failure
+mode.
 
-PR8n splits them: events are still all broadcast on disk, but
-`openOrCreatePlan` runs a per-type filter to decide whether a
-broadcast event belongs in this role's manifest. The cursor advances
-past hidden events anyway, so a role does NOT re-see them; it just
-treats them as "noted, moving on".
+The current design splits them: events are still all broadcast on
+disk, but `openOrCreatePlan` runs a per-type filter to decide whether
+a broadcast event belongs in this role's manifest. The cursor
+advances past hidden events anyway, so a role does NOT re-see them;
+it just treats them as "noted, moving on".
 
 The classification is conservative — operational events
 (SESSION_*, LOCK_BROKEN, RFC_REPAIRED) hide from everyone; "real
@@ -280,12 +282,13 @@ broadcast event would wake the agent into a no-op turn (plan shows
 nothing new → end the turn). Same projection in both places keeps the
 "wait → plan" invariant clean.
 
-## Task model: hierarchy without auto-state-propagation (PR8j)
+## Task model: hierarchy without auto-state-propagation
 
-A natural multi-layer org wants a task tree: CTO -> PM/TL epic -> per-worker
-subtasks. PR8j adds `parent` to the Task record so that tree is expressible
-on the existing single board. Three design choices are worth flagging
-because the obvious alternatives were rejected:
+A natural multi-layer org wants a task tree: CTO -> PM/TL epic ->
+per-worker subtasks. The `parent` field on the Task record makes
+that tree expressible on the existing single board. Three design
+choices are worth flagging because the obvious alternatives were
+rejected:
 
 1. **No auto status propagation.** A parent task's `status` is NOT
    derived from its children. We considered "parent goes Done when all
@@ -297,7 +300,7 @@ because the obvious alternatives were rejected:
    coupled and walking it back. Aggregation lives in `TaskSummary.childCounts`
    instead, which the epic owner reads to decide manually.
 
-2. **No reparenting in v1.** `createTask --parent` accepts the field,
+2. **No reparenting yet.** `createTask --parent` accepts the field,
    but there is no `task reparent` command. Reparenting introduces
    concurrency on the parent's `childCounts` aggregation that we do
    not need yet. The chain is cycle-checked at read time as a defence

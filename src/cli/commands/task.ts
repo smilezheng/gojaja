@@ -28,7 +28,7 @@ function splitList(raw: string | undefined): string[] {
 }
 
 /**
- * PR8j: parse `kind:ref[::description]` from a single `--asset` /
+ * parse `kind:ref[::description]` from a single `--asset` /
  * `--deliverable` flag value. We use `::` (not `:`) as the description
  * separator so URLs survive intact.
  */
@@ -90,7 +90,7 @@ function parseTags(rawArgs: string[] | undefined): string[] {
 }
 
 /**
- * PR8u: pull all `--reviewer <role>` repetitions from raw argv.
+ * pull all `--reviewer <role>` repetitions from raw argv.
  * Each value is a role id; validation happens in `Store.createTask`.
  */
 function parseReviewers(rawArgs: string[] | undefined): string[] {
@@ -218,7 +218,7 @@ async function runTaskList(args: ParsedArgs): Promise<number> {
     tasks = tasks.filter((t) => t.status === statusFilter);
   }
   if (tagFilters.length > 0) {
-    // PR8j: OR-match across multiple --tag values. A task with any
+    // OR-match across multiple --tag values. A task with any
     // matching tag passes the filter.
     tasks = tasks.filter((t) => tagFilters.some((f) => t.tags.includes(f)));
   }
@@ -241,7 +241,7 @@ async function runTaskList(args: ParsedArgs): Promise<number> {
 }
 
 /**
- * PR8j: helper for `task show` — does the file referenced by a
+ * helper for `task show` — does the file referenced by a
  * `kind: "file"` asset/deliverable exist on disk? Returns false for
  * out-of-tree refs (defence; create-time validation rejected them).
  */

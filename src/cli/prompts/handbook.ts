@@ -11,11 +11,9 @@
  *     never to PM/TL/Backend.
  *   - Concrete triggers. "Stale for 3 turns" beats "regularly".
  *   - Mostly "don't" rules. LLMs over-communicate by default.
- *
- * PR8q: rewritten for density — CLAUDE.md inserts this block, so the
- * target is ~150 lines / ~12 KB. Tables collapse parallel sections;
- * rationale paragraphs are dropped; full long-form policy lives in
- * docs/HANDBOOK.md in the source repo.
+ *   - Density target: ~150 lines / ~12 KB (so it fits cleanly into
+ *     a CLAUDE.md block). Long-form rationale lives in
+ *     docs/HANDBOOK.md in the source repo.
  */
 
 export const COLLABORATION_HANDBOOK = `## Collaboration handbook
@@ -181,8 +179,8 @@ the **parent** to a lead role. The lead:
 Tasks carry a \`reviewers\` field set at creation
 (\`task new --reviewer X --reviewer Y ...\`). Pushing a task to
 Review automatically surfaces \`TASK_STATUS_CHANGED\` in every
-reviewer's manifest — no explicit report needed (PR8u). Reviewers
-then either:
+reviewer's manifest — no explicit report needed. Reviewers then
+either:
 
 - \`task status <id> Done\` to accept (deliverable gate still applies).
 - \`task status <id> InProgress\` (optionally + a report to the
@@ -195,8 +193,7 @@ so they can shepherd it without a separate "ask owner to revert" hop.
 (self-managed task — you created it AND own it). Otherwise the
 transition refuses with \`FORBIDDEN\`; ask one of the task's
 \`reviewers\` to accept, or escalate to a role that owns
-\`state/task_board.yaml\`. Legacy tasks on disk with no \`creator\`
-field keep their old owner-Done behaviour.
+\`state/task_board.yaml\`.
 
 ### Idle
 

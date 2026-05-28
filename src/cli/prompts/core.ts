@@ -36,16 +36,15 @@ export function runtimeLoopBody(
 ): string {
   const handbook = opts.withHandbook === false ? "" : `\n\n${COLLABORATION_HANDBOOK}`;
   const waitCmd = waitRecommendation(opts.target);
-  // PR8r: projectRoot is intentionally NOT baked into the runtime
-  // body. The body is written into committed files (cursor rule,
-  // CLAUDE.md marker block) and copied across machines; an absolute
-  // path makes the artifact host-specific (wrong root on another
-  // checkout). `gojaja` discovers the project root from the shell's
-  // cwd at runtime — the rendered text says exactly that. The
-  // parameter remains so callers can pass cwd-discovery vs. a chat
-  // activation snippet symmetrically (activationSnippet does still
-  // include the path because it is pasted per-window and never
-  // committed).
+  // projectRoot is intentionally NOT baked into the runtime body. The
+  // body is written into committed files (cursor rule, CLAUDE.md
+  // marker block) and copied across machines; an absolute path makes
+  // the artifact host-specific (wrong root on another checkout).
+  // `gojaja` discovers the project root from the shell's cwd at
+  // runtime — the rendered text says exactly that. The parameter
+  // remains so callers can pass cwd-discovery vs. a chat activation
+  // snippet symmetrically (activationSnippet does still include the
+  // path because it is pasted per-window and never committed).
   const projectLine = `for whichever project this window is currently
 working in (\`gojaja\` discovers the project root from the shell's
 cwd).`;
@@ -96,7 +95,7 @@ ${handbook}`;
  *
  * Cursor's chat-mode shell wraps each tool call with a host-side
  * timeout in the seconds range. A single long sleep is killed by the
- * host and the agent sees a broken exit code. The PR8i `wait` design
+ * host and the agent sees a broken exit code. The `wait` design
  * answers this with chunked, resumable polling: Cursor pins a short
  * `--poll-interval` so each chunk fits inside the host budget; on
  * RESUME the agent re-invokes the same command. Codex / Claude /

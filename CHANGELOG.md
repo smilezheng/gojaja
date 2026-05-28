@@ -8,6 +8,34 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### Drop back-compat hints + dead migration code (PR8v)
+
+The project has no released users, so accumulated "migrate from
+PR8X" hints and back-compat code paths were costing context budget
+and clarity without buying anything.
+
+- Removed every `PR8x` / `pre-PR8x` / `legacy ...` / `alpha-only`
+  reference from user-facing artifacts: `gojaja -h`, the runtime
+  prompt body, the collaboration handbook, READMEs, and the user
+  docs (`PROTOCOL`, `SCHEMA`, `RFC`, `HANDBOOK`, `DESIGN`). The
+  history-by-design `CHANGELOG` and `ROADMAP` are unchanged.
+- Removed the dead `assignedBy → creator` promotion in
+  `backfillTaskFields`. A task missing `creator` on disk now
+  defaults to `"SYSTEM"` rather than `null`, and `Task.creator`
+  drops the `| null` member from its type.
+- Removed the `task.creator === null` fallback in `setTaskStatus`:
+  the new Done-permission gate applies uniformly. A hand-edited
+  task missing `creator` is treated as SYSTEM-created and refuses
+  owner-Done; the task-board-owner path still works for sign-off.
+- Removed the `proposal.yaml status: pre-decide` and the
+  `preDecision: {...}` field detectors from `readRfc`, plus the
+  `comments/<role>.json` directory detector and the
+  `rfcLegacyCommentsDir` helper from `paths.ts`. Those on-disk
+  shapes were ephemeral pre-release shapes.
+- Source-level scaffolding comments (`// PR8x: ...`) were stripped
+  in bulk; the design comments themselves are preserved, just no
+  longer date-stamped.
+
 ### Planned next
 
 - PR8h: schema-level features previously slated for PR8g (task

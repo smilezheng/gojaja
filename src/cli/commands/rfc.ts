@@ -53,7 +53,7 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
   if (deciders.length === 0) {
     throw new UsageError("Specify at least one decider with --deciders <role>[,role2,...].");
   }
-  // PR8l: --options is optional. Empty means "brainstorm mode" — the
+  // --options is optional. Empty means "brainstorm mode" — the
   // RFC opens with no concrete choices on the table. Voters post free
   // comments; anyone can later run `rfc add-option` to introduce a
   // pickable choice, which upgrades the RFC into a decision flow.
@@ -83,9 +83,9 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
         `  relatedTasks:  ${proposal.relatedTasks.join(", ") || "(none)"}\n`,
     );
     if (proposal.description.length === 0) {
-      // PR8g: soft warning. Description is the channel where the
+      // soft warning. Description is the channel where the
       // creator gives non-participants enough context to weigh in.
-      // Hardening to required is planned for PR8h.
+      // A future release will harden this to a required field.
       process.stdout.write(
         `\nHint: this RFC has no --description. Voters and deciders read this\n` +
           `field for context; without it they may have to revise the RFC back\n` +
@@ -176,7 +176,7 @@ async function runRfcPreDecide(args: ParsedArgs): Promise<number> {
   if (json) {
     process.stdout.write(JSON.stringify({ status: "pre-decided", comment }) + "\n");
   } else {
-    // PR8g.1: print the required-ACK set so the decider knows exactly
+    // print the required-ACK set so the decider knows exactly
     // who they're waiting on. We re-read the RFC to compute it (cheap;
     // happens once per pre-decide invocation).
     const { proposal } = await store.readRfc(rfcId);
@@ -253,7 +253,7 @@ async function runRfcDecide(args: ParsedArgs): Promise<number> {
         "  passed for brainstorm-mode RFCs (created without --options).",
     );
   }
-  // PR8l: --option is conditional. The store enforces the matching
+  // --option is conditional. The store enforces the matching
   // invariant against the proposal; we just forward what the caller
   // gave (or null) and let it return the right error message.
   const chosenOption = optionalString(args.flags, "option") ?? null;
@@ -402,7 +402,7 @@ async function runRfcList(args: ParsedArgs): Promise<number> {
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
-  // PR8g: pre-decide and revising are new valid statuses.
+  // pre-decide and revising are new valid statuses.
   const allowed = new Set([
     "open",
     "revising",
@@ -435,7 +435,7 @@ async function runRfcList(args: ParsedArgs): Promise<number> {
 /**
  * Render comments as a tree by `replyTo` chains. Depth-2 indents are
  * meaningful; deeper threads flatten to depth-2 to keep output legible.
- * PR8g.1: kind=pre-decision / ack / object comments get a [kind] tag
+ * kind=pre-decision / ack / object comments get a [kind] tag
  * so the position-statement comments stand out from regular discussion.
  */
 function renderCommentTree(comments: RfcComment[]): string[] {
@@ -464,7 +464,7 @@ function renderCommentTree(comments: RfcComment[]): string[] {
 }
 
 /**
- * PR8g.1: compute the currently-active pre-decision (latest
+ * compute the currently-active pre-decision (latest
  * kind=pre-decision comment not invalidated by a later add-option).
  * Mirrors `computeActivePreDecisionInLedger` in the store; we
  * duplicate the small filter here rather than expose store internals.
@@ -488,7 +488,7 @@ async function runRfcShow(args: ParsedArgs): Promise<number> {
   const store = await openStoreOrThrow(root);
   const data = await store.readRfc(rfcId);
 
-  // PR8g: opportunistically advance the role's read marker for this
+  // opportunistically advance the role's read marker for this
   // RFC if there's an GOJAJA_SESSION (so subsequent `plan` results reflect
   // "no unread comments"). A bare-hands SYSTEM call (no GOJAJA_SESSION)
   // doesn't move a per-role cursor; that's correct.
@@ -519,7 +519,7 @@ async function runRfcShow(args: ParsedArgs): Promise<number> {
   } else {
     process.stdout.write(`\nDescription: (empty — consider 'rfc revise' if context is missing)\n`);
   }
-  // PR8g.1: pending pre-decision is now a computed view over the
+  // pending pre-decision is now a computed view over the
   // comments ledger; render it with the outstanding ACK list and
   // already-responded roles so the agent can see at a glance what's
   // blocking decide.

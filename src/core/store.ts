@@ -222,7 +222,7 @@ export interface Store {
     actor: RoleId | "SYSTEM";
   }): Promise<{ role: RoleId; removedSessions: number }>;
 
-  // ---- event projection (PR8n) --------------------------------------------
+  // ---- event projection ---------------------------------------------------
 
   /**
    * Project the global event stream onto the slice that should land in
@@ -239,7 +239,7 @@ export interface Store {
    */
   filterVisibleEventsForRole(events: Event[], role: RoleId): Promise<Event[]>;
 
-  // ---- wait state (PR8i) --------------------------------------------------
+  // ---- wait state ---------------------------------------------------------
 
   /**
    * Read the current wait session for `role`, if any. `null` means no
@@ -275,12 +275,12 @@ export interface Store {
    * `actor` as the task's `creator` (audit; not changed by later
    * `assignTask` calls).
    *
-   * PR8j: extra optional inputs land directly on the task record.
+   * extra optional inputs land directly on the task record.
    * `parent` is validated for existence + non-cyclicity + depth limit.
    * `assets` / `deliverables` are validated for path shape (file refs
    * must stay inside the project tree and outside `.gojaja/`).
    *
-   * PR8u: `reviewers` are roles authorised to mark this task Done
+   * `reviewers` are roles authorised to mark this task Done
    * regardless of ownership; they also become stakeholders for the
    * task's `TASK_STATUS_CHANGED` events (visible in their manifest
    * without the owner sending an explicit report).
@@ -292,13 +292,11 @@ export interface Store {
     dependsOn?: string[];
     acceptance?: string;
     actor: RoleId | "SYSTEM";
-    // PR8j
-    parent?: string | null;
+    // parent?: string | null;
     assets?: TaskAsset[];
     deliverables?: Deliverable[];
     tags?: string[];
-    // PR8u
-    reviewers?: RoleId[];
+    // reviewers?: RoleId[];
   }): Promise<Task>;
 
   /**
@@ -317,7 +315,7 @@ export interface Store {
    * Set a task's status. Emits `TASK_STATUS_CHANGED`. Refuses if the
    * status string is not a known `TaskStatus`.
    *
-   * PR8j: when `newStatus === "Done"`, every `kind: "file"` deliverable
+   * when `newStatus === "Done"`, every `kind: "file"` deliverable
    * is checked against the project tree. Any missing file refuses the
    * transition with `UsageError` listing the offenders, UNLESS
    * `forceIncomplete` is true, in which case the transition succeeds
@@ -328,7 +326,7 @@ export interface Store {
     taskId: string;
     newStatus: TaskStatus;
     actor: RoleId | "SYSTEM";
-    /** PR8j: bypass file-deliverable gate; emits an audit event. */
+    /** bypass file-deliverable gate; emits an audit event. */
     forceIncomplete?: boolean;
   }): Promise<Task>;
 
@@ -351,9 +349,9 @@ export interface Store {
     options: RfcOption[];
     deadline?: string | null;
     createdBy: RoleId | "SYSTEM";
-    /** PR8g: free-form context. Optional in PR8g (warned if empty). */
+    /** Free-form context. Soft-required (warning if empty). */
     description?: string;
-    /** PR8g: linked task ids. Validated against task board. */
+    /** linked task ids. Validated against task board. */
     relatedTasks?: string[];
   }): Promise<RfcProposal>;
 
@@ -366,7 +364,7 @@ export interface Store {
   /**
    * Append a comment to the RFC's `comments.yaml` ledger.
    *
-   * PR8g.1 semantics (collapsed pre-decide back to a comment kind):
+   * semantics (collapsed pre-decide back to a comment kind):
    * - Append-only; multiple comments per role are preserved in order.
    * - `replyTo` ties the comment to the RFC root (`null`) or another
    *   comment by id.
@@ -399,11 +397,11 @@ export interface Store {
   }): Promise<RfcComment>;
 
   /**
-   * PR8g: add a new option to an open or revising RFC. Any role with a
+   * add a new option to an open or revising RFC. Any role with a
    * session may add (the discussion is collaborative). Refused in
    * terminal states (`accepted`, `rejected`, `superseded`).
    *
-   * PR8g.1: if there is an active pre-decision, calling this
+   * if there is an active pre-decision, calling this
    * silently invalidates that pre-decision (the ACK round becomes
    * moot because voters were ACKing a now-outdated option set).
    * The decider can re-issue `preDecideRfc` to start a fresh round.
@@ -418,7 +416,7 @@ export interface Store {
   }): Promise<RfcOption>;
 
   /**
-   * PR8g.1: post a pre-decision. Thin wrapper over `commentRfc` with
+   * post a pre-decision. Thin wrapper over `commentRfc` with
    * `kind: "pre-decision"`. Decider gate (FORBIDDEN otherwise);
    * validates `chosenOption` exists. Returns the just-written comment
    * so callers can echo its id.
@@ -435,7 +433,7 @@ export interface Store {
   }): Promise<RfcComment>;
 
   /**
-   * PR8g.1: record an explicit ACK to the active pre-decision.
+   * record an explicit ACK to the active pre-decision.
    * Caller must be in `(voters ∪ deciders) − {pre-decider}`. Rationale
    * is optional (a bare "yes" is meaningful). Refuses if no active
    * pre-decision exists or if the caller is the pre-decider.
@@ -447,7 +445,7 @@ export interface Store {
   }): Promise<RfcComment>;
 
   /**
-   * PR8g.1: record an explicit objection to the active pre-decision.
+   * record an explicit objection to the active pre-decision.
    * Same caller-set + active-required gates as `ackRfc`. Rationale
    * required. `preferredOption` is the option the objector would
    * rather the decider pick; may be empty if they have no preference
@@ -488,7 +486,7 @@ export interface Store {
   }): Promise<RfcDecision>;
 
   /**
-   * PR8g: kick an RFC back to the creator for rewrite. Decider gate.
+   * kick an RFC back to the creator for rewrite. Decider gate.
    * Status moves to `revising`; the rationale is captured in the
    * `RFC_REVISION_REQUESTED` event and tells the creator what to fix.
    * `editRfc` re-opens it.
@@ -500,7 +498,7 @@ export interface Store {
   }): Promise<RfcProposal>;
 
   /**
-   * PR8g: update an RFC in `revising` state and re-open it. The actor
+   * update an RFC in `revising` state and re-open it. The actor
    * must be either the original creator OR a decider. At least one of
    * `title` / `description` / `options` / `deadline` must be provided.
    * Comments are preserved across the revise → edit cycle.
@@ -516,7 +514,7 @@ export interface Store {
   }): Promise<RfcProposal>;
 
   /**
-   * PR8g: attach a task id to the RFC's `relatedTasks` list. The task
+   * attach a task id to the RFC's `relatedTasks` list. The task
    * must exist in `state/task_board.yaml`. Idempotent — adding an
    * already-linked id is a no-op (still returns the proposal).
    */
@@ -526,7 +524,7 @@ export interface Store {
     taskId: string;
   }): Promise<RfcProposal>;
 
-  /** PR8g: counterpart to `linkTaskToRfc`. Idempotent. */
+  /** counterpart to `linkTaskToRfc`. Idempotent. */
   unlinkTaskFromRfc(input: {
     rfcId: string;
     actor: RoleId;
@@ -534,7 +532,7 @@ export interface Store {
   }): Promise<RfcProposal>;
 
   /**
-   * PR8g: mark this role as having seen all comments up to the
+   * mark this role as having seen all comments up to the
    * latest one on this RFC at the time of call. Updates the
    * per-role-per-RFC cursor used by `manifest.rfcs[*].unreadComments`.
    * Idempotent.

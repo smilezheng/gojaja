@@ -489,28 +489,30 @@ describe("PR8j: task model expansion", () => {
     expect(c1Summary?.childCounts).toBeUndefined();
   });
 
-  it("readTaskBoard backfills legacy yaml (without new fields) with safe defaults", async () => {
-    // Hand-write a board that mirrors the pre-PR8j layout.
+  it("readTaskBoard backfills a hand-edited task missing optional fields with safe defaults", async () => {
+    // Hand-edit a board to strip the optional fields the framework
+    // normally writes; readTaskBoard should fill them in defensively
+    // rather than blowing up.
     const boardPath = path.join(ctx.layerRoot, "state", "task_board.yaml");
-    const legacy = `schemaVersion: "1.0.0-legacy"
+    const handEdited = `schemaVersion: "2.0.0"
 nextId: 1
 tasks:
   T-0001:
     id: T-0001
-    title: Old task
+    title: Hand-edited task
     status: Ready
     owner: Frontend
     priority: P2
     dependsOn: []
     acceptance: ''
-    createdAt: '2024-01-01T00:00:00.000Z'
-    updatedAt: '2024-01-01T00:00:00.000Z'
+    createdAt: '2026-01-01T00:00:00.000Z'
+    updatedAt: '2026-01-01T00:00:00.000Z'
 `;
-    await fsp.writeFile(boardPath, legacy);
+    await fsp.writeFile(boardPath, handEdited);
     const board = await ctx.store.readTaskBoard();
     const t = board.tasks["T-0001"];
     expect(t.parent).toBeNull();
-    expect(t.creator).toBeNull();
+    expect(t.creator).toBe("SYSTEM");
     expect(t.assets).toEqual([]);
     expect(t.deliverables).toEqual([]);
     expect(t.tags).toEqual([]);
@@ -771,32 +773,38 @@ describe("PR8u: reviewers + creator + Done permission", () => {
     expect(summary?.reviewers).toEqual(["QA"]);
   });
 
-  it("legacy task with creator=null (backfill) keeps owner-Done as before", async () => {
-    // Hand-write a board with a legacy task (no creator, no
-    // assignedBy) — backfill sets creator=null. Owner-Done must still
-    // work so existing alpha projects don't lock up after upgrade.
+  it("hand-edited task missing the creator field is backfilled to SYSTEM and refuses owner-Done", async () => {
+    // If someone hand-edits the board and strips the creator field,
+    // backfill defaults it to SYSTEM. A non-SYSTEM owner that is not
+    // also the creator (which is now impossible) is refused on Done —
+    // they must escalate to a reviewer or the task-board owner.
     const boardPath = path.join(ctx.root, "state", "task_board.yaml");
-    const legacy = `schemaVersion: "2.0.0-legacy"
+    const handEdited = `schemaVersion: "2.0.0"
 nextId: 1
 tasks:
   T-0001:
     id: T-0001
-    title: Old task
+    title: Hand-edited task
     status: Ready
     owner: Backend
     priority: P2
     dependsOn: []
     acceptance: ''
-    createdAt: '2024-01-01T00:00:00.000Z'
-    updatedAt: '2024-01-01T00:00:00.000Z'
+    createdAt: '2026-01-01T00:00:00.000Z'
+    updatedAt: '2026-01-01T00:00:00.000Z'
 `;
-    await fsp.writeFile(boardPath, legacy);
+    await fsp.writeFile(boardPath, handEdited);
     const board = await ctx.store.readTaskBoard();
-    expect(board.tasks["T-0001"].creator).toBeNull();
+    expect(board.tasks["T-0001"].creator).toBe("SYSTEM");
     expect(board.tasks["T-0001"].reviewers).toEqual([]);
-    // Backend (owner, creator unknown) can still Done.
+    await expect(
+      ctx.store.setTaskStatus({
+        taskId: "T-0001", newStatus: "Done", actor: "Backend",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // A task-board-owner role can still sign off as the last-resort path.
     const done = await ctx.store.setTaskStatus({
-      taskId: "T-0001", newStatus: "Done", actor: "Backend",
+      taskId: "T-0001", newStatus: "Done", actor: "PM",
     });
     expect(done.status).toBe("Done");
   });

@@ -116,8 +116,8 @@ access; status transitions follow per-task permissions below):
         and cycle-checked. Children INHERIT NOTHING from the parent;
         ownership, priority, status are independent.
       --tag is a free-form label. Repeat for multiple tags.
-      --reviewer (PR8u) names a role authorised to mark this task
-        Done regardless of ownership. Reviewers also auto-receive
+      --reviewer names a role authorised to mark this task Done
+        regardless of ownership. Reviewers also auto-receive
         TASK_STATUS_CHANGED events in their manifest, so pushing the
         task to Review notifies them without an explicit report.
         Repeat for multiple reviewers; each must be a registered role.
@@ -142,7 +142,7 @@ access; status transitions follow per-task permissions below):
       reassignment history).
   task status <task-id> <Backlog|Ready|InProgress|Blocked|Review|Done>
                        [--force-incomplete]
-      Permission (PR8u):
+      Permission:
         - Done is allowed for: SYSTEM, a role in task.reviewers, the
           owner IF they are also the creator (self-managed task),
           or any role with state/task_board.yaml write access.
@@ -150,8 +150,6 @@ access; status transitions follow per-task permissions below):
           state/task_board.yaml write access.
         - An owner who is not the creator gets FORBIDDEN (exit 9) on
           Done; the error message names the configured reviewers.
-        - Legacy alpha tasks with no creator on disk fall back to
-          the pre-PR8u owner-Done behaviour.
       Moving to Done with missing file-kind deliverables additionally
       refuses with USAGE. --force-incomplete bypasses the deliverable
       gate AND emits a TASK_DELIVERABLE_BYPASSED event with the
@@ -171,10 +169,10 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
       --deciders is per-RFC; there is no role-level "default decider"
         flag. Pick roles whose owns overlap the decision, plus the
         role at the top of the relevant reportsTo chain.
-      --options is OPTIONAL (PR8l). Omitting it opens a brainstorm-mode
-        RFC: voters comment freely with no concrete choices on the
-        table. Anyone can later run 'rfc add-option' to introduce a
-        pickable choice, which upgrades the RFC into a decision flow.
+      --options is OPTIONAL. Omitting it opens a brainstorm-mode RFC:
+        voters comment freely with no concrete choices on the table.
+        Anyone can later run 'rfc add-option' to introduce a pickable
+        choice, which upgrades the RFC into a decision flow.
       --description is the context anyone-not-in-the-conversation
         needs to weigh in. If empty the CLI prints a soft warning; in
         a future release this will be hard-required.
@@ -216,10 +214,10 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
       except the pre-decider must have ack'd or objected. Calling
       decide/reject from a role not in the deciders list fails with
       FORBIDDEN (exit 9), not USAGE.
-      PR8l: --option is REQUIRED only when the RFC has at least one
-      option. For brainstorm-mode RFCs (created without --options
-      and never upgraded via add-option), --option must NOT be passed
-      and the rationale carries the takeaway alone.
+      --option is REQUIRED only when the RFC has at least one option.
+      For brainstorm-mode RFCs (created without --options and never
+      upgraded via add-option), --option must NOT be passed and the
+      rationale carries the takeaway alone.
 
   rfc reject  <rfc-id> --rationale <text>
       Final reject. Valid from open or revising. Bypasses the ACK
@@ -293,8 +291,7 @@ Keepalive (agent, requires GOJAJA_SESSION):
 
       The chunked polling lets a long wait survive a short host shell
       timeout: each chunk is one process, the next process resumes from
-      disk state. PR8i replaced the old --mode block | exit dichotomy
-      and the .wait sentinel.
+      disk state.
 
 Project lifecycle (user, NOT for agents):
   reset [--dry-run] [--confirm <basename>] [--purge-codex-skill]

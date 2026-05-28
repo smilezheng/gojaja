@@ -56,9 +56,7 @@ export function worklogEntryPath(role: string, eventId: string): string {
 }
 
 /**
- * PR8i wait state. Replaces the pre-PR8i `.wait` sentinel.
- *
- * Persists across resumed `wait` invocations:
+ * Wait session state. Persists across resumed `wait` invocations:
  *   - Stores deadline + condition + bookkeeping for the current session.
  *   - De-duplicates the idle worklog broadcast emitted by
  *     `--for task-assigned` (we want exactly one broadcast per session,
@@ -82,22 +80,12 @@ export function rfcProposalPath(rfcId: string, slug: string): string {
 }
 
 /**
- * PR8g: comments moved from per-role JSON files
- * (`comments/<role>.json`) to a single threaded ledger
- * (`comments.yaml`) per RFC. The legacy per-role directory is detected
- * on read and reported as a clear migration error — alpha-only hard
- * cut, no auto-migrator.
+ * Comments live in a single threaded ledger (`comments.yaml`) per RFC.
+ * Each entry carries a ULID, optional `replyTo`, and an optional
+ * `kind` for structured pre-decision / ack / object posts.
  */
 export function rfcCommentsFile(rfcId: string, slug: string): string {
   return path.posix.join(rfcDir(rfcId, slug), "comments.yaml");
-}
-
-/**
- * Pre-PR8g layout. Kept only so the back-compat detector can name the
- * directory in its error message. Never used for new writes.
- */
-export function rfcLegacyCommentsDir(rfcId: string, slug: string): string {
-  return path.posix.join(rfcDir(rfcId, slug), "comments");
 }
 
 export function rfcDecisionPath(rfcId: string, slug: string): string {
@@ -105,7 +93,7 @@ export function rfcDecisionPath(rfcId: string, slug: string): string {
 }
 
 /**
- * Per-role-per-RFC read cursor for PR8g `unreadComments` accounting.
+ * Per-role-per-RFC read cursor for `unreadComments` accounting.
  * Updated whenever the role calls `rfc show <id>` (unless --no-mark-seen).
  */
 export function rfcReadCursorPath(role: string, rfcId: string): string {

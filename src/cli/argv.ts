@@ -5,7 +5,7 @@ export interface ParsedArgs {
   positional: string[];
   flags: Record<string, string | boolean>;
   /**
-   * PR8j: original argv slice (minus the leading command). Kept so
+   * original argv slice (minus the leading command). Kept so
    * commands like `task new` can recover multi-valued flags
    * (`--asset` repeated, `--tag` repeated, ...) via `multiFlag`.
    * `flags` only stores the last occurrence, which is fine for the
@@ -104,7 +104,7 @@ export function parseArgv(argv: string[]): ParsedArgs {
 }
 
 /**
- * PR8j: collect all occurrences of `--<name> <value>` (or
+ * collect all occurrences of `--<name> <value>` (or
  * `--<name>=<value>`) from the original argv slice. Returns values in
  * declaration order. Boolean-form `--name` with no value is silently
  * skipped (we only care about value-bearing repeats for accumulating

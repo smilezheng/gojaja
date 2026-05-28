@@ -618,57 +618,7 @@ describe("PR8g — Manifest visibility for new states", () => {
   });
 });
 
-describe("PR8g — back-compat detector (legacy per-role JSON layout)", () => {
-  let ctx: { root: string; store: LocalFsStore };
-  beforeEach(async () => { ctx = await freshStore(); });
-  afterEach(async () => { await fsp.rm(ctx.root, { recursive: true, force: true }); });
-
-  it("readRfc refuses to proceed if comments/<role>.json files are present", async () => {
-    const r = await ctx.store.createRfc(NEW_RFC);
-    // Plant a pre-PR8g shape: comments/Backend.json.
-    const dir = path.join(ctx.root, "rfcs", `${r.id}-${r.slug}`, "comments");
-    await fsp.mkdir(dir, { recursive: true });
-    await fsp.writeFile(
-      path.join(dir, "Backend.json"),
-      JSON.stringify({ rfcId: r.id, role: "Backend", preferred: "A", ts: "", rationale: "legacy" }),
-    );
-    await expect(ctx.store.readRfc(r.id)).rejects.toMatchObject({
-      code: "USAGE",
-      message: expect.stringMatching(/pre-PR8g/),
-    });
-  });
-
-  it("PR8g.1: readRfc refuses proposal.yaml with status='pre-decide' (PR8g status removed)", async () => {
-    const r = await ctx.store.createRfc(NEW_RFC);
-    // Forge a PR8g-era proposal.yaml with status: pre-decide.
-    const proposalPath = path.join(ctx.root, "rfcs", `${r.id}-${r.slug}`, "proposal.yaml");
-    const raw = await fsp.readFile(proposalPath, "utf8");
-    await fsp.writeFile(
-      proposalPath,
-      raw.replace(/status:\s*open/, "status: pre-decide"),
-    );
-    await expect(ctx.store.readRfc(r.id)).rejects.toMatchObject({
-      code: "USAGE",
-      message: expect.stringMatching(/pre-decide.*PR8g/s),
-    });
-  });
-
-  it("PR8g.1: readRfc refuses proposal.yaml with a preDecision field (PR8g shape)", async () => {
-    const r = await ctx.store.createRfc(NEW_RFC);
-    const proposalPath = path.join(ctx.root, "rfcs", `${r.id}-${r.slug}`, "proposal.yaml");
-    const raw = await fsp.readFile(proposalPath, "utf8");
-    await fsp.writeFile(
-      proposalPath,
-      raw + "\npreDecision:\n  decidedBy: TL\n  chosenOption: A\n  ts: '2026-05-28T00:00:00Z'\n  rationale: legacy\n",
-    );
-    await expect(ctx.store.readRfc(r.id)).rejects.toMatchObject({
-      code: "USAGE",
-      message: expect.stringContaining("preDecision"),
-    });
-  });
-});
-
-// ---------- PR8l: brainstorm-mode RFCs (empty options) ----------
+// ---------- Brainstorm-mode RFCs (empty options) ----------
 
 const BRAINSTORM_RFC = {
   slug: "q3-priorities",

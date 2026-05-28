@@ -32,14 +32,14 @@ ownership, atomicity, and the event-stream audit can be enforced.
     decisions.md
     risks.yaml
   rfcs/RFC-NNNN-<slug>/                ← one directory per RFC
-    proposal.yaml                       ← carries status, description, relatedTasks, preDecision (PR8g)
-    comments.yaml                       ← PR8g: append-only threaded ledger (replaces comments/<role>.json)
+    proposal.yaml                       ← carries status, description, relatedTasks, etc.
+    comments.yaml                       ← append-only threaded ledger of comments
     decision.json                       ← present once a decider has acted
   worklog/<role>/<ulid>.md             ← one entry file per worklog entry
   comms/
     events/<ulid>.json                  ← immutable event stream
     cursors/<role>.json                 ← per-role event-stream consumer cursor
-    cursors/<role>/rfc-<rfc-id>.json    ← PR8g per-role-per-RFC read marker for unreadComments
+    cursors/<role>/rfc-<rfc-id>.json    ← per-role-per-RFC read marker for unreadComments
     pending/<role>/<ack-token>.json     ← outstanding manifests
     sessions/<role>.json                ← role lease metadata
     heartbeats/<role>.json              ← (planned) external watcher input
@@ -49,7 +49,7 @@ ownership, atomicity, and the event-stream audit can be enforced.
 What `LocalFsStore.initialise` creates today: every directory listed
 above, plus `VERSION`, a seeded `config.yaml` with an empty `roles` map,
 a seeded `state/task_board.yaml` with `nextId: 0`, and a TBD skeleton
-at `state/project_state.md` (PR8f-B). The other state files
+at `state/project_state.md`. The other state files
 (`architecture.md`, `decisions.md`, `risks.yaml`) are listed here as
 the conventional locations the project will populate over time; they
 are not created up front.
@@ -140,10 +140,9 @@ tasks:
       - rate-limited to 10/min
     createdAt: 2026-05-27T05:23:00.000Z
     updatedAt: 2026-05-27T05:23:00.000Z
-    # PR8j / PR8u fields (defaults when omitted; readTaskBoard backfills them)
     parent: null                    # parent task id, or null
-    creator: PM                     # who created the task (immutable; PR8u)
-    reviewers: [TL]                 # roles authorised to mark Done (PR8u)
+    creator: PM                     # who created the task (immutable)
+    reviewers: [TL]                 # roles authorised to mark Done
     assets:                         # info-only references; not gated
       - kind: url
         ref: https://figma.com/file/xxx
@@ -181,34 +180,32 @@ Field rules:
 
 - `id` is `T-NNNN` (zero-padded, minimum 4 digits). Assigned by the
   store; do not hand-pick.
-- `status` is the union above; v2 does not enforce transitions (any
-  status may move to any status). PR8j adds ONE invariant: moving to
-  `Done` with a missing file-kind deliverable is refused unless
-  `--force-incomplete` is passed; see PROTOCOL.md.
+- `status` is the union above; the framework does not enforce
+  transitions (any status may move to any status). One invariant:
+  moving to `Done` with a missing file-kind deliverable is refused
+  unless `--force-incomplete` is passed; see PROTOCOL.md.
 - `owner` is a role id or `null`. The role does not have to exist in
   `config.yaml` yet, but it must pass role-id validation.
 - `dependsOn` is an array of other task ids. Cycle detection is not
-  done in v2.
-- `parent` (PR8j) is another task id or `null`. The task graph is
-  cycle-checked at read time; chains deeper than 5 are refused. Parent
-  status is NOT automatically derived from children.
-- `creator` (PR8u; was `assignedBy` in PR8j) is the role that
-  originally created the task. Immutable after creation — `assignTask`
-  does NOT update this field; the event stream carries reassignment
-  history. Legacy pre-PR8u boards (only `assignedBy` on disk) are
-  auto-promoted on read.
-- `reviewers` (PR8u) is the list of roles authorised to mark this task
-  `Done` regardless of ownership. Reviewers are also stakeholders for
-  the task's `TASK_STATUS_CHANGED` events — pushing to Review
+  performed.
+- `parent` is another task id or `null`. The task graph is
+  cycle-checked at read time; chains deeper than 5 are refused.
+  Parent status is NOT automatically derived from children.
+- `creator` is the role that originally created the task. Immutable
+  after creation — `assignTask` does NOT update this field; the
+  event stream carries reassignment history.
+- `reviewers` is the list of roles authorised to mark this task
+  `Done` regardless of ownership. Reviewers are also stakeholders
+  for the task's `TASK_STATUS_CHANGED` events — pushing to Review
   auto-surfaces in their manifest, no explicit report needed.
-- `assets` (PR8j) are reference pointers the owner needs to read. Each
-  entry is `{ kind: "file" | "url", ref, description }`. File refs are
-  validated for path-traversal at create time but the file is not
-  required to exist (it may be produced by a peer task).
-- `deliverables` (PR8j) are required outputs. `kind: "file"` refs are
+- `assets` are reference pointers the owner needs to read. Each
+  entry is `{ kind: "file" | "url", ref, description }`. File refs
+  are validated for path-traversal at create time but the file is
+  not required to exist (it may be produced by a peer task).
+- `deliverables` are required outputs. `kind: "file"` refs are
   existence-checked on the `Done` transition. `kind: "url"` and
   `kind: "manual"` are displayed but not auto-verified.
-- `tags` (PR8j) is a free-form list of labels; `gojaja task list
+- `tags` is a free-form list of labels; `gojaja task list
   --tag <label>` filters with OR semantics.
 - Hand-edits are allowed for trivial fixes, but normal mutation goes
   through `gojaja task new/assign/status`, which also emits the
@@ -257,13 +254,13 @@ Event types currently emitted:
 | `TASK_STATUS_CHANGED` | `gojaja task status`           | Broadcast; `ref` = task id.                    |
 | `TASK_DELIVERABLE_BYPASSED` | `gojaja task status ... Done --force-incomplete` | Broadcast; `ref` = task id; `payload.missing` lists the file refs that were not on disk; `payload.by` records the actor who approved the bypass. Always emitted before the corresponding `TASK_STATUS_CHANGED`. |
 | `RFC_CREATED`         | `gojaja rfc new`               | Broadcast; `ref` = RFC id.                     |
-| `RFC_COMMENT`         | `gojaja rfc comment` / `ack` / `object` / `pre-decide` | Broadcast; `ref` = RFC id. PR8g.1: `payload.kind` distinguishes regular discussion (undefined) from structured `"pre-decision"` / `"ack"` / `"object"` posts. |
+| `RFC_COMMENT`         | `gojaja rfc comment` / `ack` / `object` / `pre-decide` | Broadcast; `ref` = RFC id. `payload.kind` distinguishes regular discussion (undefined) from structured `"pre-decision"` / `"ack"` / `"object"` posts. |
 | `RFC_DECIDED`         | `gojaja rfc decide` / `reject` | Broadcast; `ref` = RFC id; final.              |
 | `RFC_REPAIRED`        | `Store.readRfc` self-heal        | Broadcast; `ref` = RFC id. Emitted when a half-written `finaliseRfc` is observed (decision.json exists but proposal.yaml still `open`) and the proposal status is forward-completed from the decision. |
-| `RFC_OPTION_ADDED`    | `gojaja rfc add-option`        | Broadcast; `ref` = RFC id; payload carries new option id + summary + rationale (PR8g). Also implicitly invalidates any pending pre-decision via the read-time computation. |
-| `RFC_REVISION_REQUESTED` | `gojaja rfc revise`         | Broadcast; `ref` = RFC id. Status flips to `revising`; rationale tells the creator what to fix (PR8g). |
-| `RFC_REVISED`         | `gojaja rfc edit`              | Broadcast; `ref` = RFC id. Status flips back to `open`; payload lists which fields changed (PR8g). |
-| `RFC_TASK_LINKED` / `RFC_TASK_UNLINKED` | `gojaja rfc link-task` / `unlink-task` | Broadcast; `ref` = RFC id; payload carries task id (PR8g). |
+| `RFC_OPTION_ADDED`    | `gojaja rfc add-option`        | Broadcast; `ref` = RFC id; payload carries new option id + summary + rationale. Also implicitly invalidates any pending pre-decision via the read-time computation. |
+| `RFC_REVISION_REQUESTED` | `gojaja rfc revise`         | Broadcast; `ref` = RFC id. Status flips to `revising`; rationale tells the creator what to fix. |
+| `RFC_REVISED`         | `gojaja rfc edit`              | Broadcast; `ref` = RFC id. Status flips back to `open`; payload lists which fields changed. |
+| `RFC_TASK_LINKED` / `RFC_TASK_UNLINKED` | `gojaja rfc link-task` / `unlink-task` | Broadcast; `ref` = RFC id; payload carries task id. |
 | `SESSION_CLAIMED`     | `Store.claimSession`             | First-time claim.                              |
 | `SESSION_TAKEOVER`    | `Store.claimSession` (stale)     | After lease / PID-based break.                 |
 | `SESSION_RELEASED`    | `Store.releaseSession`           | Voluntary release.                             |
@@ -273,7 +270,7 @@ Event types currently emitted:
 Records are append-only at the directory level. There is no in-place
 modification; corrections are expressed as later events.
 
-## Two layers: event stream vs per-role manifest (PR8n)
+## Two layers: event stream vs per-role manifest
 
 The directory `comms/events/` is the **single durable event log**. It
 records every event, broadcast or directed, forever (subject to PR9
@@ -433,10 +430,9 @@ via `gojaja rfc show <id>`.
 
 ## `comms/pending/<role>/wait.json`
 
-PR8i session record for `gojaja wait`. Written atomically on the
-first chunk of a fresh wait session; kept across RESUME re-invocations;
+Session record for `gojaja wait`. Written atomically on the first
+chunk of a fresh wait session; kept across RESUME re-invocations;
 cleared on terminal exits (ATTENTION / CONDITION_MET / TIMEOUT).
-Replaces the pre-PR8i `.wait` sentinel.
 
 ```jsonc
 {
@@ -458,8 +454,8 @@ Replaces the pre-PR8i `.wait` sentinel.
 
 Correctness does not depend on this file: the deadline is also on the
 agent's command line. Losing the file at worst causes one duplicate
-idle worklog. External observers (e.g. `gojaja doctor`, planned for
-PR9) read it to list "who is waiting on what and until when".
+idle worklog. External observers (e.g. the planned `gojaja doctor`)
+read it to list "who is waiting on what and until when".
 
 ## `comms/heartbeats/<role>.json` (planned)
 
@@ -504,7 +500,7 @@ rfcs/RFC-0001-switch-to-postgres/
   decision.json      ← absent until the leader decides or rejects
 ```
 
-`proposal.yaml` (PR8g.1 shape):
+`proposal.yaml`:
 
 ```yaml
 id: RFC-0001
@@ -522,19 +518,18 @@ deadline: 2026-06-01T00:00:00.000Z        # informational (framework does NOT au
 createdAt: 2026-05-27T05:23:00.000Z
 createdBy: PM
 description: |
-  Free-form context. Soft-required in PR8g.1 (warn-on-empty); will be
-  hard-required in PR8h. This is the text non-participants read to
-  weigh in; deciders are expected to `rfc revise` if it is too thin.
+  Free-form context. Soft-required today (warn-on-empty); will become
+  hard-required in a later release. This is the text non-participants
+  read to weigh in; deciders are expected to `rfc revise` if it is
+  too thin.
 relatedTasks: [T-0042]                    # linked task ids; validated against task_board.yaml
 ```
 
-> PR8g had a `preDecision: {...}` field and `status: pre-decide`.
-> PR8g.1 removed both — pre-decisions are stored as
-> `kind: "pre-decision"` comments in `comments.yaml` and the ACK gate
-> on `decideRfc` enforces consensus computationally. `readRfc`
-> refuses any proposal.yaml that still carries the PR8g shapes.
+Pre-decisions are stored as `kind: "pre-decision"` comments in
+`comments.yaml`; the ACK gate on `decideRfc` enforces consensus
+computationally rather than via a separate state.
 
-Status state machine (PR8g.1, enforced):
+Status state machine (enforced):
 
 ```
                   ┌─ rfc revise ─────────────────────────────────────┐
@@ -547,18 +542,17 @@ Status state machine (PR8g.1, enforced):
                                                        ◀── rfc edit ─────┘
 ```
 
-- `accepted` / `rejected` / `superseded` are terminal in v2.
-- `superseded` is reserved (no command produces it in v2; document
+- `accepted` / `rejected` / `superseded` are terminal.
+- `superseded` is reserved (no command produces it today; document
   supersession in the new RFC's rationale).
 - Auto-tally is **not** implemented and is a design non-goal; deciders
   pick.
 - Decider scope is **per-RFC**, set at `rfc new` time via `--deciders`.
   There is no role-level "default decider" field on `RoleConfig`; a
   role becomes a decider only by being named in a specific RFC's
-  `deciders` list. A role-level decision-scope field is a PR8h
-  candidate.
+  `deciders` list.
 
-`comments.yaml` (PR8g.1, append-only threaded ledger with structured kinds):
+`comments.yaml` (append-only threaded ledger with structured kinds):
 
 ```yaml
 - id: 01HZA000000000000000COMM1   # ULID, globally unique; reply-to target
@@ -577,7 +571,7 @@ Status state machine (PR8g.1, enforced):
   preferred: A
   replyTo: null
   rationale: "Lean A; speak up if not."
-  kind: pre-decision                # PR8g.1: structured pre-decision comment
+  kind: pre-decision                # structured pre-decision comment
 
 - id: 01HZA000000000000000COMM3
   rfcId: RFC-0001
@@ -586,7 +580,7 @@ Status state machine (PR8g.1, enforced):
   preferred: B
   replyTo: 01HZA000000000000000COMM2
   rationale: "Prefer B; M2 slip is hard to justify."
-  kind: object                      # PR8g.1: structured objection comment
+  kind: object                      # structured objection comment
 
 - id: 01HZA000000000000000COMM4
   rfcId: RFC-0001
@@ -595,7 +589,7 @@ Status state machine (PR8g.1, enforced):
   preferred: A                      # ack: locked to the pre-decision's chosenOption
   replyTo: null
   rationale: ""                     # ack rationale optional
-  kind: ack                         # PR8g.1: structured acknowledgement comment
+  kind: ack                         # structured acknowledgement comment
 ```
 
 Multiple comments per role are preserved (ULIDs ensure order). Normal
@@ -605,20 +599,15 @@ pre-decide` (kind=pre-decision; decider only), `rfc ack` (kind=ack),
 emit `RFC_COMMENT` with `payload.kind`. Comments on closed RFCs
 (`accepted` / `rejected` / `superseded`) are refused.
 
-**PR8g.1 ACK gate (`decideRfc`)**: when an active pre-decision exists
-(latest `kind: "pre-decision"` comment with no later `RFC_OPTION_ADDED`
+**ACK gate (`decideRfc`)**: when an active pre-decision exists (latest
+`kind: "pre-decision"` comment with no later `RFC_OPTION_ADDED`
 event), every role in `(voters ∪ deciders) − {pre-decider}` must have
 a `kind: "ack"` or `kind: "object"` comment with `ts > pre-decision.ts`
 before `rfc decide` will succeed. Silence never counts as consent.
 There is no override; the only escape is `rfc reject` + open a fresh
 RFC without the unreachable role.
 
-> **Migration note (PR8g).** Projects that used the pre-PR8g
-> `comments/<role>.json` layout are detected on read and refused with a
-> clear `code: USAGE` error pointing the user at this section. Alpha-
-> stage hard cut, no auto-migrator.
-
-`comms/cursors/<role>/rfc-<rfc-id>.json` (PR8g, per-role-per-RFC read
+`comms/cursors/<role>/rfc-<rfc-id>.json` (per-role-per-RFC read
 marker):
 
 ```jsonc
@@ -650,12 +639,12 @@ Field rules:
 - `slug` must match `^[a-z0-9][a-z0-9-]{0,63}$`. Slug reuse across RFCs is
   refused.
 - `options` requires at least one entry, with unique ids. Options
-  can be **added after creation** via `rfc add-option` (PR8g) while
-  the RFC is `open` or `revising`.
+  can be **added after creation** via `rfc add-option` while the
+  RFC is `open` or `revising`.
 - `deciders` requires at least one role. `gojaja rfc pre-decide /
   decide / reject / revise` refuse callers outside that list.
-- `description` is soft-required (PR8g warning); will be hard-required
-  in PR8h.
+- `description` is soft-required (warning when empty); will be
+  hard-required in a later release.
 - `relatedTasks` entries are validated against `state/task_board.yaml`
   at write time (both at `rfc new` and at `rfc link-task`).
 - The sequential id counter lives in `config.yaml` under `rfcCounter`
