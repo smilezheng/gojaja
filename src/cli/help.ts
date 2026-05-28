@@ -313,11 +313,15 @@ Exit codes (relevant for scripted callers):
                    Agents: escalate to your reportsTo, do not retry.
  10  STATE_CORRUPTION — on-disk state is malformed; stop and ask the user.
 
-See:
+See the gojaja source repo at https://github.com/smilezheng/gojaja
+for the long-form docs (none of these files are shipped into your
+project):
   README.md           — first-time setup, mental model, troubleshooting
   docs/PROTOCOL.md    — wire-level contract (manifest shape, ack semantics)
   docs/HANDBOOK.md    — collaboration heuristics for agents
   docs/SCHEMA.md      — on-disk layout reference
+  docs/RFC.md         — full RFC lifecycle walkthrough
 
-Not yet implemented (see docs/ROADMAP.md): doctor, upgrade.
+Not yet implemented (see docs/ROADMAP.md in the source repo):
+doctor, upgrade.
 `;

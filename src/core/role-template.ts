@@ -47,7 +47,9 @@ export function renderRoleMarkdown(input: { id: RoleId } & RoleConfig): string {
     "3. `gojaja ack --token <t>` — confirm what you saw.",
     "4. `gojaja wait` — keep the window alive without burning tokens.",
     "",
-    "See [docs/PROTOCOL.md](../../docs/PROTOCOL.md) for the wire-level contract.",
+    "The full protocol contract is in the gojaja-runtime instructions",
+    "installed in this host (Cursor rule / CLAUDE.md / Codex skill) —",
+    "follow that body, not chat.",
     "",
   ].join("\n");
 }

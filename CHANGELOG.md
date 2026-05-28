@@ -25,6 +25,42 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   `config.yaml`, so an HR/Admin role can be granted role-creation
   authority via the normal ownership model.
 
+## [2.0.0-alpha.24] — 2026-05-28
+
+### Fix dead doc references in user-facing artifacts (PR8s)
+
+Five places leaked relative paths like \`docs/HANDBOOK.md\` or
+\`protocol/PROTOCOL.md\` into user-facing output. Those files live in
+the gojaja **source** repo on GitHub, not in the user's project; an
+agent following the reference would look at \`<project>/docs/...\`
+and find nothing.
+
+Fixed:
+
+- \`src/cli/prompts/handbook.ts\` intro: dropped "Mechanism is in
+  protocol/PROTOCOL.md ... Full long-form rationale: docs/HANDBOOK.md".
+  The handbook block is self-contained; the new intro just says
+  "Judgement layer ... rules below are self-contained; full long-form
+  rationale lives in the gojaja source repo on GitHub (you do not
+  need it to follow the rules)."
+- \`src/cli/help.ts\` "See:" section: replaced bare relative paths
+  with an explicit GitHub URL prefix
+  (\`https://github.com/smilezheng/gojaja\`) and a clear "none of
+  these files are shipped into your project" note.
+- \`src/core/role-template.ts\`: removed
+  \`[docs/PROTOCOL.md](../../docs/PROTOCOL.md)\` from the role
+  markdown skeleton. The role file is the agent's self-introduction;
+  the protocol contract is in the runtime body (Cursor rule /
+  CLAUDE.md / Codex skill) which the new line points at instead.
+- \`PROJECT_STATE_SKELETON\` (state/project_state.md template):
+  dropped "see docs/HANDBOOK.md". The acceptance criteria in that
+  file are authoritative; no external link needed.
+- RFC pre-PR8g migration errors: replaced "See docs/RFC.md
+  Migration section" with the full GitHub URL
+  (\`https://github.com/smilezheng/gojaja/blob/main/docs/RFC.md\`).
+
+Suite 316 -> 316.
+
 ## [2.0.0-alpha.23] — 2026-05-28
 
 ### Prompt artifact compression + path portability (PR8q + PR8r)

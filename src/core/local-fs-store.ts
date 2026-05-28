@@ -325,8 +325,8 @@ const PROJECT_STATE_SKELETON = `# Project state
 
 > Maintained by the role whose \`config.yaml:owns\` includes
 > \`state/project_state.md\` (typically the product-owner role).
-> Agents consult this file whenever they need to decide whether a task
-> is "Done" — see docs/HANDBOOK.md.
+> Agents consult this file whenever they need to decide whether a
+> task is "Done": the acceptance criteria below are authoritative.
 
 ## Vision
 
@@ -3001,7 +3001,7 @@ export class LocalFsStore implements Store {
           `with \`gojaja init\` (in a clean directory) or manually edit ` +
           `proposal.yaml to set status: "open" — the pre-decision data will ` +
           `be lost and agents should re-issue \`gojaja rfc pre-decide\`. ` +
-          `See docs/RFC.md "Migration" section.`,
+          `Migration notes: https://github.com/smilezheng/gojaja/blob/main/docs/RFC.md`,
       );
     }
     if (proposalRecord.preDecision !== undefined) {
@@ -3011,7 +3011,7 @@ export class LocalFsStore implements Store {
           `Either re-init a fresh project or manually edit proposal.yaml to ` +
           `remove the "preDecision" field — the pre-decision data will be ` +
           `lost and agents should re-issue \`gojaja rfc pre-decide\`. ` +
-          `See docs/RFC.md "Migration" section.`,
+          `Migration notes: https://github.com/smilezheng/gojaja/blob/main/docs/RFC.md`,
       );
     }
     // PR8g back-compat: detect the old per-role comments directory and

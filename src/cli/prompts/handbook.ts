@@ -20,9 +20,9 @@
 
 export const COLLABORATION_HANDBOOK = `## Collaboration handbook
 
-Mechanism is in protocol/PROTOCOL.md. This is judgement: which tool
-when, what to suppress. Full long-form rationale: docs/HANDBOOK.md
-in the gojaja source repo.
+Judgement layer: which tool when, what to suppress. The rules below
+are self-contained; full long-form rationale lives in the gojaja
+source repo on GitHub (you do not need it to follow the rules).
 
 ### Core stance
 
