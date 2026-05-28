@@ -336,6 +336,34 @@ Do NOT use \`--for task-assigned\` while you still have an open task
 broadcast is for genuinely-empty queues, not for "I don't feel like
 my current task".
 
+### What the manifest contains (PR8n)
+
+\`agentctl plan\` does NOT show you every event in the project. It
+shows a per-role projection:
+
+- Directed events to you (\`REPORT\`, \`TASK_ASSIGNED\`).
+- True team broadcasts (\`WORKLOG\`, \`RFC_DECIDED\`).
+- RFC discussion events ONLY if you are a voter, decider, or the RFC
+  creator.
+- Task events (\`TASK_CREATED\`, \`TASK_STATUS_CHANGED\`,
+  \`TASK_DELIVERABLE_BYPASSED\`) ONLY if you are a stakeholder of that
+  task — its owner, its parent's owner, or have it in your
+  \`dependsOn\`. \`TASK_CREATED\` additionally surfaces to
+  task-board owners (the triage set).
+
+Things you will NOT see:
+
+- Session events (claim / release / takeover), lock recoveries, and
+  RFC repair events — those are operational, audited in the event
+  stream, but not your problem.
+- RFC discussion for an RFC you are not a participant of.
+- Status changes on tasks you have no stake in.
+
+If you need the full event history (debugging, audit), read
+\`.multi-agent/comms/events/\` directly; the manifest projection is
+for your turn-by-turn decisions, the events directory is the durable
+log.
+
 ### Brainstorm via an options-less RFC (PR8l)
 
 When you need wide-open discussion (multiple ideas, risks, unknowns —

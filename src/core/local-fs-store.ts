@@ -157,6 +157,34 @@ function validateFileRef(ref: string, fieldName: string, projectRoot: string, la
   }
 }
 
+/**
+ * PR8n: is `role` a "stakeholder" of `taskId`? Used by the manifest
+ * visibility filter to decide whether `TASK_STATUS_CHANGED` and
+ * friends should land in this role's manifest.
+ *
+ * Stakeholders are:
+ *   - the task's current owner,
+ *   - the parent task's current owner (epic owner),
+ *   - any other task's owner where this task appears in `dependsOn`
+ *     (i.e. someone is blocked on this).
+ *
+ * Returns false for unknown task ids (defensive — the caller surfaces
+ * defensively when board context is missing).
+ */
+function isTaskStakeholder(role: RoleId, taskId: string, board: TaskBoard): boolean {
+  const task = board.tasks[taskId];
+  if (!task) return false;
+  if (task.owner === role) return true;
+  if (task.parent) {
+    const parent = board.tasks[task.parent];
+    if (parent && parent.owner === role) return true;
+  }
+  for (const other of Object.values(board.tasks)) {
+    if (other.owner === role && other.dependsOn.includes(taskId)) return true;
+  }
+  return false;
+}
+
 function validateAsset(asset: TaskAsset, projectRoot: string, layerRoot: string): void {
   if (!asset || typeof asset !== "object") {
     throw new UsageError("Asset must be an object.");
@@ -518,6 +546,205 @@ export class LocalFsStore implements Store {
     return events;
   }
 
+  /**
+   * PR8n: project the global event stream onto the slice that should
+   * land in `<role>`'s next manifest. The events file under
+   * `comms/events/` always carries the full stream (audit, git
+   * history, future `agentctl doctor`); per-role projection happens
+   * here based on event type + business context.
+   *
+   * Default rules (broadcast events `to: "*"`):
+   *   - `REPORT`, `TASK_ASSIGNED` — already directed; filter passes
+   *     them through via `e.to === role` check.
+   *   - `WORKLOG`, `RFC_DECIDED` — true broadcast. Every role sees.
+   *   - `RFC_CREATED`, `RFC_COMMENT`, `RFC_OPTION_ADDED`,
+   *     `RFC_REVISION_REQUESTED`, `RFC_REVISED` — only RFC
+   *     participants (`voters ∪ deciders ∪ {createdBy}`).
+   *   - `RFC_TASK_LINKED`, `RFC_TASK_UNLINKED` — RFC participants OR
+   *     the linked task's stakeholders.
+   *   - `TASK_CREATED` — only roles owning `state/task_board.yaml`
+   *     (the natural triage set; the new owner already gets a
+   *     directed `TASK_ASSIGNED`).
+   *   - `TASK_STATUS_CHANGED`, `TASK_DELIVERABLE_BYPASSED` — task
+   *     stakeholders (owner, parent owner, anyone with this task in
+   *     their `dependsOn`).
+   *   - `SESSION_CLAIMED`, `SESSION_RELEASED`, `SESSION_TAKEOVER`,
+   *     `LOCK_BROKEN`, `ROLE_DELETED`, `RFC_REPAIRED` — operational
+   *     events; NEVER in a per-role manifest. They live in the event
+   *     stream for `agentctl doctor` and audit.
+   *   - Unknown types — surfaced (forward-compatible default).
+   *
+   * The function is async because RFC participant sets are read
+   * lazily from disk; a Map cache keeps per-call cost ≈ O(unique
+   * RFCs touched).
+   */
+  async filterVisibleEventsForRole(
+    events: Event[],
+    role: RoleId,
+  ): Promise<Event[]> {
+    if (events.length === 0) return [];
+
+    // Pre-pass: identify which contexts we need before paying the I/O.
+    let needsBoard = false;
+    let needsConfig = false;
+    const rfcIdsTouched = new Set<string>();
+    for (const e of events) {
+      switch (e.type) {
+        case "TASK_CREATED":
+          needsConfig = true;
+          break;
+        case "TASK_STATUS_CHANGED":
+        case "TASK_DELIVERABLE_BYPASSED":
+          needsBoard = true;
+          break;
+        case "RFC_CREATED":
+        case "RFC_COMMENT":
+        case "RFC_OPTION_ADDED":
+        case "RFC_REVISION_REQUESTED":
+        case "RFC_REVISED":
+          if (e.ref) rfcIdsTouched.add(e.ref);
+          break;
+        case "RFC_TASK_LINKED":
+        case "RFC_TASK_UNLINKED":
+          if (e.ref) rfcIdsTouched.add(e.ref);
+          needsBoard = true;
+          break;
+      }
+    }
+
+    const board = needsBoard ? await this.readTaskBoard() : null;
+    const taskBoardOwners = needsConfig ? await this.computeTaskBoardOwners() : new Set<RoleId>();
+    const rfcParticipants = new Map<string, Set<RoleId>>();
+    for (const rfcId of rfcIdsTouched) {
+      try {
+        const { proposal } = await this.readRfcUnchecked(rfcId);
+        const set = new Set<RoleId>();
+        for (const v of proposal.voters) set.add(v);
+        for (const d of proposal.deciders) set.add(d);
+        if (proposal.createdBy !== "SYSTEM") set.add(proposal.createdBy);
+        rfcParticipants.set(rfcId, set);
+      } catch {
+        // RFC unreadable (deleted, corrupted, ...). Surface defensively
+        // so a buggy state cannot silently swallow events.
+        rfcParticipants.set(rfcId, new Set<RoleId>([role]));
+      }
+    }
+
+    const out: Event[] = [];
+    for (const e of events) {
+      // Self-events are never in the manifest.
+      if (e.from === role) continue;
+      // Directed events: only the named recipient sees them.
+      if (e.to !== "*") {
+        if (e.to === role) out.push(e);
+        continue;
+      }
+      // Broadcast events: apply per-type rules.
+      if (this.isBroadcastVisible(e, role, board, taskBoardOwners, rfcParticipants)) {
+        out.push(e);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Owners of `state/task_board.yaml`. Lazy helper for
+   * `filterVisibleEventsForRole`. A role's `owns` list can name the
+   * file directly or via a directory prefix (`state/`); we treat any
+   * entry that would let `requireOwnership` succeed as ownership.
+   */
+  private async computeTaskBoardOwners(): Promise<Set<RoleId>> {
+    const config = await this.readConfig();
+    const target = Paths.taskBoardFile;
+    const owners = new Set<RoleId>();
+    for (const [roleId, cfg] of Object.entries(config.roles)) {
+      for (const entry of cfg.owns) {
+        const normalised = entry.endsWith("/") ? entry : entry;
+        if (target === normalised) {
+          owners.add(roleId);
+          break;
+        }
+        if (target.startsWith(normalised.endsWith("/") ? normalised : `${normalised}/`)) {
+          owners.add(roleId);
+          break;
+        }
+      }
+    }
+    return owners;
+  }
+
+  /**
+   * Per-type broadcast visibility. `event.to === "*"` and
+   * `event.from !== role` have already been verified by the caller.
+   */
+  private isBroadcastVisible(
+    e: Event,
+    role: RoleId,
+    board: TaskBoard | null,
+    taskBoardOwners: Set<RoleId>,
+    rfcParticipants: Map<string, Set<RoleId>>,
+  ): boolean {
+    switch (e.type) {
+      case "WORKLOG":
+      case "RFC_DECIDED":
+      case "REPORT":
+        return true;
+
+      case "RFC_CREATED":
+      case "RFC_COMMENT":
+      case "RFC_OPTION_ADDED":
+      case "RFC_REVISION_REQUESTED":
+      case "RFC_REVISED": {
+        if (!e.ref) return true; // malformed; surface defensively
+        const set = rfcParticipants.get(e.ref);
+        return set ? set.has(role) : true;
+      }
+
+      case "RFC_TASK_LINKED":
+      case "RFC_TASK_UNLINKED": {
+        const rfcSet = e.ref ? rfcParticipants.get(e.ref) : undefined;
+        if (rfcSet?.has(role)) return true;
+        const taskId = (e.payload as { taskId?: string }).taskId;
+        if (taskId && board && isTaskStakeholder(role, taskId, board)) return true;
+        return false;
+      }
+
+      case "TASK_CREATED":
+        return taskBoardOwners.has(role);
+
+      case "TASK_STATUS_CHANGED":
+      case "TASK_DELIVERABLE_BYPASSED": {
+        const taskId = e.ref ?? (e.payload as { taskId?: string }).taskId;
+        if (!taskId || !board) return true; // defensive
+        return isTaskStakeholder(role, taskId, board);
+      }
+
+      case "SESSION_CLAIMED":
+      case "SESSION_RELEASED":
+      case "SESSION_TAKEOVER":
+      case "LOCK_BROKEN":
+      case "ROLE_DELETED":
+      case "RFC_REPAIRED":
+        // Operational. Stays in the event stream for audit / doctor;
+        // never lands in a per-role manifest.
+        return false;
+
+      case "TASK_ASSIGNED":
+        // Always directed; if we got here with to: "*" something is
+        // wrong upstream — surface defensively.
+        return true;
+
+      case "SYSTEM":
+        // Unknown / generic SYSTEM event — surface.
+        return true;
+
+      default:
+        // Forward-compat: future event types we do not yet classify
+        // are surfaced rather than silently dropped.
+        return true;
+    }
+  }
+
   // ---- cursors ------------------------------------------------------------
 
   async readCursor(role: string): Promise<CursorState> {
@@ -780,9 +1007,17 @@ export class LocalFsStore implements Store {
         this.safetyMarginMs > 0
           ? events.filter((e) => decodeUlidTimestamp(e.id) <= watermarkMs)
           : events;
-      const filtered = safeEvents.filter(
-        (e) => e.from !== role && (e.to === role || e.to === "*"),
-      );
+      // PR8n: filter by what THIS role actually cares about. The events
+      // stream stays full (audit / git / agentctl doctor); the manifest
+      // projects only the slice that needs the role's attention. This
+      // keeps the LLM turn from being noisy when the project produces
+      // many broadcast events.
+      const filtered = await this.filterVisibleEventsForRole(safeEvents, role);
+      // IMPORTANT: advanceCursorTo uses the LAST safeEvent (not the last
+      // filtered event), so events excluded by the visibility filter do
+      // NOT re-appear on next plan. They are durably visible in the
+      // events stream itself; the cursor advance is about manifest
+      // accountability, not about which events count as "seen".
       const advanceCursorTo =
         safeEvents.length > 0
           ? safeEvents[safeEvents.length - 1].id

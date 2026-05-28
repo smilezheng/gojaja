@@ -236,6 +236,50 @@ chunked wait early, they end the chat / kill the shell themselves;
 the agent will not auto-resume because the next user message
 implicitly redirects the runtime loop.
 
+## Per-role manifest is a projection, not the source of truth (PR8n)
+
+`comms/events/*.json` is the durable event log: append-only, every
+event ever produced lives there, audit-friendly, eventually read by
+`agentctl history` and `agentctl doctor`. The per-role manifest in
+`comms/pending/<role>/<ack-token>.json` is **a projection** of that
+log onto the slice an individual role should attend to.
+
+Two layers because of two competing forces:
+
+1. **Audit demands everything is recorded.** Decisions, status moves,
+   session lifecycle, lock recoveries — git history reading later
+   wants the full story.
+2. **LLM turns are expensive.** Every event in a manifest is one LLM
+   "should I react?" decision. Broadcasting indiscriminately turns a
+   busy project into thousands of per-event LLM calls of noise.
+
+PR1–PR8m treated the manifest as "everything since my cursor, filtered
+only by `from !== self` + `to ∈ {self, '*'}`". That collapsed both
+layers into one. In a 6-role project a typical day produced ~70
+broadcast events / role / day; each broadcast triggered an LLM turn
+on every other agent. The Frontend agent reading 50 worklogs about
+backend work was the predictable failure mode.
+
+PR8n splits them: events are still all broadcast on disk, but
+`openOrCreatePlan` runs a per-type filter to decide whether a
+broadcast event belongs in this role's manifest. The cursor advances
+past hidden events anyway, so a role does NOT re-see them; it just
+treats them as "noted, moving on".
+
+The classification is conservative — operational events
+(SESSION_*, LOCK_BROKEN, RFC_REPAIRED) hide from everyone; "real
+broadcasts" (WORKLOG, RFC_DECIDED) stay broadcast; everything else
+goes only to stakeholders (RFC participants, task owners /
+parents / dependants, board triagers). Unknown event types are
+forward-compatibly surfaced — better to over-deliver than to silently
+drop a future event.
+
+`wait --for attention` uses the same projection, so a wait fires only
+on events that the manifest would actually carry. Otherwise a
+broadcast event would wake the agent into a no-op turn (plan shows
+nothing new → end the turn). Same projection in both places keeps the
+"wait → plan" invariant clean.
+
 ## Task model: hierarchy without auto-state-propagation (PR8j)
 
 A natural multi-layer org wants a task tree: CTO -> PM/TL epic -> per-worker

@@ -82,8 +82,8 @@ no event observed by `plan` can be silently skipped by `ack`.
 - Resolves the role: from `MA_SESSION` if set, or from the optional
   positional argument (the two must agree if both are present).
 - Reads the current cursor and computes a `Manifest`:
-  - all events with `id > cursor.ackedThrough`
-    where `to ∈ {role, "*"}` AND `from !== role`,
+  - events with `id > cursor.ackedThrough`, projected through the
+    per-role manifest filter (see "Manifest event projection" below),
   - a compact `roleReminder` re-anchoring identity (id, title, owns,
     mustNotEdit, reportsTo, one-line protocol; empty fields omitted),
   - active tasks owned by the role,
@@ -92,6 +92,49 @@ no event observed by `plan` can be silently skipped by `ack`.
 - Updates the cursor with `pendingManifest = <ack-token>` (the cursor's
   `ackedThrough` is **not** moved).
 - Prints the manifest to stdout (as JSON when `--json`).
+
+#### Manifest event projection (PR8n)
+
+The global event stream (`comms/events/*.json`) records every event,
+broadcast or directed, for audit and future `agentctl doctor`. The
+**per-role manifest** is a projection of that stream, designed to keep
+each agent's per-turn attention small. Two filters apply in order:
+
+1. **Basic visibility.** `from !== role` (no self-echo);
+   `to === role` (directed) OR `to === "*"` (broadcast).
+2. **Per-type business filter** (broadcast events only):
+
+   | Event type | Surfaced to |
+   | --- | --- |
+   | `WORKLOG` | every role (manual team-status channel) |
+   | `RFC_DECIDED` | every role (decisions are team-wide knowledge) |
+   | `RFC_CREATED`, `RFC_COMMENT`, `RFC_OPTION_ADDED`, `RFC_REVISION_REQUESTED`, `RFC_REVISED` | the RFC's `voters ∪ deciders ∪ {createdBy}` |
+   | `RFC_TASK_LINKED`, `RFC_TASK_UNLINKED` | RFC participants OR the linked task's stakeholders |
+   | `TASK_CREATED` | roles that own `state/task_board.yaml` (triage set) |
+   | `TASK_STATUS_CHANGED`, `TASK_DELIVERABLE_BYPASSED` | task stakeholders (owner, parent owner, dependants) |
+   | `SESSION_CLAIMED`, `SESSION_RELEASED`, `SESSION_TAKEOVER`, `LOCK_BROKEN`, `ROLE_DELETED`, `RFC_REPAIRED` | nobody — operational events; surfaced only via `agentctl doctor` and the event stream itself |
+   | `REPORT`, `TASK_ASSIGNED` | always directed; the basic filter already handles them |
+
+   Forward-compat: future event types we have not yet classified are
+   surfaced rather than silently dropped.
+
+Two important guarantees:
+
+- **`advanceCursorTo` is computed from the unfiltered safe-events
+  list**, not the post-filter manifest. So an event excluded by the
+  per-type rule does NOT re-appear on the next `plan`; it is durably
+  recorded as "seen" once the manifest is ack'd, even if nothing in
+  the manifest referred to it. The event remains in `comms/events/`
+  forever for audit.
+- **`agentctl wait --for attention` uses the same projection.** A
+  role's wait only wakes on events that its manifest would actually
+  carry. Without this guarantee `wait` would fire on broadcast events
+  the agent would then discover its manifest hid — guaranteed wasted
+  turn.
+
+When you need the full event history (audit / debugging), read
+`comms/events/*.json` directly or use `agentctl history --role <role>`
+(planned in PR9).
 
 The `roleReminder` is intentionally tiny — a fully populated reminder
 serialises to under 300 bytes. It exists so that a context-compressed

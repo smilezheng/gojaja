@@ -265,11 +265,51 @@ Event types currently emitted:
 Records are append-only at the directory level. There is no in-place
 modification; corrections are expressed as later events.
 
+## Two layers: event stream vs per-role manifest (PR8n)
+
+The directory `comms/events/` is the **single durable event log**. It
+records every event, broadcast or directed, forever (subject to PR9
+archival). External tools (`agentctl history`, `agentctl doctor`,
+git-blame-style audit) read directly from this directory.
+
+What lands in a role's per-turn `manifest.events` is a **projection**
+of that stream, filtered by the visibility rules below. The projection
+keeps the LLM turn small and the agent focused on what actually
+demands their attention. Two layers, one source of truth.
+
+### Manifest visibility rules
+
+Applied in order to each event in `comms/events/` newer than the
+role's `ackedThrough`:
+
+1. **Basic.** `from !== role` (no self-echo);
+   `to === role` (directed) OR `to === "*"` (broadcast).
+2. **Per-type business filter** (broadcast events only):
+
+   | Event type | Surfaced to |
+   | --- | --- |
+   | `WORKLOG` | every role |
+   | `RFC_DECIDED` | every role |
+   | `RFC_CREATED`, `RFC_COMMENT`, `RFC_OPTION_ADDED`, `RFC_REVISION_REQUESTED`, `RFC_REVISED` | `voters ∪ deciders ∪ {createdBy}` of that RFC |
+   | `RFC_TASK_LINKED`, `RFC_TASK_UNLINKED` | RFC participants OR linked task's stakeholders |
+   | `TASK_CREATED` | roles owning `state/task_board.yaml` (the triage set) |
+   | `TASK_STATUS_CHANGED`, `TASK_DELIVERABLE_BYPASSED` | task stakeholders (owner, parent owner, dependants) |
+   | `SESSION_*`, `LOCK_BROKEN`, `RFC_REPAIRED`, `ROLE_DELETED` | nobody — operational, surfaced only via the event stream + `agentctl doctor` |
+   | `REPORT`, `TASK_ASSIGNED` | always directed; handled by rule 1 |
+
+**Cursor advance is computed against the pre-filter list.** An event
+excluded by rule 2 still counts toward `advanceCursorTo`, so it does
+NOT re-surface on the next `plan` — the manifest fairly admits "we
+saw this event but decided you don't need to react".
+
+The same projection is used by `agentctl wait --for attention`, so
+wait fires only on events the manifest would carry.
+
 ## Inbox is a derived view, not files
 
-A role's "inbox" is the subset of the event stream where
-`to ∈ {role, "*"}` and `from !== role`. `plan` performs that filter
-on the fly; there are no separate `comms/inbox/<role>/` files in v2.0.
+A role's "inbox" is the subset of the event stream produced by the
+projection above. `plan` performs the projection on the fly; there
+are no separate `comms/inbox/<role>/` files in v2.0.
 
 Rationale: events are already globally visible (the audit stream is not
 ACL'd), so a per-role inbox file would be pure duplication with its own

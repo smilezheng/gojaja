@@ -222,6 +222,23 @@ export interface Store {
     actor: RoleId | "SYSTEM";
   }): Promise<{ role: RoleId; removedSessions: number }>;
 
+  // ---- event projection (PR8n) --------------------------------------------
+
+  /**
+   * Project the global event stream onto the slice that should land in
+   * `<role>`'s manifest. Filters out:
+   *   - own events (`from === role`)
+   *   - events directed elsewhere (`to !== role && to !== "*"`)
+   *   - broadcast events the role is not a stakeholder of, per the
+   *     per-type rules documented on the implementation.
+   *
+   * Used by `openOrCreatePlan` to build `manifest.events` and by
+   * `agentctl wait --for attention` to wake the role only when an
+   * actually-relevant event arrived. The events themselves stay on
+   * disk; this is purely a view function.
+   */
+  filterVisibleEventsForRole(events: Event[], role: RoleId): Promise<Event[]>;
+
   // ---- wait state (PR8i) --------------------------------------------------
 
   /**

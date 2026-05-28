@@ -1,6 +1,6 @@
 {
   "name": "multi-agent-coordination",
-  "version": "2.0.0-alpha.19",
+  "version": "2.0.0-alpha.20",
   "description": "Agent-agnostic file-system coordination layer for multi-LLM-agent collaboration (Codex, Claude Code, Cursor, ...).",
   "keywords": [
     "multi-agent",

@@ -23,7 +23,14 @@ export const CLI_VERSION: string = PACKAGE_VERSION;
 // + gated hard outputs), `tags` (filter labels). `setTaskStatus(Done)`
 // refuses when file-kind deliverables are missing on disk; bypass via
 // `--force-incomplete` emits `TASK_DELIVERABLE_BYPASSED`.
-export const SCHEMA_VERSION = "2.0.0-task-v2";
+// Bumped in PR8n: manifest `events` is now a per-role projection of
+// the global event stream. Broadcast events (`to: "*"`) only land in
+// the manifests of roles that are stakeholders for that event type
+// (RFC participants, task stakeholders, task-board owners, ...).
+// Operational events (SESSION_*, LOCK_BROKEN, RFC_REPAIRED,
+// ROLE_DELETED) never appear in any manifest — they stay in
+// `comms/events/` for audit + future `agentctl doctor`.
+export const SCHEMA_VERSION = "2.0.0-manifest-filter";
 
 export const LAYER_DIRNAME = ".multi-agent";
 

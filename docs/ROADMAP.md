@@ -309,6 +309,34 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Non-breaking: no schema change; constraint relaxation only.
   - Suite 284 -> 294.
 
+- **PR8n — manifest event filter (token / attention budget).**
+  - The events stream stayed broadcast-by-default but was firing every
+    broadcast event into every agent's manifest. In a 6-role project
+    that meant ~70 broadcast events / role / day, each one an LLM
+    "should I react" turn. Broadcast-as-default was the wrong model.
+  - `openOrCreatePlan` now projects the global event stream onto a
+    per-role slice. Operational events (SESSION_*, LOCK_BROKEN,
+    RFC_REPAIRED, ROLE_DELETED) never land in any manifest; RFC
+    discussion events go only to participants; task-* events go only
+    to stakeholders (owner, parent owner, dependants, task-board
+    owners for `TASK_CREATED`); WORKLOG and RFC_DECIDED stay broadcast.
+  - The cursor still advances past hidden events, so they do not
+    re-appear on subsequent `plan` calls. The events themselves live
+    forever in `comms/events/` for audit + `agentctl doctor` (PR9).
+  - `agentctl wait --for attention` uses the same projection so wait
+    only fires on events the manifest would carry.
+  - `Store.filterVisibleEventsForRole` exposed on the interface for
+    `wait` to reuse without duplicating logic.
+  - Schema bumped to `2.0.0-manifest-filter`. Non-breaking in the
+    on-disk sense (no shape change); manifest visibility narrows —
+    agents see less, which is the entire point.
+  - PR8k's "retarget `wait --for task-assigned` idle broadcast to
+    `directReports`" is subsumed by this: when PR8k lands
+    `directReports`, the idle worklog can be marked with a payload
+    flag and the per-type filter will route it to that set instead
+    of broadcasting.
+  - Suite 294 -> 302.
+
 ### Planned, in priority order
 
 - **PR8k — org-hierarchy ergonomics (planned).**
@@ -434,13 +462,16 @@ deadline-driven, chunked, resumable primitive. PR8j expands the task
 model with parent/assets/deliverables/assignedBy/tags so 3+ layer
 organisations can express decomposition + hard outputs natively.
 PR8l relaxes the RFC `--options` requirement so the same primitive
-covers wide-open brainstorm sessions (no concrete choices yet).
+covers wide-open brainstorm sessions (no concrete choices yet). PR8n
+splits "audit log" and "agent manifest" so broadcast events no longer
+flood every role's per-turn attention.
 The "breaking" alpha-stage surface changes are PR8f-C
 (`write-state` → `state edit`), PR8g (comments file shape),
 PR8g.1 (pre-decide field/status removed), PR8i (wait flags +
 `.wait` sentinel removed), and PR8j (task field additions, Done
-deliverable gate). PR8l is non-breaking (constraint relaxation only).
-PR8h, PR8k, and PR9–PR10 harden the layer for everyday use; PR8h
+deliverable gate). PR8l and PR8n are non-breaking on-disk (PR8n
+narrows manifest visibility but does not change file shapes).
+PR8h, PR8k, PR8m, and PR9–PR10 harden the layer for everyday use; PR8h
 is the only remaining RFC-affecting PR
 before `v2.0.0`. Anything past `v2.0.0` only ships after the chaos
 suite (PR10) is green.

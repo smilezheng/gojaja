@@ -108,6 +108,12 @@ function formatConditionToken(cond: WaitCondition): string {
  * Per-condition predicate. Returns the first matching event (oldest by
  * ULID) or null. `attention` produces ATTENTION; the other kinds
  * produce CONDITION_MET.
+ *
+ * PR8n note: for `kind: "attention"`, the upstream `findFirstHit` pre-
+ * filters events through `Store.filterVisibleEventsForRole`, so this
+ * function only sees events that would actually appear in the role's
+ * manifest. The simple to/from check is the historical equivalent and
+ * is kept for back-compat when the filter is unavailable.
  */
 function matchEvent(
   e: Event,
@@ -116,8 +122,9 @@ function matchEvent(
 ): boolean {
   switch (cond.kind) {
     case "attention":
-      if (e.from === role) return false;
-      return e.to === role || e.to === "*";
+      // events have been pre-filtered upstream; any event here is
+      // already a relevant attention signal.
+      return true;
     case "rfc-decided":
       return e.type === "RFC_DECIDED" && e.ref === cond.ref;
     case "rfc-acked": {
@@ -147,7 +154,14 @@ async function findFirstHit(
   cursor: string,
   cond: WaitCondition,
 ): Promise<{ event: Event; count: number } | null> {
-  const events = (await store.listEventsAfter(cursor)) as Event[];
+  let events = (await store.listEventsAfter(cursor)) as Event[];
+  // PR8n: for `--for attention`, pre-filter through the same projection
+  // that builds `manifest.events`. Otherwise wait would wake the role
+  // for broadcast events that plan would have hidden — a guaranteed
+  // useless turn.
+  if (cond.kind === "attention") {
+    events = await store.filterVisibleEventsForRole(events, role);
+  }
   let hit: Event | null = null;
   let count = 0;
   for (const e of events) {

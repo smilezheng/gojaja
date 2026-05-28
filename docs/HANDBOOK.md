@@ -52,9 +52,9 @@ When extending the handbook, keep these constraints:
   something, link to `PROTOCOL.md` rather than restating it.
 - **Stay under the size budget.** The handbook ships in every agent
   window's persistent prompt area; the test suite enforces
-  `< 18 KB` of UTF-8 (bumped over time as content grew; PR8j set the
-  current ceiling after adding the deliverable-gate policy paragraph
-  on top of PR8i's wait verdict table).
+  `< 20 KB` of UTF-8 (bumped over time as content grew; PR8n set the
+  current ceiling after adding the manifest event filter contract on
+  top of PR8j's deliverable gate guidance).
 
 ## Scope: what is in vs out
 
@@ -79,6 +79,11 @@ In scope:
   wide-open discussion; `rfc add-option` upgrades the RFC into a
   decision flow when the team is ready to pick. `decide` allows
   (and requires) `--option` only after the upgrade.
+- Manifest is a per-role projection of the event stream (PR8n).
+  Operational events (sessions, locks, RFC repairs) and irrelevant
+  RFC discussion / task transitions are hidden so the agent's
+  per-turn attention stays on its own slice. The full audit log is
+  always in `.multi-agent/comms/events/`.
 
 Out of scope:
 

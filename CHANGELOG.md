@@ -18,9 +18,65 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   "who has acked / objected / not responded yet" without the agent
   having to read `rfc show`.
 - PR8k: org-hierarchy ergonomics. `directReports` reverse field,
-  multi-target `report --to`, idle-broadcast retargeting from `*` to
-  `directReports`, role-level RFC `decisionScopes`. Goal: 3+ layer
-  organisations are pleasant rather than noisy.
+  multi-target `report --to`, role-level RFC `decisionScopes`. Goal:
+  3+ layer organisations are pleasant rather than noisy. PR8n
+  subsumed the original "idle-broadcast retargeting" sub-task.
+- PR8m: gate `agentctl role create` behind ownership of
+  `config.yaml`, so an HR/Admin role can be granted role-creation
+  authority via the normal ownership model.
+
+## [2.0.0-alpha.20] — 2026-05-28
+
+### Manifest event filter — token / attention budget (PR8n)
+
+The events directory (`comms/events/`) stays the durable broadcast
+log: every event ever produced lives there for audit and future
+`agentctl doctor`. The per-role manifest is now a **projection** of
+that stream onto the slice the role should attend to. Two layers,
+one source of truth.
+
+Why: pre-PR8n a busy 6-role project produced ~70 broadcast events /
+role / day; each one was an LLM "should I react?" turn. WORKLOG and
+RFC_DECIDED really are team-wide; everything else was over-delivered.
+Net effect was bloated turns and noticeable behaviour contamination
+(agents reacting to RFC threads they were not invited to, status
+updates on tasks they had no stake in, session-claim noise, etc.).
+
+Filter rules (broadcast events `to: "*"`):
+
+- `WORKLOG`, `RFC_DECIDED` — every role (intentional team-wide
+  channels).
+- `RFC_CREATED`, `RFC_COMMENT`, `RFC_OPTION_ADDED`,
+  `RFC_REVISION_REQUESTED`, `RFC_REVISED` — the RFC's
+  `voters ∪ deciders ∪ {createdBy}`.
+- `RFC_TASK_LINKED`, `RFC_TASK_UNLINKED` — RFC participants OR the
+  linked task's stakeholders.
+- `TASK_CREATED` — roles owning `state/task_board.yaml` (triage set).
+  The new owner already gets a directed `TASK_ASSIGNED`.
+- `TASK_STATUS_CHANGED`, `TASK_DELIVERABLE_BYPASSED` — task
+  stakeholders (owner, parent owner, dependants).
+- `SESSION_CLAIMED`, `SESSION_RELEASED`, `SESSION_TAKEOVER`,
+  `LOCK_BROKEN`, `ROLE_DELETED`, `RFC_REPAIRED` — nobody. Operational
+  events; surfaced only via the event stream and (planned) doctor.
+- Unknown / future event types — surfaced (forward-compatibility).
+
+Guarantees:
+
+- The cursor advance is computed against the pre-filter list, so
+  events excluded by the per-type rule do NOT re-surface on the next
+  `plan`. The event remains in `comms/events/` forever.
+- `agentctl wait --for attention` uses the same projection, so wait
+  fires only on events that would actually appear in the manifest.
+  No more "wake the agent to look at a manifest that hides everything"
+  loops.
+
+Added:
+
+- `Store.filterVisibleEventsForRole(events, role): Promise<Event[]>`
+  exposed for `wait` to reuse the same projection.
+
+Schema version bumped to `2.0.0-manifest-filter`. Non-breaking on
+disk; manifest visibility narrows. Suite 294 -> 302.
 
 ## [2.0.0-alpha.19] — 2026-05-28
 
