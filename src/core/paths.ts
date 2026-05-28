@@ -2,7 +2,7 @@ import * as path from "node:path";
 import { PathValidationError } from "./errors";
 
 /**
- * Canonical relative path layout inside the .multi-agent directory.
+ * Canonical relative path layout inside the .gojaja directory.
  *
  * Anything not enumerated here is not part of the contract. Commands must go
  * through these helpers so that all path concatenation happens in one place,

@@ -126,7 +126,7 @@ function detectParentCycles(board: TaskBoard): void {
 
 /**
  * PR8j: validate a `kind: "file"` ref is a repo-relative path that
- * stays inside the project tree AND outside the `.multi-agent/` layer.
+ * stays inside the project tree AND outside the `.gojaja/` layer.
  * Refs are kept as POSIX-style strings on disk; we normalise here only
  * to detect escape attempts (`..`), not to mutate the stored value.
  */
@@ -151,7 +151,7 @@ function validateFileRef(ref: string, fieldName: string, projectRoot: string, la
   const relFromLayer = path.relative(layerRoot, abs);
   if (!relFromLayer.startsWith("..") && relFromLayer !== "..") {
     throw new UsageError(
-      `${fieldName} ref '${ref}' points inside .multi-agent/. Deliverables and ` +
+      `${fieldName} ref '${ref}' points inside .gojaja/. Deliverables and ` +
         `assets are project-tree artifacts; do not target framework state.`,
     );
   }
@@ -393,7 +393,7 @@ export interface LocalFsStoreOptions {
 const DEFAULT_SAFETY_MARGIN_MS = 200;
 
 /**
- * Filesystem-backed Store. Operates against a `.multi-agent` directory rooted
+ * Filesystem-backed Store. Operates against a `.gojaja` directory rooted
  * at `root`. All path construction is forced through `resolveInside`, so no
  * user input can reach `fs.*` without validation.
  */
@@ -410,7 +410,7 @@ export class LocalFsStore implements Store {
   }
 
   /**
-   * PR8j: the project tree (the directory CONTAINING `.multi-agent/`).
+   * PR8j: the project tree (the directory CONTAINING `.gojaja/`).
    * Used to resolve `kind: "file"` deliverable refs for the existence
    * gate on `setTaskStatus(... Done)`. We rely on the convention that
    * the layer directory lives at the project root; if that ever
@@ -550,7 +550,7 @@ export class LocalFsStore implements Store {
    * PR8n: project the global event stream onto the slice that should
    * land in `<role>`'s next manifest. The events file under
    * `comms/events/` always carries the full stream (audit, git
-   * history, future `agentctl doctor`); per-role projection happens
+   * history, future `gojaja doctor`); per-role projection happens
    * here based on event type + business context.
    *
    * Default rules (broadcast events `to: "*"`):
@@ -571,7 +571,7 @@ export class LocalFsStore implements Store {
    *   - `SESSION_CLAIMED`, `SESSION_RELEASED`, `SESSION_TAKEOVER`,
    *     `LOCK_BROKEN`, `ROLE_DELETED`, `RFC_REPAIRED` — operational
    *     events; NEVER in a per-role manifest. They live in the event
-   *     stream for `agentctl doctor` and audit.
+   *     stream for `gojaja doctor` and audit.
    *   - Unknown types — surfaced (forward-compatible default).
    *
    * The function is async because RFC participant sets are read
@@ -810,12 +810,12 @@ export class LocalFsStore implements Store {
           // agents that see "pass --force to take over" will reflexively
           // do so, and a live peer in another window is silently killed.
           // The `--force` flag still works for humans who pass it
-          // explicitly (see `agentctl claim --help`).
+          // explicitly (see `gojaja claim --help`).
           throw new UsageError(
             `Role '${role}' is already claimed by a live session ` +
               `(heartbeat ${Math.floor(heartbeatAge / 1000)}s ago). ` +
               `If you believe the previous window is genuinely dead, ` +
-              `see \`agentctl claim --help\`. Otherwise stop and ask the ` +
+              `see \`gojaja claim --help\`. Otherwise stop and ask the ` +
               `user — do NOT silently take over a peer.`,
           );
         }
@@ -1008,7 +1008,7 @@ export class LocalFsStore implements Store {
           ? events.filter((e) => decodeUlidTimestamp(e.id) <= watermarkMs)
           : events;
       // PR8n: filter by what THIS role actually cares about. The events
-      // stream stays full (audit / git / agentctl doctor); the manifest
+      // stream stays full (audit / git / gojaja doctor); the manifest
       // projects only the slice that needs the role's attention. This
       // keeps the LLM turn from being noisy when the project produces
       // many broadcast events.
@@ -1052,7 +1052,7 @@ export class LocalFsStore implements Store {
    * Build the compact RoleReminder. Empty fields are omitted from the
    * serialised JSON to keep agent prompts small. If the role is not yet
    * registered in `config.yaml` (e.g. unit-test paths that exercise the
-   * Store directly without going through `agentctl role create`), we
+   * Store directly without going through `gojaja role create`), we
    * synthesise a minimal reminder rather than failing — `plan` is
    * read-only and should never crash an otherwise-valid window.
    */
@@ -1094,13 +1094,13 @@ export class LocalFsStore implements Store {
       const cursor = await this.readCursor(role);
       if (!cursor.pendingManifest) {
         throw new UsageError(
-          `Role '${role}' has no outstanding manifest to ack. Run 'agentctl plan' first.`,
+          `Role '${role}' has no outstanding manifest to ack. Run 'gojaja plan' first.`,
         );
       }
       if (cursor.pendingManifest !== token) {
         throw new UsageError(
           `Ack token mismatch for '${role}': pending '${cursor.pendingManifest}', ` +
-            `provided '${token}'. Re-run 'agentctl plan' to get the current token.`,
+            `provided '${token}'. Re-run 'gojaja plan' to get the current token.`,
         );
       }
       const manifestFile = this.abs(manifestPath(role, token));
@@ -1146,7 +1146,7 @@ export class LocalFsStore implements Store {
         // initialise() should have created this; treat absence as a layer
         // that has never been initialised with a config schema.
         throw new StateCorruptionError(
-          `${Paths.configFile} is missing. Run 'agentctl init' to create it.`,
+          `${Paths.configFile} is missing. Run 'gojaja init' to create it.`,
         );
       }
       throw err;
@@ -1315,13 +1315,13 @@ export class LocalFsStore implements Store {
   }): Promise<{ role: RoleId; removedSessions: number }> {
     validateRoleId(input.id);
     // Role deletion is a project-governance act, not a per-role
-    // operation. Restrict to SYSTEM (no MA_SESSION) so an agent that
+    // operation. Restrict to SYSTEM (no GOJAJA_SESSION) so an agent that
     // somehow acquired a session for any role cannot wipe another
     // role out from under it. The user runs this from their shell.
     if (input.actor !== "SYSTEM") {
       throw new ForbiddenError(
         `Role deletion is restricted to project owners (SYSTEM). ` +
-          `Run \`agentctl role delete ${input.id}\` from a shell without MA_SESSION set.`,
+          `Run \`gojaja role delete ${input.id}\` from a shell without GOJAJA_SESSION set.`,
       );
     }
     return this.withLock("roles-create", async () => {
@@ -1350,9 +1350,9 @@ export class LocalFsStore implements Store {
         if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
       }
       // Step 3: invalidate any live session. Without this, an agent
-      // window with the old MA_SESSION still exported would happily
+      // window with the old GOJAJA_SESSION still exported would happily
       // authenticate via findSessionById until the lease ran out —
-      // and could still call `agentctl plan` against a role that no
+      // and could still call `gojaja plan` against a role that no
       // longer exists in config.
       let removedSessions = 0;
       const sessionFile = this.abs(rolePaths(input.id).sessionFile);
@@ -1636,8 +1636,8 @@ export class LocalFsStore implements Store {
       const config = await this.readConfig();
       if (!config.roles[owner]) {
         throw new UsageError(
-          `Owner role '${owner}' is not registered. Run \`agentctl role list\` ` +
-            `to see registered roles or \`agentctl role create ${owner} ...\` ` +
+          `Owner role '${owner}' is not registered. Run \`gojaja role list\` ` +
+            `to see registered roles or \`gojaja role create ${owner} ...\` ` +
             `to add it first.`,
         );
       }
@@ -1756,8 +1756,8 @@ export class LocalFsStore implements Store {
     if (!config.roles[input.newOwner]) {
       throw new UsageError(
         `Owner role '${input.newOwner}' is not registered. Run ` +
-          `\`agentctl role list\` to see registered roles or ` +
-          `\`agentctl role create ${input.newOwner} ...\` to add it first.`,
+          `\`gojaja role list\` to see registered roles or ` +
+          `\`gojaja role create ${input.newOwner} ...\` to add it first.`,
       );
     }
     await this.requireOwnership(input.actor, Paths.taskBoardFile);
@@ -2174,7 +2174,7 @@ export class LocalFsStore implements Store {
           throw new UsageError(
             `RFC ${input.rfcId} is in brainstorm mode (no options yet); ` +
               `cannot reference option '${preferred}'. ` +
-              `Run \`agentctl rfc add-option ${input.rfcId} <id>:<summary> --rationale ...\` first.`,
+              `Run \`gojaja rfc add-option ${input.rfcId} <id>:<summary> --rationale ...\` first.`,
           );
         }
         throw new UsageError(
@@ -2214,7 +2214,7 @@ export class LocalFsStore implements Store {
         if (proposal.options.length === 0) {
           throw new UsageError(
             `RFC ${input.rfcId} has no options yet; cannot pre-decide. ` +
-              `Run \`agentctl rfc add-option ${input.rfcId} <id>:<summary>\` first.`,
+              `Run \`gojaja rfc add-option ${input.rfcId} <id>:<summary>\` first.`,
           );
         }
         if (!proposal.options.find((o) => o.id === preferred)) {
@@ -2391,7 +2391,7 @@ export class LocalFsStore implements Store {
           if (args.chosenOption) {
             throw new UsageError(
               `RFC ${args.rfcId} has no options; decide must not be given an --option. ` +
-                `If you want to lock in a concrete choice, run \`agentctl rfc add-option ${args.rfcId} ...\` first.`,
+                `If you want to lock in a concrete choice, run \`gojaja rfc add-option ${args.rfcId} ...\` first.`,
             );
           }
         } else {
@@ -2434,9 +2434,9 @@ export class LocalFsStore implements Store {
             throw new UsageError(
               `RFC ${proposal.id} has an active pre-decision (option '${active.chosenOption}' by ${active.decidedBy}); ` +
                 `waiting for ACK from: ${outstanding.join(", ")}. ` +
-                `Each role must run \`agentctl rfc ack ${proposal.id}\` or \`agentctl rfc object ${proposal.id} --rationale ...\` ` +
+                `Each role must run \`gojaja rfc ack ${proposal.id}\` or \`gojaja rfc object ${proposal.id} --rationale ...\` ` +
                 `before this RFC can be decided. There is no override; if a role is unreachable, ` +
-                `run \`agentctl rfc reject ${proposal.id} --rationale ...\` and open a new RFC ` +
+                `run \`gojaja rfc reject ${proposal.id} --rationale ...\` and open a new RFC ` +
                 `without that role in voters/deciders.`,
             );
           }
@@ -2998,9 +2998,9 @@ export class LocalFsStore implements Store {
       throw new UsageError(
         `RFC ${rfcId} has status "pre-decide" from PR8g; PR8g.1 collapsed ` +
           `pre-decide back to a comment kind. Either re-init a fresh project ` +
-          `with \`agentctl init\` (in a clean directory) or manually edit ` +
+          `with \`gojaja init\` (in a clean directory) or manually edit ` +
           `proposal.yaml to set status: "open" — the pre-decision data will ` +
-          `be lost and agents should re-issue \`agentctl rfc pre-decide\`. ` +
+          `be lost and agents should re-issue \`gojaja rfc pre-decide\`. ` +
           `See docs/RFC.md "Migration" section.`,
       );
     }
@@ -3010,13 +3010,13 @@ export class LocalFsStore implements Store {
           `PR8g.1 stores pre-decisions in the comments ledger instead. ` +
           `Either re-init a fresh project or manually edit proposal.yaml to ` +
           `remove the "preDecision" field — the pre-decision data will be ` +
-          `lost and agents should re-issue \`agentctl rfc pre-decide\`. ` +
+          `lost and agents should re-issue \`gojaja rfc pre-decide\`. ` +
           `See docs/RFC.md "Migration" section.`,
       );
     }
     // PR8g back-compat: detect the old per-role comments directory and
     // refuse to proceed silently. Alpha-stage hard cut; the user must
-    // migrate by hand or `agentctl init` a fresh project. We deliberately
+    // migrate by hand or `gojaja init` a fresh project. We deliberately
     // do NOT auto-migrate: comment timestamps + threading would need to
     // be synthesised and that risks silently destroying audit detail.
     const legacyDir = this.abs(rfcLegacyCommentsDir(rfcId, slug));
@@ -3034,7 +3034,7 @@ export class LocalFsStore implements Store {
               `${rfcLegacyCommentsDir(rfcId, slug)}/ (per-role JSON files). ` +
               `PR8g uses a single threaded ledger at ${rfcCommentsFile(rfcId, slug)}. ` +
               `Migrate by hand (no auto-migrator) or open a fresh project with ` +
-              `\`agentctl init\`. See CHANGELOG 2.0.0-alpha.15 for the new shape.`,
+              `\`gojaja init\`. See CHANGELOG 2.0.0-alpha.15 for the new shape.`,
           );
         }
       } catch (err) {

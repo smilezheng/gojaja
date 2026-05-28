@@ -23,18 +23,18 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Cursor read/update with monotonic invariant enforced.
   - Session claim/release/heartbeat with `SESSION_TAKEOVER` events.
   - Strict path / role-id / lock-key validation.
-  - CLI skeleton: `agentctl --version | help | init | version`.
+  - CLI skeleton: `gojaja --version | help | init | version`.
 
 - **PR2 — claim / plan / ack / report / worklog.**
-  - `agentctl claim <role>` / `agentctl release`.
-  - `MA_SESSION` environment-variable identity, resolved via
+  - `gojaja claim <role>` / `gojaja release`.
+  - `GOJAJA_SESSION` environment-variable identity, resolved via
     `Store.findSessionById`.
-  - `agentctl plan [<role>]` with manifest emission,
+  - `gojaja plan [<role>]` with manifest emission,
     `pendingManifest` stamp, idempotent across retry.
-  - `agentctl ack [<role>] --token <t>` with bounded cursor advance —
+  - `gojaja ack [<role>] --token <t>` with bounded cursor advance —
     fixes the v0.1 "ack races concurrent write" loss.
-  - `agentctl report --to <role> --message <text> [--ref <id>]`.
-  - `agentctl worklog --message <text>` plus a markdown copy under
+  - `gojaja report --to <role> --message <text> [--ref <id>]`.
+  - `gojaja worklog --message <text>` plus a markdown copy under
     `worklog/<role>/<id>.md`.
   - Design simplification: inbox is now a derived filter on the event
     stream, not a separate file tree. See
@@ -42,30 +42,30 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - 39 vitest cases across storage, plan/ack, and identity resolution.
 
 - **PR3 — role / prompt / wait.**
-  - `agentctl role create / list / show` plus a backing `config.yaml`
+  - `gojaja role create / list / show` plus a backing `config.yaml`
     that registers each role's title, owns, reportsTo, and mustNotEdit.
-  - `agentctl prompt <role> --target codex|claude|cursor|generic`
+  - `gojaja prompt <role> --target codex|claude|cursor|generic`
     [`--write`], producing host-specific persistent artifacts: Codex
     skill, Claude `CLAUDE.md` marker block, Cursor
-    `.cursor/rules/multi-agent-runtime.mdc`. Role-agnostic install +
+    `.cursor/rules/gojaja-runtime.mdc`. Role-agnostic install +
     per-window activation snippet.
-  - `agentctl wait` (block + exit modes) with no exit-code overloading
+  - `gojaja wait` (block + exit modes) with no exit-code overloading
     and no cursor mutation.
   - `js-yaml` dependency added for `config.yaml` round-tripping.
   - 25 new vitest cases (`tests/role.test.ts`, `tests/prompt.test.ts`,
     `tests/wait.test.ts`); 64/64 total.
 
 - **PR4 — manifest self-anchoring.**
-  - `agentctl plan` output now embeds a compact `roleReminder`
+  - `gojaja plan` output now embeds a compact `roleReminder`
     (`id`, `title`, optional `owns`/`mustNotEdit`/`reportsTo`, plus a
     95-char protocol one-liner). Empty fields are omitted.
   - Goal: a context-compressed agent recovers full identity by
-    running `agentctl plan` once.
+    running `gojaja plan` once.
 
 - **PR5 — task board.**
   - `state/task_board.yaml` schema with id, status, owner, priority,
     dependsOn, acceptance, createdAt, updatedAt.
-  - `agentctl task new / assign / status / list / show`.
+  - `gojaja task new / assign / status / list / show`.
   - `plan` manifest now carries a `tasks` array filtered to
     `owner == role && status ∈ {Ready, InProgress, Blocked, Review}`,
     with `blockedBy` derived from dependsOn entries that are not Done.
@@ -75,7 +75,7 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
 - **PR6 — RFC state machine.**
   - Per-RFC directory `rfcs/RFC-NNNN-<slug>/` with `proposal.yaml`,
     `comments/<role>.json`, and `decision.json`.
-  - `agentctl rfc new / comment / decide / reject / list / show`.
+  - `gojaja rfc new / comment / decide / reject / list / show`.
   - Status machine `open -> accepted | rejected`, enforced; no
     automatic tally — a role in the proposal's `deciders` list calls
     `decide` or `reject`.
@@ -87,18 +87,18 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
 - **PR7 — ownership enforcement.**
   - `config.yaml:roles[<role>].owns` and `mustNotEdit` become runtime
     gates for state writes and task mutations.
-  - `agentctl state edit --file <state/path>` (renamed from
-    `agentctl write-state` in PR8f-C) writes atomically into the state
-    subtree, gated by ownership; `SYSTEM` (no MA_SESSION) bypasses for
+  - `gojaja state edit --file <state/path>` (renamed from
+    `gojaja write-state` in PR8f-C) writes atomically into the state
+    subtree, gated by ownership; `SYSTEM` (no GOJAJA_SESSION) bypasses for
     human bootstrap.
-  - `agentctl task new` / `task assign` require ownership of
+  - `gojaja task new` / `task assign` require ownership of
     `state/task_board.yaml`. `task status` has a task-owner exception
     (a role may always update its own task's status).
   - New `ForbiddenError` class with stable exit code 9.
 
 - **PR7a — prompt / activate split.**
-  - `agentctl prompt` is now strictly role-free (`--target X [--write]`);
-    a new `agentctl activate <role> --target X` prints the per-window
+  - `gojaja prompt` is now strictly role-free (`--target X [--write]`);
+    a new `gojaja activate <role> --target X` prints the per-window
     chat-paste snippet without ever touching disk.
   - Enforces the architectural invariant "role binding lives at the
     window/shell layer, never at the project layer" — two Cursor chats
@@ -111,7 +111,7 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - New `src/cli/prompts/handbook.ts` exporting a ~7 KB UTF-8
     `COLLABORATION_HANDBOOK` string. Role-neutral; concrete triggers;
     mostly "don'ts".
-  - Default-injected into every `agentctl prompt --target X --write`
+  - Default-injected into every `gojaja prompt --target X --write`
     artifact (Cursor rules, Codex skill, Claude CLAUDE.md block, generic
     stdout). `--no-handbook` opts out.
   - Covers: turn shape, worklog rules, report vs RFC, disagreement,
@@ -123,7 +123,7 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Ten independent fixes from two consolidated reviews. argv boolean
     flag whitelist, ULID cross-process watermark, stale-lock
     conditional restore, RFC self-heal on inconsistent on-disk shape,
-    `MA_SESSION` strict semantics, session lease + auto-heartbeat,
+    `GOJAJA_SESSION` strict semantics, session lease + auto-heartbeat,
     atomic `createRole`, `wait` refusal with pending manifest,
     `claim` / `publishReport` recipient-role validation, TTY-aware
     `plan` default + tasks/RFCs in text output.
@@ -137,17 +137,17 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     error de-advertises `--force`, Codex SKILL.md project-agnostic,
     RFC deciders gate → `FORBIDDEN`, fail-closed corrupt heartbeat,
     `task new` / `task assign` owner registration check, `release`
-    `unset MA_SESSION` hint, `claim --eval` mode, handbook review
+    `unset GOJAJA_SESSION` hint, `claim --eval` mode, handbook review
     handoff + role-neutrality regex guard. Suite 150 → 169.
 
 - **PR8d — prompt UX gate + role delete.**
   - Runtime body opens with an "only when bound to a role" gate so an
-    unactivated agent window does not reflexively run agentctl.
+    unactivated agent window does not reflexively run gojaja.
   - `prompt --write` prints a "restart any open agent windows" caveat
     on every successful write; JSON adds `requiresWindowRestart`.
   - "SKIPPED" renamed to "UNCHANGED (already up to date)"; new
     `--force-rewrite` flag overrides the byte-equal short-circuit.
-  - New `agentctl role delete <id>` (SYSTEM-only): removes config /
+  - New `gojaja role delete <id>` (SYSTEM-only): removes config /
     md / live session and emits `ROLE_DELETED`. Open task assignments
     are left in place by design so re-creating the same id reinherits
     them.
@@ -160,14 +160,14 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - SCHEMA.md flagged `state/project_state.md` as not auto-created
     (later flipped to auto-created skeleton in PR8f-B).
   - `role create` nags about TBD sections in the freshly rendered
-    role markdown; `role list` annotates TBD rows; `agentctl
+    role markdown; `role list` annotates TBD rows; `gojaja
     activate` refuses while the role markdown still has TBD.
   - `activate` output rewritten: explicit `═══ BEGIN/END PASTE ═══`
     dividers, second-person `You are the ...` framing, three numbered
-    steps (claim via --eval, role show, agentctl -h), auto-copy to
+    steps (claim via --eval, role show, gojaja -h), auto-copy to
     clipboard via pbcopy / wl-copy / xclip / xsel / clip.exe with
     `--no-copy` escape hatch.
-  - `agentctl -h` rewritten: intro paragraph + Quickstart + per-section
+  - `gojaja -h` rewritten: intro paragraph + Quickstart + per-section
     inline tips + exit-codes table + See-also doc links.
   - Handbook gains "Task assignment is push, not pull" + "Multi-role
     task pattern" + hard-don't against `task assign --to <yourself>`.
@@ -186,10 +186,10 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     document its expected RFC decision scopes.
 
 - **PR8f-B — init skeleton + write-state replace/append.**
-  - `agentctl init` seeds a TBD skeleton at `state/project_state.md`
+  - `gojaja init` seeds a TBD skeleton at `state/project_state.md`
     so the file always exists; the handbook nudges agents to ask the
     user to fill TBD sections before judging Done.
-  - `agentctl write-state` (later renamed to `agentctl state edit` in
+  - `gojaja write-state` (later renamed to `gojaja state edit` in
     PR8f-C) gains `--append` and `--replace`/`--with`/`--batch` modes
     alongside the existing `--content` (overwrite). Default replace
     refuses 0 or N>1 matches; `--batch` allows N>1. All modes still
@@ -198,12 +198,12 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Suite 198 -> 214.
 
 - **PR8f-C — rename write-state, sync help, roleReminder hint.**
-  - `agentctl write-state` renamed to `agentctl state edit` (hard
+  - `gojaja write-state` renamed to `gojaja state edit` (hard
     cut; alpha-stage, no backward alias). Subcommand-group style now
     consistent with `task / role / rfc`.
-  - `agentctl -h` rewrites the state-editing section to list all
+  - `gojaja -h` rewrites the state-editing section to list all
     three modes with copy-pasteable invocations.
-  - `manifest.roleReminder.protocol` adds a `agentctl role show
+  - `manifest.roleReminder.protocol` adds a `gojaja role show
     <you>` hint so agents who lose context are routed to recover
     their own contract every turn (within the 300-byte budget).
 
@@ -239,8 +239,8 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     PR8g auto-reopen mechanic and `RFC_PRE_DECISION` /
     `RFC_PRE_DECISION_OBJECTED` event types are gone.
   - Pre-decide is now a structured comment with `kind: "pre-decision"`.
-    Voters / non-pre-decider deciders use new `agentctl rfc ack` /
-    `agentctl rfc object` verbs to register positions.
+    Voters / non-pre-decider deciders use new `gojaja rfc ack` /
+    `gojaja rfc object` verbs to register positions.
   - `decideRfc` enforces a hard ACK gate: every role in
     `(voters ∪ deciders) − {pre-decider}` must explicitly ack or
     object. Silence does NOT count as consent. No override; the only
@@ -309,22 +309,37 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Non-breaking: no schema change; constraint relaxation only.
   - Suite 284 -> 294.
 
-- **PR8o — `agentctl reset` (project uninstall).**
+- **PR8p — rename to gojaja (过家家).**
+  - Project name: `multi-agent-coordination` → `gojaja`.
+  - CLI binary `agentctl` → `gojaja`.
+  - Layer directory `.multi-agent/` → `.gojaja/`.
+  - Env vars `MA_SESSION` / `MA_PROJECT_ROOT` →
+    `GOJAJA_SESSION` / `GOJAJA_PROJECT_ROOT`.
+  - Runtime artifact names (Cursor rule file, Codex skill name,
+    Claude marker block) → `gojaja-runtime`.
+  - Error base class `AgentctlError` → `GojajaError`.
+  - 过家家 is a Chinese phrase for kids' role-play family games;
+    fits the multi-agent role-binding metaphor exactly.
+  - BREAKING — every existing project must re-init. Alpha-stage, no
+    users, hard cut. ~1150 token edits across 59 files; no semantic
+    code changes.
+
+- **PR8o — `gojaja reset` (project uninstall).**
   - Removes everything this tool wrote into a project: the
-    `.multi-agent/` layer, `.cursor/rules/multi-agent-runtime.mdc`
+    `.gojaja/` layer, `.cursor/rules/gojaja-runtime.mdc`
     (plus empty parent dirs), and the
-    `<!-- multi-agent-runtime:BEGIN/END -->` block inside
+    `<!-- gojaja-runtime:BEGIN/END -->` block inside
     `<project>/CLAUDE.md` (preserves the rest; deletes CLAUDE.md only
     if the marker block was its only content).
   - `--purge-codex-skill` optionally removes
-    `${CODEX_HOME:-~/.codex}/skills/multi-agent-runtime/` (off by
+    `${CODEX_HOME:-~/.codex}/skills/gojaja-runtime/` (off by
     default; user-level skill is shared across projects).
   - Default invocation prints a preview; `--confirm <basename>` is
     required to actually delete (token = project root basename).
     `--dry-run` forces preview mode even with `--confirm` present.
-    `MA_SESSION` must be unset (same posture as `role delete`).
+    `GOJAJA_SESSION` must be unset (same posture as `role delete`).
   - Part of the original PR8 (installer & upgrade) bucket; the
-    `agentctl upgrade` half stays planned.
+    `gojaja upgrade` half stays planned.
   - Suite 302 -> 316.
 
 - **PR8n — manifest event filter (token / attention budget).**
@@ -340,8 +355,8 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     owners for `TASK_CREATED`); WORKLOG and RFC_DECIDED stay broadcast.
   - The cursor still advances past hidden events, so they do not
     re-appear on subsequent `plan` calls. The events themselves live
-    forever in `comms/events/` for audit + `agentctl doctor` (PR9).
-  - `agentctl wait --for attention` uses the same projection so wait
+    forever in `comms/events/` for audit + `gojaja doctor` (PR9).
+  - `gojaja wait --for attention` uses the same projection so wait
     only fires on events the manifest would carry.
   - `Store.filterVisibleEventsForRole` exposed on the interface for
     `wait` to reuse without duplicating logic.
@@ -361,10 +376,10 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Reverse `directReports` computed field on `roleReminder` so a
     manager role knows "who reports to me" without scanning
     `role list`.
-  - `agentctl wait --for task-assigned` retargets the idle worklog
+  - `gojaja wait --for task-assigned` retargets the idle worklog
     to `directReports` instead of `*` so the broadcast lands only on
     likely-task-assigners.
-  - `agentctl report --to <a>,<b>` multi-target so a manager can
+  - `gojaja report --to <a>,<b>` multi-target so a manager can
     address a team subset without N separate calls.
   - Role-level `decisionScopes` so RFC `--deciders` can be inferred
     from scope rather than spelled out each time (defended against
@@ -374,7 +389,7 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     primitives.
 
 - **PR8m — agent-delegated role creation (planned).**
-  - Today `agentctl role create` has no ownership gate at all: any
+  - Today `gojaja role create` has no ownership gate at all: any
     agent in any session can mint new roles with arbitrary `owns` /
     `mustNotEdit`. That bypasses the ownership model `requireOwnership`
     enforces elsewhere — `config.yaml` is unprotected on the create
@@ -385,16 +400,16 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     actor is a non-SYSTEM role without `config.yaml` in its `owns`.
   - Default behaviour unchanged: at init time no agent role owns
     `config.yaml`, so a user running `role create` in a shell with
-    no `MA_SESSION` keeps minting roles via the SYSTEM bypass.
+    no `GOJAJA_SESSION` keeps minting roles via the SYSTEM bypass.
   - Delegation: a project that wants an HR / Admin agent to create
     roles grants that role `--owns 'config.yaml'`. The classic flow
     becomes:
       1. TL opens an RFC describing the gap + JD; deciders=[CTO].
       2. CTO accepts; opens a task assigned to HR with the JD as an
          asset and the new role id as a deliverable.
-      3. HR runs `agentctl role create <id> ...` (allowed because HR
+      3. HR runs `gojaja role create <id> ...` (allowed because HR
          owns `config.yaml`); reports the new role id back to TL.
-      4. TL `agentctl task assign T-NNNN --to <new-role>`.
+      4. TL `gojaja task assign T-NNNN --to <new-role>`.
   - Asymmetric with `role delete` (which stays SYSTEM-only) by design:
     create is additive and recoverable, delete is destructive and
     one-way.
@@ -411,9 +426,9 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     needing task-board ownership.
   - `STATE_UPDATED` event when `state/*` files change.
   - `dependsOn` cycle detection in task board.
-  - Schema-version compatibility check on `agentctl plan`.
+  - Schema-version compatibility check on `gojaja plan`.
   - Harden `rfc new --description` from soft-warn (PR8g) to required.
-  - Candidate: read-only `agentctl rfc audit <id>` to surface
+  - Candidate: read-only `gojaja rfc audit <id>` to surface
     "who has ack'd / objected / not responded yet" without the
     agent reading `rfc show`.
   - Candidate: role-level `decisionScopes` so a role becomes a default
@@ -422,33 +437,33 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     insufficient.
 
 - **PR8 — installer & upgrade.**
-  - `agentctl upgrade` driving `src/migrations/<from>-<to>.ts`.
-  - ~~`agentctl reset --confirm <project-name>` for destructive
+  - `gojaja upgrade` driving `src/migrations/<from>-<to>.ts`.
+  - ~~`gojaja reset --confirm <project-name>` for destructive
     nukes.~~ Done in PR8o.
   - AGENTS.md bridge insertion with versioned marker block, re-written
     on every upgrade.
 
 - **PR9 — operational tooling.**
-  - `agentctl doctor`: JSON parse all records, validate cursor reachability,
+  - `gojaja doctor`: JSON parse all records, validate cursor reachability,
     detect orphan manifests, surface stale locks.
-  - `agentctl history --role <role> [--since <ulid>]`.
+  - `gojaja history --role <role> [--since <ulid>]`.
   - Event archival (`comms/events/_archive/YYYY-MM-DD/`) with a configurable
     retention floor.
 
 - **PR10 — chaos / soak.**
   - Multi-process integration tests under `vitest`'s pool=forks running
     real concurrent claim/plan/ack cycles.
-  - Random-kill harness asserting `agentctl doctor` stays green.
+  - Random-kill harness asserting `gojaja doctor` stays green.
 
 After PR10 we tag `v2.0.0`.
 
 ## v2.x — deferred but slot-reserved
 
 - **HTTP transport.** `HttpStore` implementing the same `Store`
-  interface; an `agentctl serve` mode that wraps a `LocalFsStore` behind
+  interface; an `gojaja serve` mode that wraps a `LocalFsStore` behind
   a REST API. Authentication, TLS, and account model are out of scope
   for this layer — to be designed by the consuming team.
-- **Heartbeat watcher.** `agentctl watch` daemon that downgrades stale
+- **Heartbeat watcher.** `gojaja watch` daemon that downgrades stale
   sessions and emits `attention_required` events when an offline role
   has waiting inbox items.
 - **Multi-machine safety review.** Verify rename / lock semantics under
@@ -490,8 +505,8 @@ PR8g.1 (pre-decide field/status removed), PR8i (wait flags +
 `.wait` sentinel removed), and PR8j (task field additions, Done
 deliverable gate). PR8l and PR8n are non-breaking on-disk (PR8n
 narrows manifest visibility but does not change file shapes).
-PR8o adds the user-facing "uninstall" / `agentctl reset` command that
-removes everything this tool wrote into a project (the `.multi-agent/`
+PR8o adds the user-facing "uninstall" / `gojaja reset` command that
+removes everything this tool wrote into a project (the `.gojaja/`
 layer + the Cursor rule + the Claude marker block, with an opt-in to
 also purge the Codex user-level skill).
 PR8h, PR8k, PR8m, and PR9–PR10 harden the layer for everyday use; PR8h

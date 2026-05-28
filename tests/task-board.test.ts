@@ -255,13 +255,13 @@ describe("Manifest.tasks", () => {
 // ---------- PR8j: parent / assets / deliverables / assignedBy / tags ----------
 
 /**
- * PR8j fixture: tempdir is the PROJECT root; `.multi-agent/` lives at
- * `<project>/.multi-agent/`. This lets deliverable file refs (relative
+ * PR8j fixture: tempdir is the PROJECT root; `.gojaja/` lives at
+ * `<project>/.gojaja/`. This lets deliverable file refs (relative
  * paths like `docs/x.md`) be controlled by the test.
  */
 async function freshProjectStore() {
   const projectRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-pj-"));
-  const layerRoot = path.join(projectRoot, ".multi-agent");
+  const layerRoot = path.join(projectRoot, ".gojaja");
   const store = new LocalFsStore(layerRoot, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   await store.createRole({
@@ -359,12 +359,12 @@ describe("PR8j: task model expansion", () => {
     ).rejects.toMatchObject({ code: "USAGE" });
   });
 
-  it("createTask refuses deliverable file ref that points inside .multi-agent/", async () => {
+  it("createTask refuses deliverable file ref that points inside .gojaja/", async () => {
     await expect(
       ctx.store.createTask({
         title: "x", actor: "PM",
         deliverables: [
-          { kind: "file", ref: ".multi-agent/state/secret.md", description: "" },
+          { kind: "file", ref: ".gojaja/state/secret.md", description: "" },
         ],
       }),
     ).rejects.toMatchObject({ code: "USAGE" });

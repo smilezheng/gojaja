@@ -3,22 +3,22 @@
 Cross-references: [DESIGN](./DESIGN.md) — architecture rationale.
 [PROTOCOL](./PROTOCOL.md) — how agents use these files.
 
-This document is the source of truth for what `.multi-agent/` looks like.
+This document is the source of truth for what `.gojaja/` looks like.
 The on-disk version is recorded in the top-level `VERSION` file. Any
 breaking change to a path, file name, or JSON shape requires bumping
 `SCHEMA_VERSION` in `src/cli/runtime.ts` together with this document.
 
 **Reads are unrestricted, writes are mediated.** Anything under
-`.multi-agent/` can be read directly by any process — the layer is a
+`.gojaja/` can be read directly by any process — the layer is a
 shared blackboard, and the agent host already has a file-read tool.
-There is therefore no `agentctl read-state` command (it would only
-add token cost). Writes go through `agentctl` (or `Store`) so that
+There is therefore no `gojaja read-state` command (it would only
+add token cost). Writes go through `gojaja` (or `Store`) so that
 ownership, atomicity, and the event-stream audit can be enforced.
 
 ## Top-level layout
 
 ```
-.multi-agent/
+.gojaja/
   VERSION                              ← schema version, plain text
   config.yaml                          ← project config (roles, ownership, RFC counter)
   audit.log                            ← JSONL audit trail (planned)
@@ -60,7 +60,7 @@ are not created up front.
 > (whoever owns this file per `config.yaml`) is expected to fill them
 > in. The handbook tells agents to ask the user to fill any section
 > that is still marked TBD before judging a task Done.
-> Re-running `agentctl init` on a project that already has the
+> Re-running `gojaja init` on a project that already has the
 > skeleton (or a user-edited version of it) is refused via
 > `AlreadyInitializedError`; user edits are never clobbered.
 
@@ -72,7 +72,7 @@ Plain text, no trailing whitespace beyond a single newline.
 2.0.0
 ```
 
-Read with `agentctl version`. The CLI refuses to run against a layer
+Read with `gojaja version`. The CLI refuses to run against a layer
 whose schema is newer than its own (planned check).
 
 ## `config.yaml`
@@ -113,8 +113,8 @@ Field rules:
   roles up the escalation chain; the collaboration handbook tells
   agents to escalate stuck work via `report` along this list.
 
-Created and mutated only through `agentctl role create` (and future
-`agentctl role edit`). Hand edits are allowed but rare; the markdown
+Created and mutated only through `gojaja role create` (and future
+`gojaja role edit`). Hand edits are allowed but rare; the markdown
 contract in `roles/<id>.md` points the human at this file.
 
 ## `state/task_board.yaml`
@@ -200,10 +200,10 @@ Field rules:
 - `deliverables` (PR8j) are required outputs. `kind: "file"` refs are
   existence-checked on the `Done` transition. `kind: "url"` and
   `kind: "manual"` are displayed but not auto-verified.
-- `tags` (PR8j) is a free-form list of labels; `agentctl task list
+- `tags` (PR8j) is a free-form list of labels; `gojaja task list
   --tag <label>` filters with OR semantics.
 - Hand-edits are allowed for trivial fixes, but normal mutation goes
-  through `agentctl task new/assign/status`, which also emits the
+  through `gojaja task new/assign/status`, which also emits the
   corresponding event.
 
 A `--force-incomplete` Done emits a `TASK_DELIVERABLE_BYPASSED` event
@@ -242,20 +242,20 @@ Event types currently emitted:
 
 | Type                  | Emitted by                       | Notes                                          |
 | --------------------- | -------------------------------- | ---------------------------------------------- |
-| `REPORT`              | `agentctl report`                | Directed message; `to` = recipient role.       |
-| `WORKLOG`             | `agentctl worklog`               | Broadcast (`to = "*"`).                        |
-| `TASK_CREATED`        | `agentctl task new`              | Broadcast; `ref` = task id.                    |
-| `TASK_ASSIGNED`       | `agentctl task new` / `assign`   | `to` = new owner; `ref` = task id.             |
-| `TASK_STATUS_CHANGED` | `agentctl task status`           | Broadcast; `ref` = task id.                    |
-| `TASK_DELIVERABLE_BYPASSED` | `agentctl task status ... Done --force-incomplete` | Broadcast; `ref` = task id; `payload.missing` lists the file refs that were not on disk; `payload.by` records the actor who approved the bypass. Always emitted before the corresponding `TASK_STATUS_CHANGED`. |
-| `RFC_CREATED`         | `agentctl rfc new`               | Broadcast; `ref` = RFC id.                     |
-| `RFC_COMMENT`         | `agentctl rfc comment` / `ack` / `object` / `pre-decide` | Broadcast; `ref` = RFC id. PR8g.1: `payload.kind` distinguishes regular discussion (undefined) from structured `"pre-decision"` / `"ack"` / `"object"` posts. |
-| `RFC_DECIDED`         | `agentctl rfc decide` / `reject` | Broadcast; `ref` = RFC id; final.              |
+| `REPORT`              | `gojaja report`                | Directed message; `to` = recipient role.       |
+| `WORKLOG`             | `gojaja worklog`               | Broadcast (`to = "*"`).                        |
+| `TASK_CREATED`        | `gojaja task new`              | Broadcast; `ref` = task id.                    |
+| `TASK_ASSIGNED`       | `gojaja task new` / `assign`   | `to` = new owner; `ref` = task id.             |
+| `TASK_STATUS_CHANGED` | `gojaja task status`           | Broadcast; `ref` = task id.                    |
+| `TASK_DELIVERABLE_BYPASSED` | `gojaja task status ... Done --force-incomplete` | Broadcast; `ref` = task id; `payload.missing` lists the file refs that were not on disk; `payload.by` records the actor who approved the bypass. Always emitted before the corresponding `TASK_STATUS_CHANGED`. |
+| `RFC_CREATED`         | `gojaja rfc new`               | Broadcast; `ref` = RFC id.                     |
+| `RFC_COMMENT`         | `gojaja rfc comment` / `ack` / `object` / `pre-decide` | Broadcast; `ref` = RFC id. PR8g.1: `payload.kind` distinguishes regular discussion (undefined) from structured `"pre-decision"` / `"ack"` / `"object"` posts. |
+| `RFC_DECIDED`         | `gojaja rfc decide` / `reject` | Broadcast; `ref` = RFC id; final.              |
 | `RFC_REPAIRED`        | `Store.readRfc` self-heal        | Broadcast; `ref` = RFC id. Emitted when a half-written `finaliseRfc` is observed (decision.json exists but proposal.yaml still `open`) and the proposal status is forward-completed from the decision. |
-| `RFC_OPTION_ADDED`    | `agentctl rfc add-option`        | Broadcast; `ref` = RFC id; payload carries new option id + summary + rationale (PR8g). Also implicitly invalidates any pending pre-decision via the read-time computation. |
-| `RFC_REVISION_REQUESTED` | `agentctl rfc revise`         | Broadcast; `ref` = RFC id. Status flips to `revising`; rationale tells the creator what to fix (PR8g). |
-| `RFC_REVISED`         | `agentctl rfc edit`              | Broadcast; `ref` = RFC id. Status flips back to `open`; payload lists which fields changed (PR8g). |
-| `RFC_TASK_LINKED` / `RFC_TASK_UNLINKED` | `agentctl rfc link-task` / `unlink-task` | Broadcast; `ref` = RFC id; payload carries task id (PR8g). |
+| `RFC_OPTION_ADDED`    | `gojaja rfc add-option`        | Broadcast; `ref` = RFC id; payload carries new option id + summary + rationale (PR8g). Also implicitly invalidates any pending pre-decision via the read-time computation. |
+| `RFC_REVISION_REQUESTED` | `gojaja rfc revise`         | Broadcast; `ref` = RFC id. Status flips to `revising`; rationale tells the creator what to fix (PR8g). |
+| `RFC_REVISED`         | `gojaja rfc edit`              | Broadcast; `ref` = RFC id. Status flips back to `open`; payload lists which fields changed (PR8g). |
+| `RFC_TASK_LINKED` / `RFC_TASK_UNLINKED` | `gojaja rfc link-task` / `unlink-task` | Broadcast; `ref` = RFC id; payload carries task id (PR8g). |
 | `SESSION_CLAIMED`     | `Store.claimSession`             | First-time claim.                              |
 | `SESSION_TAKEOVER`    | `Store.claimSession` (stale)     | After lease / PID-based break.                 |
 | `SESSION_RELEASED`    | `Store.releaseSession`           | Voluntary release.                             |
@@ -269,7 +269,7 @@ modification; corrections are expressed as later events.
 
 The directory `comms/events/` is the **single durable event log**. It
 records every event, broadcast or directed, forever (subject to PR9
-archival). External tools (`agentctl history`, `agentctl doctor`,
+archival). External tools (`gojaja history`, `gojaja doctor`,
 git-blame-style audit) read directly from this directory.
 
 What lands in a role's per-turn `manifest.events` is a **projection**
@@ -294,7 +294,7 @@ role's `ackedThrough`:
    | `RFC_TASK_LINKED`, `RFC_TASK_UNLINKED` | RFC participants OR linked task's stakeholders |
    | `TASK_CREATED` | roles owning `state/task_board.yaml` (the triage set) |
    | `TASK_STATUS_CHANGED`, `TASK_DELIVERABLE_BYPASSED` | task stakeholders (owner, parent owner, dependants) |
-   | `SESSION_*`, `LOCK_BROKEN`, `RFC_REPAIRED`, `ROLE_DELETED` | nobody — operational, surfaced only via the event stream + `agentctl doctor` |
+   | `SESSION_*`, `LOCK_BROKEN`, `RFC_REPAIRED`, `ROLE_DELETED` | nobody — operational, surfaced only via the event stream + `gojaja doctor` |
    | `REPORT`, `TASK_ASSIGNED` | always directed; handled by rule 1 |
 
 **Cursor advance is computed against the pre-filter list.** An event
@@ -302,7 +302,7 @@ excluded by rule 2 still counts toward `advanceCursorTo`, so it does
 NOT re-surface on the next `plan` — the manifest fairly admits "we
 saw this event but decided you don't need to react".
 
-The same projection is used by `agentctl wait --for attention`, so
+The same projection is used by `gojaja wait --for attention`, so
 wait fires only on events the manifest would carry.
 
 ## Inbox is a derived view, not files
@@ -346,7 +346,7 @@ Invariants:
 
 ## `comms/pending/<role>/<ack-token>.json`
 
-The output of `agentctl plan <role>`, archived so `ack` can validate the
+The output of `gojaja plan <role>`, archived so `ack` can validate the
 token and advance the cursor deterministically.
 
 ```jsonc
@@ -363,7 +363,7 @@ token and advance the cursor deterministically.
     "owns": ["state/project_state.md"],          // omitted if empty
     "mustNotEdit": ["state/architecture.md"],    // omitted if empty
     "reportsTo": ["TL"],                          // omitted if empty
-    "protocol": "Loop: plan -> ack --token <t> -> wait. All writes via agentctl; never hand-edit .multi-agent/."
+    "protocol": "Loop: plan -> ack --token <t> -> wait. All writes via gojaja; never hand-edit .gojaja/."
   }
 }
 ```
@@ -378,7 +378,7 @@ Invariants:
   plan time. It may be greater than the largest id in `events` because
   the filter excludes events the role sent itself.
 - `roleReminder` re-anchors the role's identity on every plan, so a
-  context-compressed agent only needs to re-run `agentctl plan` to
+  context-compressed agent only needs to re-run `gojaja plan` to
   recover. Fields read from `config.yaml`; empty lists are intentionally
   omitted to keep the manifest tight.
 
@@ -387,7 +387,7 @@ records filtered to those where `owner == role` and
 `status ∈ {Ready, InProgress, Blocked, Review}`. Each summary carries
 only `id`, `title`, `status`, `priority`, and `blockedBy` (the subset
 of `dependsOn` that is not yet Done). The full task record is fetched
-on demand via `agentctl task show <id>`.
+on demand via `gojaja task show <id>`.
 
 Likewise, `rfcs` carries `RfcSummary` entries for **open** RFCs that
 need this role's action:
@@ -399,7 +399,7 @@ need this role's action:
 
 Each summary keeps just `id`, `title`, `status`, `role`, and
 `commented` (a boolean). Full proposal + comments + decision are fetched
-via `agentctl rfc show <id>`.
+via `gojaja rfc show <id>`.
 
 ## `comms/sessions/<role>.json`
 
@@ -425,7 +425,7 @@ via `agentctl rfc show <id>`.
 
 ## `comms/pending/<role>/wait.json`
 
-PR8i session record for `agentctl wait`. Written atomically on the
+PR8i session record for `gojaja wait`. Written atomically on the
 first chunk of a fresh wait session; kept across RESUME re-invocations;
 cleared on terminal exits (ATTENTION / CONDITION_MET / TIMEOUT).
 Replaces the pre-PR8i `.wait` sentinel.
@@ -450,7 +450,7 @@ Replaces the pre-PR8i `.wait` sentinel.
 
 Correctness does not depend on this file: the deadline is also on the
 agent's command line. Losing the file at worst causes one duplicate
-idle worklog. External observers (e.g. `agentctl doctor`, planned for
+idle worklog. External observers (e.g. `gojaja doctor`, planned for
 PR9) read it to list "who is waiting on what and until when".
 
 ## `comms/heartbeats/<role>.json` (planned)
@@ -472,12 +472,12 @@ in the event stream.
 
 ## `worklog/<role>/<ulid>.md`
 
-One markdown file per worklog entry. Created via `agentctl worklog`.
+One markdown file per worklog entry. Created via `gojaja worklog`.
 Body format is human-prose; no enforced sections yet.
 
 ## `roles/<role>.md`
 
-Human-readable role contract. Created by `agentctl role create`; the
+Human-readable role contract. Created by `gojaja role create`; the
 generated template lives in
 [`src/core/role-template.ts`](../src/core/role-template.ts) and has
 these sections: title, role id, Role (description), Responsibilities,
@@ -591,7 +591,7 @@ Status state machine (PR8g.1, enforced):
 ```
 
 Multiple comments per role are preserved (ULIDs ensure order). Normal
-mutation goes through `agentctl rfc comment` (regular), `rfc
+mutation goes through `gojaja rfc comment` (regular), `rfc
 pre-decide` (kind=pre-decision; decider only), `rfc ack` (kind=ack),
 `rfc object` (kind=object), all of which append to the ledger and
 emit `RFC_COMMENT` with `payload.kind`. Comments on closed RFCs
@@ -619,8 +619,8 @@ marker):
 }
 ```
 
-Set by `agentctl rfc show <id>` (advances to latest comment id) and by
-`agentctl rfc comment <id>` (advances to the just-written comment).
+Set by `gojaja rfc show <id>` (advances to latest comment id) and by
+`gojaja rfc comment <id>` (advances to the just-written comment).
 `null` means "this role has not opened this RFC yet" → all comments
 count as unread. Surfaces in `manifest.rfcs[*].unreadComments`.
 
@@ -644,7 +644,7 @@ Field rules:
 - `options` requires at least one entry, with unique ids. Options
   can be **added after creation** via `rfc add-option` (PR8g) while
   the RFC is `open` or `revising`.
-- `deciders` requires at least one role. `agentctl rfc pre-decide /
+- `deciders` requires at least one role. `gojaja rfc pre-decide /
   decide / reject / revise` refuse callers outside that list.
 - `description` is soft-required (PR8g warning); will be hard-required
   in PR8h.
@@ -655,9 +655,9 @@ Field rules:
 
 ## `audit.log` (planned)
 
-JSONL of every state-mutating `agentctl` invocation, with the resulting
+JSONL of every state-mutating `gojaja` invocation, with the resulting
 event ids and any `LOCK_BROKEN` / `SESSION_TAKEOVER` side effects. Tooled
-by `agentctl doctor` (planned).
+by `gojaja doctor` (planned).
 
 ## Schema versioning rules
 
@@ -670,5 +670,5 @@ by `agentctl doctor` (planned).
 5. Renaming a directory → breaking.
 
 A breaking change in published code must ship with a migration in
-`src/migrations/<from>-<to>.ts` and is run by `agentctl upgrade`. v2.0.0
+`src/migrations/<from>-<to>.ts` and is run by `gojaja upgrade`. v2.0.0
 ships with an empty migrations directory because there is no predecessor.

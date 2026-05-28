@@ -36,7 +36,7 @@ export async function runInit(args: ParsedArgs): Promise<number> {
       }) + "\n",
     );
   } else {
-    process.stdout.write(`Initialised multi-agent layer (v${SCHEMA_VERSION}) at ${layerDir}\n`);
+    process.stdout.write(`Initialised gojaja layer (v${SCHEMA_VERSION}) at ${layerDir}\n`);
   }
   return 0;
 }

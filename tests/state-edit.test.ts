@@ -8,7 +8,7 @@ import type { ParsedArgs } from "../src/cli/argv";
 
 async function freshProject() {
   const projectRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-state-edit-"));
-  const root = path.join(projectRoot, ".multi-agent");
+  const root = path.join(projectRoot, ".gojaja");
   const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   await store.createRole({
@@ -209,7 +209,7 @@ function captureStdout(): Captured {
   return cap;
 }
 
-describe("agentctl state (CLI dispatcher, PR8f-C)", () => {
+describe("gojaja state (CLI dispatcher, PR8f-C)", () => {
   let ctx: { projectRoot: string; root: string; store: LocalFsStore };
   beforeEach(async () => { ctx = await freshProject(); });
   afterEach(async () => { await fsp.rm(ctx.projectRoot, { recursive: true, force: true }); });
@@ -237,7 +237,7 @@ describe("agentctl state (CLI dispatcher, PR8f-C)", () => {
   });
 });
 
-describe("agentctl state edit CLI — flag-exclusion matrix (PR8f-B)", () => {
+describe("gojaja state edit CLI — flag-exclusion matrix (PR8f-B)", () => {
   let ctx: { projectRoot: string; root: string; store: LocalFsStore };
   beforeEach(async () => { ctx = await freshProject(); });
   afterEach(async () => { await fsp.rm(ctx.projectRoot, { recursive: true, force: true }); });

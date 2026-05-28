@@ -6,9 +6,9 @@ import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, LAYER_DIRNAME } from "../runtime";
 import { CLAUDE_MARKER_BEGIN, CLAUDE_MARKER_END } from "../prompts/claude";
 
-const CURSOR_RULE_REL = path.join(".cursor", "rules", "multi-agent-runtime.mdc");
+const CURSOR_RULE_REL = path.join(".cursor", "rules", "gojaja-runtime.mdc");
 const CLAUDE_FILE = "CLAUDE.md";
-const CODEX_SKILL_REL = path.join("skills", "multi-agent-runtime");
+const CODEX_SKILL_REL = path.join("skills", "gojaja-runtime");
 
 interface ResetPlan {
   layerDir: string | null;
@@ -31,7 +31,7 @@ async function pathExists(p: string): Promise<boolean> {
 }
 
 /**
- * Strip the `multi-agent-runtime` marker block from a CLAUDE.md
+ * Strip the `gojaja-runtime` marker block from a CLAUDE.md
  * payload, preserving everything outside. The strip is forgiving:
  *   - removes the block from its BEGIN marker through its END marker
  *   - eats trailing whitespace immediately after the END marker
@@ -133,10 +133,10 @@ export async function runReset(args: ParsedArgs): Promise<number> {
   // Destructive op: refuse when an agent session is exported. The
   // user must be in their own shell, not impersonating a role. Same
   // rationale as `role delete`.
-  if (typeof process.env.MA_SESSION === "string" && process.env.MA_SESSION.length > 0) {
+  if (typeof process.env.GOJAJA_SESSION === "string" && process.env.GOJAJA_SESSION.length > 0) {
     throw new UsageError(
-      "`reset` must be run from a shell with no MA_SESSION exported. " +
-        "Run `unset MA_SESSION` (or open a fresh shell) and try again.",
+      "`reset` must be run from a shell with no GOJAJA_SESSION exported. " +
+        "Run `unset GOJAJA_SESSION` (or open a fresh shell) and try again.",
     );
   }
 
@@ -162,11 +162,11 @@ export async function runReset(args: ParsedArgs): Promise<number> {
     } else {
       process.stdout.write(
         `Nothing to remove at ${projectRoot}.\n` +
-          `  - No .multi-agent/ layer\n` +
-          `  - No .cursor/rules/multi-agent-runtime.mdc\n` +
+          `  - No .gojaja/ layer\n` +
+          `  - No .cursor/rules/gojaja-runtime.mdc\n` +
           `  - No managed block in CLAUDE.md\n` +
           (purgeCodexSkill
-            ? `  - No ~/.codex/skills/multi-agent-runtime/\n`
+            ? `  - No ~/.codex/skills/gojaja-runtime/\n`
             : `(Pass --purge-codex-skill to also check the user-level Codex skill.)\n`),
       );
     }
@@ -195,7 +195,7 @@ export async function runReset(args: ParsedArgs): Promise<number> {
     process.stdout.write("\n");
     if (!purgeCodexSkill) {
       process.stdout.write(
-        `The Codex skill at ~/.codex/skills/multi-agent-runtime/ is\n` +
+        `The Codex skill at ~/.codex/skills/gojaja-runtime/ is\n` +
           `user-level and shared across every project that activated a\n` +
           `Codex agent. It is NOT touched by default; pass\n` +
           `--purge-codex-skill to also delete it.\n\n`,
@@ -206,7 +206,7 @@ export async function runReset(args: ParsedArgs): Promise<number> {
       return 0;
     }
     process.stdout.write(
-      `To confirm, run:\n  agentctl reset --confirm ${expectedToken}` +
+      `To confirm, run:\n  gojaja reset --confirm ${expectedToken}` +
         (purgeCodexSkill ? " --purge-codex-skill\n" : "\n"),
     );
     return 0;
@@ -262,7 +262,7 @@ export async function runReset(args: ParsedArgs): Promise<number> {
   }
   if (!purgeCodexSkill) {
     process.stdout.write(
-      `\nThe Codex skill at ~/.codex/skills/multi-agent-runtime/ was NOT\n` +
+      `\nThe Codex skill at ~/.codex/skills/gojaja-runtime/ was NOT\n` +
         `touched (user-level, shared across projects). Pass --purge-codex-skill\n` +
         `next time if you want it removed too.\n`,
     );

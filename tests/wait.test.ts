@@ -9,7 +9,7 @@ import type { Event } from "../src/core/types";
 
 async function freshProject() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-wait-"));
-  const store = new LocalFsStore(path.join(root, ".multi-agent"), { safetyMarginMs: 0 });
+  const store = new LocalFsStore(path.join(root, ".gojaja"), { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   await store.createRole({ id: "TL", title: "Tech Lead" });
   await store.createRole({ id: "PM", title: "Product Manager" });
@@ -47,7 +47,7 @@ function args(role: string, flags: Record<string, string | boolean>): ParsedArgs
 }
 
 function waitJsonPath(root: string, role: string): string {
-  return path.join(root, ".multi-agent", "comms", "pending", role, "wait.json");
+  return path.join(root, ".gojaja", "comms", "pending", role, "wait.json");
 }
 
 async function exists(p: string): Promise<boolean> {
@@ -59,21 +59,21 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
-describe("agentctl wait (PR8i)", () => {
+describe("gojaja wait (PR8i)", () => {
   let ctx: { root: string; store: LocalFsStore };
   let envOrig: string | undefined;
   beforeEach(async () => {
     ctx = await freshProject();
-    envOrig = process.env.MA_SESSION;
+    envOrig = process.env.GOJAJA_SESSION;
     const s = await ctx.store.claimSession("TL", 60);
-    process.env.MA_SESSION = s.sessionId;
+    process.env.GOJAJA_SESSION = s.sessionId;
     // Drain baseline events so wait starts from a clean cursor.
     const m = await ctx.store.openOrCreatePlan("TL");
     await ctx.store.ackManifest("TL", m.ackToken);
   });
   afterEach(async () => {
-    if (envOrig === undefined) delete process.env.MA_SESSION;
-    else process.env.MA_SESSION = envOrig;
+    if (envOrig === undefined) delete process.env.GOJAJA_SESSION;
+    else process.env.GOJAJA_SESSION = envOrig;
     await fsp.rm(ctx.root, { recursive: true, force: true });
   });
 

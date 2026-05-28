@@ -7,11 +7,11 @@ import type { Target } from "../prompts";
 const TARGETS: ReadonlySet<Target> = new Set(["codex", "claude", "cursor", "generic"]);
 
 /**
- * `agentctl prompt --target <host> [--write] [--no-handbook] [--json]`
+ * `gojaja prompt --target <host> [--write] [--no-handbook] [--json]`
  *
  * Strictly role-free. Builds the runtime artifact for a host — the same
  * artifact for every role on that host. To bind a role to a specific
- * chat window, the user (or agent) runs `agentctl activate <role> ...`
+ * chat window, the user (or agent) runs `gojaja activate <role> ...`
  * separately. This separation prevents role identifiers from leaking
  * into project-shared files like `.cursor/rules/*` or `CLAUDE.md`,
  * which would otherwise lock the project to a single role per host.
@@ -24,7 +24,7 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
   if (args.positional.length > 0) {
     throw new UsageError(
       `'prompt' no longer accepts a role argument (got '${args.positional[0]}'). ` +
-        `Use 'agentctl activate <role> --target <host>' to get a per-window activation snippet. ` +
+        `Use 'gojaja activate <role> --target <host>' to get a per-window activation snippet. ` +
         `'prompt' installs the host-wide runtime artifact only.`,
     );
   }
@@ -51,7 +51,7 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
   if (write && target === "generic") {
     throw new UsageError(
       "--write is not supported for --target generic (no persistent install location). " +
-        "Use `agentctl activate <role> --target generic` instead — it bundles the runtime body.",
+        "Use `gojaja activate <role> --target generic` instead — it bundles the runtime body.",
     );
   }
 
@@ -111,7 +111,7 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
     }
     process.stdout.write(
       `\nNext: open one agent window per role and run\n` +
-        `  agentctl activate <role> --target ${target}\n` +
+        `  gojaja activate <role> --target ${target}\n` +
         `to get the chat-paste snippet for that window.\n`,
     );
   } else if (artifact.files.length > 0) {

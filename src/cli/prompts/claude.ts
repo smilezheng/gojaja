@@ -2,14 +2,14 @@ import * as path from "node:path";
 import { activationSnippet, runtimeLoopBody, type RuntimeBodyOptions } from "./core";
 import type { RuntimeArtifact } from "./types";
 
-export const CLAUDE_MARKER_BEGIN = "<!-- multi-agent-runtime:BEGIN -->";
-export const CLAUDE_MARKER_END = "<!-- multi-agent-runtime:END -->";
+export const CLAUDE_MARKER_BEGIN = "<!-- gojaja-runtime:BEGIN -->";
+export const CLAUDE_MARKER_END = "<!-- gojaja-runtime:END -->";
 
 function blockBody(projectRoot: string, opts: RuntimeBodyOptions): string {
   const effectiveOpts: RuntimeBodyOptions = { ...opts, target: "claude" };
   return [
     CLAUDE_MARKER_BEGIN,
-    "<!-- managed by multi-agent-coordination; edit the surrounding file freely, but do not edit the contents of this block -->",
+    "<!-- managed by gojaja; edit the surrounding file freely, but do not edit the contents of this block -->",
     "",
     "## Multi-Agent Coordination",
     "",
@@ -30,7 +30,7 @@ export function buildClaudeRuntime(
     "Run with `--write` to insert (or refresh) a managed block in",
     "`CLAUDE.md`. Existing content outside the block is preserved.",
     "",
-    "After install, use `agentctl activate <role> --target claude` to get",
+    "After install, use `gojaja activate <role> --target claude` to get",
     "the chat-paste line for each role.",
     "",
     "---",

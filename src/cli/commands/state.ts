@@ -4,13 +4,13 @@ import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveActor } from "../identity";
 
 /**
- * `agentctl state <subcommand>` — operations on `state/*` files.
+ * `gojaja state <subcommand>` — operations on `state/*` files.
  *
  * Subcommands:
  *   edit    Edit a state file: overwrite / append / replace modes.
  *
  * Other subcommands (list / show / ...) are reserved for future use.
- * This file replaces the previous `agentctl write-state` command name,
+ * This file replaces the previous `gojaja write-state` command name,
  * which had become misleading once append/replace modes were added —
  * "write" reads like overwrite-only.
  */
@@ -21,8 +21,8 @@ export async function runState(args: ParsedArgs): Promise<number> {
       return runStateEdit(args);
     default:
       throw new UsageError(
-        "Usage: agentctl state <edit> [flags]\n" +
-          "  agentctl state edit --file state/<path> [--content <text> | --append <text> | --replace <old> --with <new> [--batch]]",
+        "Usage: gojaja state <edit> [flags]\n" +
+          "  gojaja state edit --file state/<path> [--content <text> | --append <text> | --replace <old> --with <new> [--batch]]",
       );
   }
 }
@@ -41,7 +41,7 @@ async function readStdin(): Promise<string> {
 }
 
 /**
- * `agentctl state edit --file state/<path> ...`
+ * `gojaja state edit --file state/<path> ...`
  *
  * Three mutually-exclusive write modes:
  *
@@ -66,9 +66,9 @@ async function runStateEdit(args: ParsedArgs): Promise<number> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
 
-  // Identity: agent invocations (MA_SESSION set) get their gated role;
+  // Identity: agent invocations (GOJAJA_SESSION set) get their gated role;
   // bare human invocations bypass via "SYSTEM" (see Store.requireOwnership).
-  // A stale/invalid MA_SESSION must NOT silently downgrade to SYSTEM —
+  // A stale/invalid GOJAJA_SESSION must NOT silently downgrade to SYSTEM —
   // that would be privilege escalation against the ownership gate.
   const { actor } = await resolveActor(store);
 

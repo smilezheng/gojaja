@@ -5,7 +5,7 @@
 
 export type ExitCode = number;
 
-export class AgentctlError extends Error {
+export class GojajaError extends Error {
   readonly exitCode: ExitCode;
   readonly code: string;
 
@@ -17,39 +17,39 @@ export class AgentctlError extends Error {
   }
 }
 
-export class UsageError extends AgentctlError {
+export class UsageError extends GojajaError {
   constructor(message: string) {
     super("USAGE", message, 2);
   }
 }
 
-export class NotInitializedError extends AgentctlError {
+export class NotInitializedError extends GojajaError {
   constructor(root: string) {
     super(
       "NOT_INITIALIZED",
-      `No .multi-agent layer found at ${root}. Run 'agentctl init' first.`,
+      `No .gojaja layer found at ${root}. Run 'gojaja init' first.`,
       3,
     );
   }
 }
 
-export class AlreadyInitializedError extends AgentctlError {
+export class AlreadyInitializedError extends GojajaError {
   constructor(root: string) {
     super(
       "ALREADY_INITIALIZED",
-      `.multi-agent layer already exists at ${root}. Use 'agentctl upgrade' or 'agentctl reset' instead.`,
+      `.gojaja layer already exists at ${root}. Use 'gojaja upgrade' or 'gojaja reset' instead.`,
       4,
     );
   }
 }
 
-export class UnknownRoleError extends AgentctlError {
+export class UnknownRoleError extends GojajaError {
   constructor(role: string) {
     super("UNKNOWN_ROLE", `Unknown role: ${role}`, 5);
   }
 }
 
-export class LockTimeoutError extends AgentctlError {
+export class LockTimeoutError extends GojajaError {
   constructor(key: string, waitedMs: number) {
     super(
       "LOCK_TIMEOUT",
@@ -59,13 +59,13 @@ export class LockTimeoutError extends AgentctlError {
   }
 }
 
-export class PathValidationError extends AgentctlError {
+export class PathValidationError extends GojajaError {
   constructor(message: string) {
     super("PATH_INVALID", message, 7);
   }
 }
 
-export class StateCorruptionError extends AgentctlError {
+export class StateCorruptionError extends GojajaError {
   constructor(message: string) {
     super("STATE_CORRUPT", message, 8);
   }
@@ -76,7 +76,7 @@ export class StateCorruptionError extends AgentctlError {
  * permission to perform a write. Distinct from UsageError so scripts and
  * agents can distinguish "you said it wrong" from "you are not allowed".
  */
-export class ForbiddenError extends AgentctlError {
+export class ForbiddenError extends GojajaError {
   constructor(message: string) {
     super("FORBIDDEN", message, 9);
   }

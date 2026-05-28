@@ -8,7 +8,7 @@ export async function runClaim(args: ParsedArgs): Promise<number> {
   const role = args.positional[0];
   if (!role) {
     throw new UsageError(
-      "Usage: agentctl claim <role> [--ttl <seconds>] [--eval] [--json]",
+      "Usage: gojaja claim <role> [--ttl <seconds>] [--eval] [--json]",
     );
   }
   const ttlRaw = optionalString(args.flags, "ttl");
@@ -26,32 +26,32 @@ export async function runClaim(args: ParsedArgs): Promise<number> {
 
   const store = await openStoreOrThrow(root);
   // Refuse claims for roles that are not registered. Without this check
-  // a typo (`agentctl claim Forntend`) silently creates a "phantom" role
+  // a typo (`gojaja claim Forntend`) silently creates a "phantom" role
   // session that no other agent's manifest will ever route to, and the
   // agent ends up waiting forever for tasks it can never receive.
   const config = await store.readConfig();
   if (!config.roles[role]) {
     throw new UsageError(
-      `Unknown role '${role}'. Create it first: agentctl role create ${role} "<title>"`,
+      `Unknown role '${role}'. Create it first: gojaja role create ${role} "<title>"`,
     );
   }
   const session = await store.claimSession(role, ttl, force);
 
   if (evalMode) {
     // Step 4a: shell-eval-friendly output. Agent runs:
-    //   eval "$(agentctl claim PM --eval)"
+    //   eval "$(gojaja claim PM --eval)"
     // and the env var is exported in the current shell in one step.
     // Anything other than the export line (incl. trailing whitespace
     // ambiguities) breaks `eval`, so format is strict.
-    process.stdout.write(`export MA_SESSION=${session.sessionId}\n`);
+    process.stdout.write(`export GOJAJA_SESSION=${session.sessionId}\n`);
   } else if (json) {
     process.stdout.write(JSON.stringify({ status: "claimed", session }) + "\n");
   } else {
     process.stdout.write(
       `Claimed role '${session.role}' (session ${session.sessionId}, lease ${session.leaseTtlSeconds}s).\n` +
         `Export this in your shell so follow-up commands authenticate as ${session.role}:\n\n` +
-        `  export MA_SESSION=${session.sessionId}\n\n` +
-        `Tip: \`eval "$(agentctl claim ${session.role} --eval)"\` does this in one step.\n`,
+        `  export GOJAJA_SESSION=${session.sessionId}\n\n` +
+        `Tip: \`eval "$(gojaja claim ${session.role} --eval)"\` does this in one step.\n`,
     );
   }
   return 0;

@@ -8,7 +8,7 @@ with a worked example (this doc is the wire spec; that doc shows the
 flow).
 
 This document is the contract between an LLM agent window and the
-coordination layer. The wire-level invariants here are what `agentctl`
+coordination layer. The wire-level invariants here are what `gojaja`
 enforces; anything not enforced here is convention only.
 
 ## Identities
@@ -18,7 +18,7 @@ There are three identity domains:
 - **Role id** — long-lived, human-meaningful (`PM`, `TL`, `Backend`).
   Stable across sessions.
 - **Session id** — issued by `claim`; valid only while the lease is held.
-  All authenticated commands carry the session id via the `MA_SESSION`
+  All authenticated commands carry the session id via the `GOJAJA_SESSION`
   environment variable.
 - **Ack token** — issued by `plan`; valid until the next `plan` for that
   role or until consumed by `ack`.
@@ -28,11 +28,11 @@ for that role.
 
 ## Project lifecycle
 
-`agentctl init` writes `.multi-agent/` into a project. `agentctl reset`
+`gojaja init` writes `.gojaja/` into a project. `gojaja reset`
 removes everything this tool installed there (and optionally the
 user-level Codex skill).
 
-### `agentctl reset [--dry-run] [--confirm <basename>] [--purge-codex-skill]`
+### `gojaja reset [--dry-run] [--confirm <basename>] [--purge-codex-skill]`
 
 - Without `--confirm`, prints a preview and exits without deleting.
   The preview lists every path that would be touched and tells the
@@ -41,47 +41,47 @@ user-level Codex skill).
 - `--confirm <basename>` actually deletes when the token matches the
   project root's basename. Mismatch raises `UsageError` (exit 2).
 - Removes, when present:
-  - `<project>/.multi-agent/` (recursive — events, state, RFCs,
+  - `<project>/.gojaja/` (recursive — events, state, RFCs,
     worklogs, sessions, locks; everything this tool wrote).
-  - `<project>/.cursor/rules/multi-agent-runtime.mdc` (plus empty
+  - `<project>/.cursor/rules/gojaja-runtime.mdc` (plus empty
     `.cursor/rules/` and `.cursor/` after, so the project tree is
     not left with empty parent directories belonging to us).
-  - The `<!-- multi-agent-runtime:BEGIN ... :END -->` block in
+  - The `<!-- gojaja-runtime:BEGIN ... :END -->` block in
     `<project>/CLAUDE.md`. Surrounding user content is preserved;
     `CLAUDE.md` is deleted entirely only if the marker block was its
     only content.
 - `--purge-codex-skill` additionally removes
-  `${CODEX_HOME:-~/.codex}/skills/multi-agent-runtime/`. Off by
+  `${CODEX_HOME:-~/.codex}/skills/gojaja-runtime/`. Off by
   default because that skill is user-level and shared across every
   project the user works on; deleting it from one project's reset
   would break other projects.
-- **Refuses when `MA_SESSION` is set.** Destructive ops are for the
+- **Refuses when `GOJAJA_SESSION` is set.** Destructive ops are for the
   user, not an agent — same posture as `role delete`. Open a fresh
-  shell or `unset MA_SESSION` first.
+  shell or `unset GOJAJA_SESSION` first.
 
-The event stream and audit log live entirely under `.multi-agent/`,
+The event stream and audit log live entirely under `.gojaja/`,
 so `reset` is also the canonical "delete the audit trail" operation.
-If you need an archive, `cp -r .multi-agent .multi-agent.bak` (or git
+If you need an archive, `cp -r .gojaja .gojaja.bak` (or git
 commit it) before running reset; we do not auto-backup.
 
 ## Role lifecycle
 
 ```
-agentctl claim <role>           → SessionInfo (sessionId, leaseTtlSeconds)
-[ export MA_SESSION=<sessionId> ]
+gojaja claim <role>           → SessionInfo (sessionId, leaseTtlSeconds)
+[ export GOJAJA_SESSION=<sessionId> ]
 
 loop:
-  agentctl plan                 → Manifest JSON (events, ackToken, ...)
+  gojaja plan                 → Manifest JSON (events, ackToken, ...)
                                    stamps cursor.pendingManifest=<token>
   ... agent processes manifest events ...
-  agentctl ack --token <token>  → cursor advances exactly to
+  gojaja ack --token <token>  → cursor advances exactly to
                                   manifest.advanceCursorTo
 
-  (optional, between turns) agentctl wait [--until <iso> | --in <dur>]
+  (optional, between turns) gojaja wait [--until <iso> | --in <dur>]
                                           [--for <condition>]
                                           [--poll-interval <dur>]
 
-agentctl release                → clears the session
+gojaja release                → clears the session
 ```
 
 `claim`, `release`, `plan`, `ack`, `report`, `worklog`, and `wait` are
@@ -89,7 +89,7 @@ all implemented.
 
 ## Claim
 
-`agentctl claim <role> [--ttl <seconds>] [--eval] [--force]`
+`gojaja claim <role> [--ttl <seconds>] [--eval] [--force]`
 
 - Refuses if an existing session for `<role>` has a heartbeat younger
   than its `leaseTtlSeconds`. The agent should report this as a
@@ -99,15 +99,15 @@ all implemented.
 - If the existing session has missed its lease (heartbeat older than
   `leaseTtlSeconds`) the new claim takes over automatically — no
   `--force` needed.
-- `--eval` outputs a single shell line: `export MA_SESSION=<ulid>`.
-  Intended use: `eval "$(agentctl claim PM --eval)"` to claim and
+- `--eval` outputs a single shell line: `export GOJAJA_SESSION=<ulid>`.
+  Intended use: `eval "$(gojaja claim PM --eval)"` to claim and
   export in one step.
 - With `--force`, takes over any existing session and emits a
   `SESSION_TAKEOVER` event. Use only when the previous window is known
   dead.
 - Returns JSON: `{ "role", "sessionId", "leaseTtlSeconds", "startedAt" }`.
 
-The agent **must** export `MA_SESSION` for the rest of its shell turn so
+The agent **must** export `GOJAJA_SESSION` for the rest of its shell turn so
 subsequent commands can verify identity.
 
 ## Plan / process / ack
@@ -115,9 +115,9 @@ subsequent commands can verify identity.
 This is the only correct loop to consume work. It is designed so that
 no event observed by `plan` can be silently skipped by `ack`.
 
-### `agentctl plan [<role>]`
+### `gojaja plan [<role>]`
 
-- Resolves the role: from `MA_SESSION` if set, or from the optional
+- Resolves the role: from `GOJAJA_SESSION` if set, or from the optional
   positional argument (the two must agree if both are present).
 - Reads the current cursor and computes a `Manifest`:
   - events with `id > cursor.ackedThrough`, projected through the
@@ -134,7 +134,7 @@ no event observed by `plan` can be silently skipped by `ack`.
 #### Manifest event projection (PR8n)
 
 The global event stream (`comms/events/*.json`) records every event,
-broadcast or directed, for audit and future `agentctl doctor`. The
+broadcast or directed, for audit and future `gojaja doctor`. The
 **per-role manifest** is a projection of that stream, designed to keep
 each agent's per-turn attention small. Two filters apply in order:
 
@@ -150,7 +150,7 @@ each agent's per-turn attention small. Two filters apply in order:
    | `RFC_TASK_LINKED`, `RFC_TASK_UNLINKED` | RFC participants OR the linked task's stakeholders |
    | `TASK_CREATED` | roles that own `state/task_board.yaml` (triage set) |
    | `TASK_STATUS_CHANGED`, `TASK_DELIVERABLE_BYPASSED` | task stakeholders (owner, parent owner, dependants) |
-   | `SESSION_CLAIMED`, `SESSION_RELEASED`, `SESSION_TAKEOVER`, `LOCK_BROKEN`, `ROLE_DELETED`, `RFC_REPAIRED` | nobody — operational events; surfaced only via `agentctl doctor` and the event stream itself |
+   | `SESSION_CLAIMED`, `SESSION_RELEASED`, `SESSION_TAKEOVER`, `LOCK_BROKEN`, `ROLE_DELETED`, `RFC_REPAIRED` | nobody — operational events; surfaced only via `gojaja doctor` and the event stream itself |
    | `REPORT`, `TASK_ASSIGNED` | always directed; the basic filter already handles them |
 
    Forward-compat: future event types we have not yet classified are
@@ -164,14 +164,14 @@ Two important guarantees:
   recorded as "seen" once the manifest is ack'd, even if nothing in
   the manifest referred to it. The event remains in `comms/events/`
   forever for audit.
-- **`agentctl wait --for attention` uses the same projection.** A
+- **`gojaja wait --for attention` uses the same projection.** A
   role's wait only wakes on events that its manifest would actually
   carry. Without this guarantee `wait` would fire on broadcast events
   the agent would then discover its manifest hid — guaranteed wasted
   turn.
 
 When you need the full event history (audit / debugging), read
-`comms/events/*.json` directly or use `agentctl history --role <role>`
+`comms/events/*.json` directly or use `gojaja history --role <role>`
 (planned in PR9).
 
 The `roleReminder` is intentionally tiny — a fully populated reminder
@@ -184,14 +184,14 @@ it does not duplicate the full role contract or protocol docs.
 Each entry is a `TaskSummary` (`id`, `title`, `status`, `priority`,
 `blockedBy`). Backlog and Done are intentionally excluded — the
 former is product/PM space, the latter is history. Call
-`agentctl task show <id>` for full details (acceptance criteria,
+`gojaja task show <id>` for full details (acceptance criteria,
 timestamps).
 
 If a previous manifest is outstanding (`pendingManifest != null`), `plan`
 returns the existing manifest verbatim and does not generate a new one.
 This makes the operation idempotent across crash-and-retry.
 
-### `agentctl ack [<role>] --token <ack-token>`
+### `gojaja ack [<role>] --token <ack-token>`
 
 - Same role resolution as `plan`.
 - Validates `<ack-token> == cursor.pendingManifest`. Mismatch → `UsageError`,
@@ -209,23 +209,23 @@ ack — see the regression test
 
 - Read every item in the manifest. Items the agent ignores are still
   acked — they will not appear in the next `plan`.
-- All writes to framework state must go through `agentctl` subcommands.
-  Direct file edits bypass ownership checks (exit 9 from `agentctl`
+- All writes to framework state must go through `gojaja` subcommands.
+  Direct file edits bypass ownership checks (exit 9 from `gojaja`
   means the caller lacks the configured permission) and are not
   reflected in the event stream.
 
 ## Sending
 
-### `agentctl report --to <role> --message <text> [--ref <id>]`
+### `gojaja report --to <role> --message <text> [--ref <id>]`
 
-- `from` is derived from `MA_SESSION` (i.e. the session's role); the agent
+- `from` is derived from `GOJAJA_SESSION` (i.e. the session's role); the agent
   cannot pass an arbitrary `--from`.
 - Writes one event record into `comms/events/`. Recipients see it via
   their next `plan`, which filters the global event stream by `to`.
 - Refuses an empty message or an unknown recipient role.
 - Returns the created event (full record when `--json`).
 
-### `agentctl worklog --message <text>`
+### `gojaja worklog --message <text>`
 
 - Broadcast event (`to = "*"`).
 - Also creates a `worklog/<role>/<ulid>.md` file with the body, for
@@ -245,43 +245,43 @@ state-mutating commands. Two rules:
 
 Commands gated:
 
-- `agentctl task new` / `agentctl task assign` — require the actor to
+- `gojaja task new` / `gojaja task assign` — require the actor to
   own `state/task_board.yaml`. SYSTEM bypasses (so a human running the
   CLI outside any session can still bootstrap the board).
-- `agentctl task status <task-id> <status>` — same gate, but a **task
+- `gojaja task status <task-id> <status>` — same gate, but a **task
   owner exception** also applies: a role may always move its OWN task's
   status. This lets engineering roles update progress without
   blanket task-board write access.
-- `agentctl state edit --file <state/path>` — generic state editor
+- `gojaja state edit --file <state/path>` — generic state editor
   gated by `owns`; `--file` must live under `state/`. Renamed from
-  `agentctl write-state` in PR8f-C; see the `state edit` section below
+  `gojaja write-state` in PR8f-C; see the `state edit` section below
   for the full mode specification.
 
 `ForbiddenError` exits 9 (distinct from `UsageError`'s exit 2 so a
 caller can distinguish "you said it wrong" from "you are not allowed").
 
-### `agentctl state edit --file <state/path> [mode flags]`
+### `gojaja state edit --file <state/path> [mode flags]`
 
 Mode flags (mutually exclusive — pick exactly one; default is overwrite):
 
 ```
 # overwrite (default): replace the whole file
-agentctl state edit --file state/foo.md --content '<text>'
-agentctl state edit --file state/foo.md            # content from stdin
+gojaja state edit --file state/foo.md --content '<text>'
+gojaja state edit --file state/foo.md            # content from stdin
 
 # append: add to the end of the file
-agentctl state edit --file state/foo.md --append '<text>'
+gojaja state edit --file state/foo.md --append '<text>'
 
 # replace: literal-string find and replace
-agentctl state edit --file state/foo.md --replace '<old>' --with '<new>'
-agentctl state edit --file state/foo.md --replace '<old>' --with '<new>' --batch
+gojaja state edit --file state/foo.md --replace '<old>' --with '<new>'
+gojaja state edit --file state/foo.md --replace '<old>' --with '<new>' --batch
 ```
 
 Common rules:
 
 - `--file` must be a relative path under `state/`. Path-traversal
   refused via the standard `resolveInside` check.
-- Identity: agents authenticate via `MA_SESSION` as usual; humans
+- Identity: agents authenticate via `GOJAJA_SESSION` as usual; humans
   running the CLI without a session write as `"SYSTEM"` and bypass the
   ownership gate.
 - All three modes are atomic (write tmp + rename), so a reader is
@@ -317,13 +317,13 @@ Tasks are the unit of "what should this role be working on right now".
 The full schema is documented in
 [SCHEMA -> task_board.yaml](./SCHEMA.md#statetask_boardyaml).
 
-### `agentctl task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3] [--depends-on T-NNNN,...] [--acceptance <text>] [--parent T-NNNN] [--tag <label> ...] [--asset 'kind:ref::desc' ...] [--deliverable 'kind:ref::desc' ...]`
+### `gojaja task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3] [--depends-on T-NNNN,...] [--acceptance <text>] [--parent T-NNNN] [--tag <label> ...] [--asset 'kind:ref::desc' ...] [--deliverable 'kind:ref::desc' ...]`
 
 - The store assigns the next `T-NNNN` id atomically (under a
   `task-board` lock); ids are never reused even if a task is deleted.
 - Emits `TASK_CREATED` (broadcast). If `--owner` is given, also emits
   `TASK_ASSIGNED` (directed at the new owner).
-- `from` for the events is the actor's role (from `MA_SESSION`) when
+- `from` for the events is the actor's role (from `GOJAJA_SESSION`) when
   available, otherwise `"SYSTEM"` (so a human one-off invocation still
   produces audit events). The same actor is recorded as the task's
   `assignedBy` (PR8j); `assignTask` does NOT update this field.
@@ -338,13 +338,13 @@ The full schema is documented in
   `kind:ref::description`. `::` is the separator so URLs survive
   intact. Kinds:
     - asset       — `file` (repo-relative path, validated for `..`
-                    escape and refused if inside `.multi-agent/`)
+                    escape and refused if inside `.gojaja/`)
                     or `url` (opaque external string).
     - deliverable — same `file` / `url` kinds plus `manual` (free-text
                     requirement). `kind: "file"` deliverables are
                     GATED at `task status Done`; see below.
 
-### `agentctl task assign <task-id> --to <role>`
+### `gojaja task assign <task-id> --to <role>`
 
 - Sets `task.owner` and emits `TASK_ASSIGNED` with `previousOwner` and
   `newOwner`.
@@ -352,7 +352,7 @@ The full schema is documented in
 - Does NOT change `task.assignedBy` — that field records the original
   creator. Reassignment is auditable via the event stream alone.
 
-### `agentctl task status <task-id> <Backlog|Ready|InProgress|Blocked|Review|Done> [--force-incomplete]`
+### `gojaja task status <task-id> <Backlog|Ready|InProgress|Blocked|Review|Done> [--force-incomplete]`
 
 - Sets `task.status` and emits `TASK_STATUS_CHANGED`.
 - v2 does not enforce status transitions; any role with write access
@@ -370,7 +370,7 @@ The full schema is documented in
   Reviewers escalating a task with a known-incomplete deliverable can
   use this to keep momentum without losing accountability.
 
-### `agentctl task list [--owner <role>] [--status <s>] [--tag <label> ...]` and `agentctl task show <id>`
+### `gojaja task list [--owner <role>] [--status <s>] [--tag <label> ...]` and `gojaja task show <id>`
 
 - Read-only. Useful for humans browsing the project. The agent's
   per-turn view of its tasks is `manifest.tasks`; explicit list/show
@@ -397,7 +397,7 @@ superseded), worked example, and rationale live in
 [docs/RFC.md](./RFC.md). Full on-disk schema:
 [SCHEMA -> rfcs/](./SCHEMA.md#rfcsrfc-nnnn-slug).
 
-### `agentctl rfc new <slug> --title <text> --deciders <r1,...> [--options <A:summary,B:summary>] [--description <text>] [--voters <r1,...>] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]`
+### `gojaja rfc new <slug> --title <text> --deciders <r1,...> [--options <A:summary,B:summary>] [--description <text>] [--voters <r1,...>] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]`
 
 - Slug must match `^[a-z0-9][a-z0-9-]{0,63}$`; reuse across RFCs is refused.
 - The store assigns the next sequential `RFC-NNNN` id under a `rfcs` lock
@@ -415,13 +415,13 @@ superseded), worked example, and rationale live in
 - `--task` links one or more existing task ids; each is validated
   against `state/task_board.yaml` and refused if not found.
 - Emits `RFC_CREATED` (broadcast).
-- The actor (`MA_SESSION` role, or `"SYSTEM"` if no session) is recorded
+- The actor (`GOJAJA_SESSION` role, or `"SYSTEM"` if no session) is recorded
   as the event's `from` and the proposal's `createdBy`.
 
-### `agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]`
+### `gojaja rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]`
 
 - Posts a regular discussion comment (no `kind` field).
-- The role comes from `MA_SESSION`; the framework does not allow
+- The role comes from `GOJAJA_SESSION`; the framework does not allow
   ghost-commenting on behalf of another role.
 - Non-voters may comment — they often add cross-cutting context that the
   named voters miss.
@@ -441,7 +441,7 @@ superseded), worked example, and rationale live in
   `kind: undefined` for regular comments; `kind: "pre-decision" |
   "ack" | "object"` for the structured commands documented below.
 
-### `agentctl rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>` (PR8g)
+### `gojaja rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>` (PR8g)
 
 - Any session can add. Allowed in `open` or `revising`. Refused in
   terminal states (`accepted`, `rejected`, `superseded`).
@@ -452,7 +452,7 @@ superseded), worked example, and rationale live in
   `RFC_OPTION_ADDED` event is the audit signal.
 - Emits `RFC_OPTION_ADDED`.
 
-### `agentctl rfc pre-decide <rfc-id> --option <opt> --rationale <text>` (PR8g, reshaped in PR8g.1)
+### `gojaja rfc pre-decide <rfc-id> --option <opt> --rationale <text>` (PR8g, reshaped in PR8g.1)
 
 - Decider gate (FORBIDDEN otherwise). Valid only from `open`.
 - **PR8g.1**: posts a structured comment with `kind: "pre-decision"`;
@@ -465,7 +465,7 @@ superseded), worked example, and rationale live in
   responses — every required role must respond again.
 - Emits `RFC_COMMENT` with `payload.kind = "pre-decision"`.
 
-### `agentctl rfc ack <rfc-id> [--rationale <text>]` (PR8g.1)
+### `gojaja rfc ack <rfc-id> [--rationale <text>]` (PR8g.1)
 
 - Caller must be in `(voters ∪ deciders) − {pre-decider}`. Pre-decider
   cannot ack their own pre-decision.
@@ -474,7 +474,7 @@ superseded), worked example, and rationale live in
 - Rationale optional ("yes" is meaningful).
 - Emits `RFC_COMMENT` with `payload.kind = "ack"`.
 
-### `agentctl rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]` (PR8g.1)
+### `gojaja rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]` (PR8g.1)
 
 - Same caller-set + active-required gates as `ack`.
 - Rationale required. `--option` optional; when set, must be an
@@ -483,7 +483,7 @@ superseded), worked example, and rationale live in
   (advances the ACK gate too).
 - Emits `RFC_COMMENT` with `payload.kind = "object"`.
 
-### `agentctl rfc decide <rfc-id> [--option <opt>] --rationale <text>`
+### `gojaja rfc decide <rfc-id> [--option <opt>] --rationale <text>`
 
 - Deciders gate. Valid from `open`.
 - **PR8l: `--option` is conditional.** When `proposal.options.length > 0`,
@@ -503,7 +503,7 @@ superseded), worked example, and rationale live in
 - Status -> `accepted`; writes `decision.json`; emits `RFC_DECIDED`
   with `outcome="accepted"`.
 
-### `agentctl rfc reject <rfc-id> --rationale <text>`
+### `gojaja rfc reject <rfc-id> --rationale <text>`
 
 - Deciders gate. Valid from `open` / `revising`.
 - **Bypasses the ACK gate by design** — this is the only escape from
@@ -511,14 +511,14 @@ superseded), worked example, and rationale live in
 - Status -> `rejected`; writes `decision.json` with `outcome="rejected"`
   and `chosenOption=null`; emits `RFC_DECIDED`.
 
-### `agentctl rfc revise <rfc-id> --rationale <text>` (PR8g)
+### `gojaja rfc revise <rfc-id> --rationale <text>` (PR8g)
 
 - Deciders gate. Valid from `open`.
 - Status -> `revising`; emits `RFC_REVISION_REQUESTED` carrying the
   rationale (which is the "what to fix" message to the creator).
 - Comments are preserved untouched.
 
-### `agentctl rfc edit <rfc-id> --rationale <text> [--title <text>] [--description <text>] [--options A:summary,B:summary] [--deadline <iso>]` (PR8g)
+### `gojaja rfc edit <rfc-id> --rationale <text> [--title <text>] [--description <text>] [--options A:summary,B:summary] [--deadline <iso>]` (PR8g)
 
 - Allowed only in `revising`. Actor must be the original `createdBy`
   OR a role in `deciders`. Other voters cannot rewrite.
@@ -528,19 +528,19 @@ superseded), worked example, and rationale live in
   including which fields changed.
 - Comments preserved untouched.
 
-### `agentctl rfc link-task <rfc-id> --task T-NNNN` (PR8g)
+### `gojaja rfc link-task <rfc-id> --task T-NNNN` (PR8g)
 
 - Any session. Refused in terminal states.
 - Task id must exist on the board (USAGE otherwise).
 - Idempotent: linking an already-linked task is a no-op.
 - Emits `RFC_TASK_LINKED`.
 
-### `agentctl rfc unlink-task <rfc-id> --task T-NNNN` (PR8g)
+### `gojaja rfc unlink-task <rfc-id> --task T-NNNN` (PR8g)
 
 - Counterpart to `link-task`. Idempotent.
 - Emits `RFC_TASK_UNLINKED`.
 
-### `agentctl rfc list [--status open|pre-decide|revising|accepted|rejected|superseded]` and `agentctl rfc show <rfc-id> [--no-mark-seen]`
+### `gojaja rfc list [--status open|pre-decide|revising|accepted|rejected|superseded]` and `gojaja rfc show <rfc-id> [--no-mark-seen]`
 
 - Read-only.
 - `rfc show` side effect (PR8g): advances this role's per-RFC read
@@ -560,9 +560,9 @@ single deadline-driven, chunked, resumable primitive. The `.wait`
 sentinel is gone; a session record lives at
 `comms/pending/<role>/wait.json` (see [SCHEMA](./SCHEMA.md)).
 
-### `agentctl wait [<role>] [--until <iso> | --in <dur>] [--for <condition>] [--poll-interval <dur>] [--json]`
+### `gojaja wait [<role>] [--until <iso> | --in <dur>] [--for <condition>] [--poll-interval <dur>] [--json]`
 
-Role resolution follows the same rules as `plan` (MA_SESSION first;
+Role resolution follows the same rules as `plan` (GOJAJA_SESSION first;
 explicit role argument must agree).
 
 **Deadline (pick one; default `--in 10m`):**
@@ -596,13 +596,13 @@ it checks events and exits with one of four verdicts:
 
 ```
 ATTENTION       role=<r> newEvents=<n> deadline=<iso>
-                Next: agentctl plan
+                Next: gojaja plan
 
 CONDITION_MET   condition=<token> role=<r>
-                Next: agentctl plan
+                Next: gojaja plan
 
 RESUME          deadline=<iso> chunkSleptMs=<ms>
-                Next: agentctl wait --until <iso> [--for <token>]
+                Next: gojaja wait --until <iso> [--for <token>]
 
 TIMEOUT         role=<r> deadline=<iso>
                 Next: end the turn cleanly, or take initiative.
@@ -636,18 +636,18 @@ the framework does not provide a separate cancel verb.
 
 ## Activation in different agent hosts
 
-`agentctl prompt <role> --target <host> [--write]` produces a prompt body
+`gojaja prompt <role> --target <host> [--write]` produces a prompt body
 and, when `--write` is given, drops a persistent artifact into the host's
 own configuration area. The artifact is **role-agnostic**: it tells the
-agent how to find its identity via `MA_SESSION` and `agentctl plan`.
+agent how to find its identity via `GOJAJA_SESSION` and `gojaja plan`.
 Per-window role binding is done by pasting a short activation snippet
 into that window's chat.
 
 | Target | Persistent artifact location | Activation per window |
 | --- | --- | --- |
-| `codex` | `${CODEX_HOME:-~/.codex}/skills/multi-agent-runtime/SKILL.md` and `agents/openai.yaml` | User pastes `Use $multi-agent-runtime. I am the <role> agent for <project root>.` |
-| `claude` | A `<!-- multi-agent-runtime:BEGIN ... :END -->` marker block inside `<project>/CLAUDE.md` (preserves user content around it) | User pastes the activation snippet into the chat |
-| `cursor` | `<project>/.cursor/rules/multi-agent-runtime.mdc` with `alwaysApply: true` | User pastes the activation snippet into the chat |
+| `codex` | `${CODEX_HOME:-~/.codex}/skills/gojaja-runtime/SKILL.md` and `agents/openai.yaml` | User pastes `Use $gojaja-runtime. I am the <role> agent for <project root>.` |
+| `claude` | A `<!-- gojaja-runtime:BEGIN ... :END -->` marker block inside `<project>/CLAUDE.md` (preserves user content around it) | User pastes the activation snippet into the chat |
+| `cursor` | `<project>/.cursor/rules/gojaja-runtime.mdc` with `alwaysApply: true` | User pastes the activation snippet into the chat |
 | `generic` | Nothing written | User pastes the full prompt body into the chat |
 
 Writing is idempotent: re-running `prompt --write` overwrites a prior
@@ -656,7 +656,7 @@ date)` and touch no files. Pass `--force-rewrite` to overwrite even
 when bytes match (useful after a CLI upgrade, to confirm the install
 came from the current template). The CLI refuses to clobber an
 existing file that does not look like a previous artifact (heuristic:
-must contain the `agentctl plan` marker phrase).
+must contain the `gojaja plan` marker phrase).
 
 **Window-restart caveat.** Cursor, Claude Code, and Codex inject these
 rule files into the agent's system prompt only when an agent window
@@ -671,11 +671,11 @@ notice on every successful write, and JSON output carries
 The installed artifact begins with an explicit gate:
 
 > The protocol governs your behaviour **only when this window has been
-> bound to a role**, which is true if and only if `MA_SESSION` is
+> bound to a role**, which is true if and only if `GOJAJA_SESSION` is
 > exported in the shell, or the user has explicitly told you in chat
 > that you are playing the `<role>` for this project. Otherwise,
 > ignore the protocol and respond normally — do not speculatively run
-> `agentctl plan`, `claim`, or any other `agentctl` command.
+> `gojaja plan`, `claim`, or any other `gojaja` command.
 
 This is necessary because the rule file applies to every agent window
 in the project (including windows the user opens for unrelated work);
@@ -684,7 +684,7 @@ claiming roles on the user's behalf.
 
 ## Role lifecycle (deletion)
 
-`agentctl role delete <id>`
+`gojaja role delete <id>`
 
 - Removes the role from `config.yaml`, deletes the `roles/<id>.md`
   human contract, and unlinks the live session file under
@@ -696,13 +696,13 @@ claiming roles on the user's behalf.
   recreating a role with the same id reinherits them, which is usually
   what the user wants when "deleting" was actually "renaming". To
   reassign instead, the user runs
-  `agentctl task assign <task-id> --to <other-role>`.
-- Restricted to `SYSTEM`. The CLI refuses to run when `MA_SESSION` is
+  `gojaja task assign <task-id> --to <other-role>`.
+- Restricted to `SYSTEM`. The CLI refuses to run when `GOJAJA_SESSION` is
   exported in the calling shell — role deletion is a project-governance
   act, not something an agent should do on its own.
 - After deletion, any agent window that still has the deleted role's
-  `MA_SESSION` exported will fail with `USAGE` ("session not found")
-  on its next authenticated command. The user must `unset MA_SESSION`
+  `GOJAJA_SESSION` exported will fail with `USAGE` ("session not found")
+  on its next authenticated command. The user must `unset GOJAJA_SESSION`
   or claim a new role in that window.
 
 ## Reporting format
@@ -719,7 +719,7 @@ A role's window can end its turn cleanly only when:
 1. No outstanding `pendingManifest` exists for the role (i.e. the last
    `plan` was acked).
 2. `wait` returned `timeout` or the user has terminated the loop.
-3. Optionally, `agentctl release <role>` was called. If not called, the
+3. Optionally, `gojaja release <role>` was called. If not called, the
    session lease will expire naturally; the next `claim` will take over.
 
 Crash-on-mid-turn is recoverable: the next window for the role takes the
@@ -729,11 +729,11 @@ and can re-issue `plan` to retrieve the same manifest deterministically.
 ## Forbidden agent actions
 
 The framework cannot prevent these at the OS level today, but they are
-out-of-contract and will be flagged by future `agentctl doctor`:
+out-of-contract and will be flagged by future `gojaja doctor`:
 
 - Writing into another role's `worklog/<other>/` directory.
 - Editing `comms/events/<id>.json` (events are immutable).
 - Editing `comms/cursors/<other>.json`.
 - Hand-rolling new entries in any `comms/` directory without going
-  through `agentctl`. Even when the file shape is trivially writable,
+  through `gojaja`. Even when the file shape is trivially writable,
   doing so bypasses event emission, ownership, and audit.

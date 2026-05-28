@@ -13,7 +13,7 @@ Cross-references: [SCHEMA](./SCHEMA.md) — on-disk file formats.
 A coordination substrate for **N LLM-agent windows that each play a role
 inside one project** (PM, TL, Backend, Frontend, QA, DevOps, ...). The agents
 do not talk to each other directly; they read and write files inside a
-project-local `.multi-agent/` directory. The framework's job is to make
+project-local `.gojaja/` directory. The framework's job is to make
 those reads and writes safe, ordered, recoverable, and auditable so the
 agents can behave like a real working team without a server.
 
@@ -49,7 +49,7 @@ What this layer is **not**:
 └──────────────────────────┬───────────────────────────────────┘
                            │ shell invocation + JSON stdio
 ┌──────────────────────────▼───────────────────────────────────┐
-│  agentctl  (Node CLI)                                        │
+│  gojaja  (Node CLI)                                        │
 │   parse → validate → command handler                         │
 └──────────────────────────┬───────────────────────────────────┘
                            │ method calls
@@ -95,7 +95,7 @@ worklog/PM/01HX7T0Z6KCJ1B0FQ2K5MNT0DA.md
 Note: there is no separate `comms/inbox/` directory. Role inboxes are
 derived views — a role's "unread messages" are simply the events in
 `comms/events/` where `to == role || to == "*"` and `from != role`,
-filtered by the role's cursor position. `agentctl plan` computes this
+filtered by the role's cursor position. `gojaja plan` computes this
 filter on demand.
 
 Properties this buys:
@@ -149,13 +149,13 @@ A naïve `ack` implementation reads "current latest event id" and writes
 it to the cursor. That race silently loses any event that arrived between
 `sync` and `ack`. v2 closes the race with an explicit manifest:
 
-1. `agentctl plan <role>` snapshots all unread events (filtered to those
+1. `gojaja plan <role>` snapshots all unread events (filtered to those
    addressed to the role), writes the snapshot to
    `comms/pending/<role>/<ack-token>.json`, stamps the cursor's
    `pendingManifest = ack-token`, and prints the snapshot as JSON for
    the agent to act on.
 2. The agent processes the listed items.
-3. `agentctl ack <role> --token <ack-token>` validates that the token is
+3. `gojaja ack <role> --token <ack-token>` validates that the token is
    the cursor's current `pendingManifest`, then advances `ackedThrough` to
    the manifest's `advanceCursorTo` (which was fixed at plan time). Events
    that arrived after `plan` remain unread.
@@ -177,7 +177,7 @@ performs the analogous O_EXCL+lease dance on `comms/sessions/<role>.json`:
   release the previous holder's session.
 
 The session id is a ULID returned by `claim`. Follow-up commands in the
-same shell read it from `MA_SESSION`, which ties identity to the
+same shell read it from `GOJAJA_SESSION`, which ties identity to the
 environment rather than to an argument the agent could accidentally omit
 or forge. Impersonating a different role requires an explicit `claim` and
 is recorded in the event stream.
@@ -240,7 +240,7 @@ implicitly redirects the runtime loop.
 
 `comms/events/*.json` is the durable event log: append-only, every
 event ever produced lives there, audit-friendly, eventually read by
-`agentctl history` and `agentctl doctor`. The per-role manifest in
+`gojaja history` and `gojaja doctor`. The per-role manifest in
 `comms/pending/<role>/<ack-token>.json` is **a projection** of that
 log onto the slice an individual role should attend to.
 
@@ -360,7 +360,7 @@ agents can branch deterministically.
 
 | Class                    | Exit | When                                               |
 | ------------------------ | ---- | -------------------------------------------------- |
-| `AgentctlError` (base)   |    1 | Generic protocol failure.                          |
+| `GojajaError` (base)   |    1 | Generic protocol failure.                          |
 | `UsageError`             |    2 | Bad arguments, bad role id, invalid lock key.      |
 | `NotInitializedError`    |    3 | Layer not found under the resolved root.           |
 | `AlreadyInitializedError`|    4 | `init` against an existing layer.                  |
@@ -386,7 +386,7 @@ non-zero (cf. v0.1's `turn-end` returning 1 for the normal busy case).
   sections must complete inside the default 30 s lease.
 - **No automatic event archival.** `comms/events/` grows monotonically
   until manually trimmed. An archiver is on the roadmap.
-- **Schema migrations are stubs.** `agentctl upgrade` will arrive when we
+- **Schema migrations are stubs.** `gojaja upgrade` will arrive when we
   have a non-trivial schema delta to migrate.
 - **Cross-process event-visibility lag.** ULIDs are only process-locally
   monotonic; two processes writing in the same millisecond can produce
@@ -397,9 +397,9 @@ non-zero (cf. v0.1's `turn-end` returning 1 for the normal busy case).
 
 ## Extension points reserved for v2.x
 
-- **HTTP transport.** Implement `Store` against a remote agentctl process.
+- **HTTP transport.** Implement `Store` against a remote gojaja process.
   Command code is already store-agnostic; only the entry point that
   constructs the store needs to learn about the new option.
-- **Heartbeat watcher.** A separate `agentctl watch` process that scans
+- **Heartbeat watcher.** A separate `gojaja watch` process that scans
   heartbeats and downgrades stale sessions, independent of any agent
   window.

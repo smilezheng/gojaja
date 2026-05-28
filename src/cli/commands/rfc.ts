@@ -41,7 +41,7 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
   const slug = args.positional[1];
   if (!slug) {
     throw new UsageError(
-      "Usage: agentctl rfc new <slug> --title <text> --deciders <r1,r2> " +
+      "Usage: gojaja rfc new <slug> --title <text> --deciders <r1,r2> " +
         "[--description <text>] [--voters <r1,r2,...>] " +
         "[--options A:summary,B:summary] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]",
     );
@@ -89,7 +89,7 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
       process.stdout.write(
         `\nHint: this RFC has no --description. Voters and deciders read this\n` +
           `field for context; without it they may have to revise the RFC back\n` +
-          `to you for a fuller writeup. Add one with 'agentctl rfc edit ${proposal.id}\n` +
+          `to you for a fuller writeup. Add one with 'gojaja rfc edit ${proposal.id}\n` +
           `--description "..." --rationale "fill in context"' after 'rfc revise'.\n`,
       );
     }
@@ -101,7 +101,7 @@ async function runRfcComment(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
     throw new UsageError(
-      "Usage: agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]",
+      "Usage: gojaja rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]",
     );
   }
   const preferred = optionalString(args.flags, "option") ?? "";
@@ -129,7 +129,7 @@ async function runRfcAddOption(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
     throw new UsageError(
-      "Usage: agentctl rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>",
+      "Usage: gojaja rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>",
     );
   }
   const optionRaw = requireString(args.flags, "option");
@@ -161,7 +161,7 @@ async function runRfcPreDecide(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
     throw new UsageError(
-      "Usage: agentctl rfc pre-decide <rfc-id> --option <opt> --rationale <text>",
+      "Usage: gojaja rfc pre-decide <rfc-id> --option <opt> --rationale <text>",
     );
   }
   const chosenOption = requireString(args.flags, "option");
@@ -188,10 +188,10 @@ async function runRfcPreDecide(args: ParsedArgs): Promise<number> {
     process.stdout.write(
       `Posted pre-decision on ${rfcId} as option '${chosenOption}' by ${role} (comment ${comment.id}).\n` +
         `\nRequired ACK from: ${[...required].join(", ") || "(none — no other voters or deciders, you can decide directly)"}.\n` +
-        `Each role must run \`agentctl rfc ack ${rfcId}\` or \`agentctl rfc object ${rfcId} --rationale ...\`\n` +
-        `before \`agentctl rfc decide ${rfcId} --option ${chosenOption} --rationale ...\` will succeed.\n` +
+        `Each role must run \`gojaja rfc ack ${rfcId}\` or \`gojaja rfc object ${rfcId} --rationale ...\`\n` +
+        `before \`gojaja rfc decide ${rfcId} --option ${chosenOption} --rationale ...\` will succeed.\n` +
         `Silence does NOT count as consent. The only escape from a stalled ACK round is\n` +
-        `\`agentctl rfc reject ${rfcId}\`.\n`,
+        `\`gojaja rfc reject ${rfcId}\`.\n`,
     );
   }
   return 0;
@@ -201,7 +201,7 @@ async function runRfcAck(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
     throw new UsageError(
-      "Usage: agentctl rfc ack <rfc-id> [--rationale <text>]",
+      "Usage: gojaja rfc ack <rfc-id> [--rationale <text>]",
     );
   }
   const rationale = optionalString(args.flags, "rationale");
@@ -222,7 +222,7 @@ async function runRfcObject(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
     throw new UsageError(
-      "Usage: agentctl rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]",
+      "Usage: gojaja rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]",
     );
   }
   const rationale = requireString(args.flags, "rationale");
@@ -248,7 +248,7 @@ async function runRfcDecide(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
     throw new UsageError(
-      "Usage: agentctl rfc decide <rfc-id> [--option <opt>] --rationale <text>\n" +
+      "Usage: gojaja rfc decide <rfc-id> [--option <opt>] --rationale <text>\n" +
         "  --option is required for RFCs that have options, and must NOT be\n" +
         "  passed for brainstorm-mode RFCs (created without --options).",
     );
@@ -278,7 +278,7 @@ async function runRfcDecide(args: ParsedArgs): Promise<number> {
 async function runRfcReject(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
-    throw new UsageError("Usage: agentctl rfc reject <rfc-id> --rationale <text>");
+    throw new UsageError("Usage: gojaja rfc reject <rfc-id> --rationale <text>");
   }
   const rationale = requireString(args.flags, "rationale");
   const json = boolFlag(args.flags, "json");
@@ -298,7 +298,7 @@ async function runRfcRevise(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
     throw new UsageError(
-      "Usage: agentctl rfc revise <rfc-id> --rationale <text>",
+      "Usage: gojaja rfc revise <rfc-id> --rationale <text>",
     );
   }
   const rationale = requireString(args.flags, "rationale");
@@ -312,7 +312,7 @@ async function runRfcRevise(args: ParsedArgs): Promise<number> {
   } else {
     process.stdout.write(
       `Sent ${rfcId} back for revision by ${role}.\n` +
-        `Creator (or any decider) can now run 'agentctl rfc edit ${rfcId} ...'\n` +
+        `Creator (or any decider) can now run 'gojaja rfc edit ${rfcId} ...'\n` +
         `to update the proposal; that re-opens the RFC.\n`,
     );
   }
@@ -323,7 +323,7 @@ async function runRfcEdit(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
     throw new UsageError(
-      "Usage: agentctl rfc edit <rfc-id> --rationale <text> " +
+      "Usage: gojaja rfc edit <rfc-id> --rationale <text> " +
         "[--title <text>] [--description <text>] " +
         "[--options A:summary,B:summary] [--deadline <iso>]",
     );
@@ -358,7 +358,7 @@ async function runRfcEdit(args: ParsedArgs): Promise<number> {
 async function runRfcLinkTask(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
-    throw new UsageError("Usage: agentctl rfc link-task <rfc-id> --task T-NNNN");
+    throw new UsageError("Usage: gojaja rfc link-task <rfc-id> --task T-NNNN");
   }
   const taskId = requireString(args.flags, "task");
   const json = boolFlag(args.flags, "json");
@@ -379,7 +379,7 @@ async function runRfcLinkTask(args: ParsedArgs): Promise<number> {
 async function runRfcUnlinkTask(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
-    throw new UsageError("Usage: agentctl rfc unlink-task <rfc-id> --task T-NNNN");
+    throw new UsageError("Usage: gojaja rfc unlink-task <rfc-id> --task T-NNNN");
   }
   const taskId = requireString(args.flags, "task");
   const json = boolFlag(args.flags, "json");
@@ -480,7 +480,7 @@ function activePreDecisionFromComments(comments: RfcComment[]): RfcComment | nul
 async function runRfcShow(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
-    throw new UsageError("Usage: agentctl rfc show <rfc-id> [--json] [--no-mark-seen]");
+    throw new UsageError("Usage: gojaja rfc show <rfc-id> [--json] [--no-mark-seen]");
   }
   const json = boolFlag(args.flags, "json");
   const noMarkSeen = boolFlag(args.flags, "no-mark-seen");
@@ -489,8 +489,8 @@ async function runRfcShow(args: ParsedArgs): Promise<number> {
   const data = await store.readRfc(rfcId);
 
   // PR8g: opportunistically advance the role's read marker for this
-  // RFC if there's an MA_SESSION (so subsequent `plan` results reflect
-  // "no unread comments"). A bare-hands SYSTEM call (no MA_SESSION)
+  // RFC if there's an GOJAJA_SESSION (so subsequent `plan` results reflect
+  // "no unread comments"). A bare-hands SYSTEM call (no GOJAJA_SESSION)
   // doesn't move a per-role cursor; that's correct.
   if (!noMarkSeen) {
     try {
@@ -556,8 +556,8 @@ async function runRfcShow(args: ParsedArgs): Promise<number> {
             .join(", ") || "(none)"
         }\n` +
         `(Silence does NOT count as consent. Every required role must run\n` +
-        ` 'agentctl rfc ack ${proposal.id}' or 'agentctl rfc object ${proposal.id} --rationale ...'\n` +
-        ` before 'agentctl rfc decide' will succeed.)\n`,
+        ` 'gojaja rfc ack ${proposal.id}' or 'gojaja rfc object ${proposal.id} --rationale ...'\n` +
+        ` before 'gojaja rfc decide' will succeed.)\n`,
     );
   }
   process.stdout.write(`\nComments (${comments.length}):\n`);
@@ -597,21 +597,21 @@ export async function runRfc(args: ParsedArgs): Promise<number> {
     case "show":          return runRfcShow(args);
     default:
       throw new UsageError(
-        "Usage: agentctl rfc <new|comment|add-option|pre-decide|ack|object|decide|reject|revise|edit|link-task|unlink-task|list|show> [args]\n" +
-          "  agentctl rfc new <slug> --title <text> --deciders <r1,r2> [--description <text>] [--voters <...>] [--options A:summary,B:summary] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]\n" +
-          "  agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]\n" +
-          "  agentctl rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>\n" +
-          "  agentctl rfc pre-decide <rfc-id> --option <opt> --rationale <text>\n" +
-          "  agentctl rfc ack <rfc-id> [--rationale <text>]\n" +
-          "  agentctl rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]\n" +
-          "  agentctl rfc decide <rfc-id> --option <opt> --rationale <text>\n" +
-          "  agentctl rfc reject <rfc-id> --rationale <text>\n" +
-          "  agentctl rfc revise <rfc-id> --rationale <text>\n" +
-          "  agentctl rfc edit <rfc-id> --rationale <text> [--title <text>] [--description <text>] [--options A:summary,B:summary] [--deadline <iso>]\n" +
-          "  agentctl rfc link-task <rfc-id> --task T-NNNN\n" +
-          "  agentctl rfc unlink-task <rfc-id> --task T-NNNN\n" +
-          "  agentctl rfc list [--status open|revising|accepted|rejected|superseded]\n" +
-          "  agentctl rfc show <rfc-id> [--no-mark-seen]",
+        "Usage: gojaja rfc <new|comment|add-option|pre-decide|ack|object|decide|reject|revise|edit|link-task|unlink-task|list|show> [args]\n" +
+          "  gojaja rfc new <slug> --title <text> --deciders <r1,r2> [--description <text>] [--voters <...>] [--options A:summary,B:summary] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]\n" +
+          "  gojaja rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]\n" +
+          "  gojaja rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>\n" +
+          "  gojaja rfc pre-decide <rfc-id> --option <opt> --rationale <text>\n" +
+          "  gojaja rfc ack <rfc-id> [--rationale <text>]\n" +
+          "  gojaja rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]\n" +
+          "  gojaja rfc decide <rfc-id> --option <opt> --rationale <text>\n" +
+          "  gojaja rfc reject <rfc-id> --rationale <text>\n" +
+          "  gojaja rfc revise <rfc-id> --rationale <text>\n" +
+          "  gojaja rfc edit <rfc-id> --rationale <text> [--title <text>] [--description <text>] [--options A:summary,B:summary] [--deadline <iso>]\n" +
+          "  gojaja rfc link-task <rfc-id> --task T-NNNN\n" +
+          "  gojaja rfc unlink-task <rfc-id> --task T-NNNN\n" +
+          "  gojaja rfc list [--status open|revising|accepted|rejected|superseded]\n" +
+          "  gojaja rfc show <rfc-id> [--no-mark-seen]",
       );
   }
 }

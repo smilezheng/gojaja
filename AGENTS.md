@@ -2,10 +2,10 @@
 
 Working notes for any agent (or human) editing this repository.
 
-This repository **builds** the `multi-agent-coordination` package; it is
-not a project that consumes it. The `.multi-agent/` runtime layer is
-only created when an end-user runs `agentctl init` inside their own
-project. Do not commit a `.multi-agent/` directory at the repo root.
+This repository **builds** the `gojaja` package; it is
+not a project that consumes it. The `.gojaja/` runtime layer is
+only created when an end-user runs `gojaja init` inside their own
+project. Do not commit a `.gojaja/` directory at the repo root.
 
 ## Where to look first
 
@@ -34,7 +34,7 @@ project. Do not commit a `.multi-agent/` directory at the repo root.
 - Every typed error class has a stable exit code (see
   [docs/DESIGN.md → Errors](./docs/DESIGN.md#errors-and-exit-codes)).
   Do not invent new ad-hoc `process.exit(7)` calls; subclass
-  `AgentctlError` instead.
+  `GojajaError` instead.
 
 ## Build / test / typecheck
 
@@ -48,7 +48,7 @@ npm test               # vitest run
 ## What not to do
 
 - Do not reintroduce v0.1's bash scripts, `templates/multi-agent/`,
-  `skills/`, or the `.multi-agent → templates/multi-agent` symlink.
+  `skills/`, or the `.gojaja → templates/multi-agent` symlink.
   They were removed deliberately in PR1.
 - Do not append to a shared log file as an alternative to the
   per-record event scheme; the corruption modes that motivated the

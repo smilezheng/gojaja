@@ -112,7 +112,7 @@ export interface Store {
   /**
    * Scan all session files and return the one whose `sessionId` matches.
    * Returns `null` if no live session has that id. Used to translate the
-   * `MA_SESSION` environment variable back into a role identity.
+   * `GOJAJA_SESSION` environment variable back into a role identity.
    */
   findSessionById(sessionId: string): Promise<SessionInfo | null>;
 
@@ -233,7 +233,7 @@ export interface Store {
    *     per-type rules documented on the implementation.
    *
    * Used by `openOrCreatePlan` to build `manifest.events` and by
-   * `agentctl wait --for attention` to wake the role only when an
+   * `gojaja wait --for attention` to wake the role only when an
    * actually-relevant event arrived. The events themselves stay on
    * disk; this is purely a view function.
    */
@@ -278,7 +278,7 @@ export interface Store {
    * PR8j: extra optional inputs land directly on the task record.
    * `parent` is validated for existence + non-cyclicity + depth limit.
    * `assets` / `deliverables` are validated for path shape (file refs
-   * must stay inside the project tree and outside `.multi-agent/`).
+   * must stay inside the project tree and outside `.gojaja/`).
    */
   createTask(input: {
     title: string;
@@ -552,7 +552,7 @@ export interface Store {
   /**
    * Atomically write a file under the layer root, gated by the actor's
    * `config.yaml:roles[actor].owns`. The path must be relative, must
-   * resolve inside `.multi-agent/` (no `..` escapes), and must appear in
+   * resolve inside `.gojaja/` (no `..` escapes), and must appear in
    * the actor's `owns` list. If the same path also appears in the actor's
    * `mustNotEdit` list, the write is refused regardless of `owns` (defence
    * in depth).

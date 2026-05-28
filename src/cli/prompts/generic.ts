@@ -18,7 +18,7 @@ export function buildGenericRuntime(
     "",
     "There is no persistent install location for a generic agent; the",
     "runtime body and per-role activation are bundled at activate time.",
-    "Use `agentctl activate <role> --target generic` to get the full",
+    "Use `gojaja activate <role> --target generic` to get the full",
     "paste-ready prompt for each agent window.",
     "",
     "----- BEGIN runtime body (for inspection only) -----",

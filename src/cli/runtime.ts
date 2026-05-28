@@ -6,7 +6,7 @@ import { NotInitializedError } from "../core/errors";
 const PACKAGE_VERSION = require("../../package.json").version as string;
 export const CLI_VERSION: string = PACKAGE_VERSION;
 
-/** The on-disk schema version embedded in the .multi-agent/VERSION file. */
+/** The on-disk schema version embedded in the .gojaja/VERSION file. */
 // Bumped in PR8g (RFC v2 — comments shape moved from per-role JSONs
 // to a single threaded comments.yaml ledger; proposal.yaml gained
 // description / relatedTasks / preDecision; new RFC_* event types).
@@ -29,23 +29,23 @@ export const CLI_VERSION: string = PACKAGE_VERSION;
 // (RFC participants, task stakeholders, task-board owners, ...).
 // Operational events (SESSION_*, LOCK_BROKEN, RFC_REPAIRED,
 // ROLE_DELETED) never appear in any manifest — they stay in
-// `comms/events/` for audit + future `agentctl doctor`.
+// `comms/events/` for audit + future `gojaja doctor`.
 export const SCHEMA_VERSION = "2.0.0-manifest-filter";
 
-export const LAYER_DIRNAME = ".multi-agent";
+export const LAYER_DIRNAME = ".gojaja";
 
 /**
  * Discover the project root.
  *
  * Resolution order:
- *   1. The `MA_PROJECT_ROOT` env var, if set, is used verbatim.
+ *   1. The `GOJAJA_PROJECT_ROOT` env var, if set, is used verbatim.
  *   2. Otherwise walk upwards from CWD looking for an existing
- *      `.multi-agent/VERSION` file. The directory containing it wins.
+ *      `.gojaja/VERSION` file. The directory containing it wins.
  *   3. If nothing is found, fall back to CWD. Callers wanting initialisation
  *      should use `cwd` directly via `--root`.
  */
 export async function discoverProjectRoot(cwd: string = process.cwd()): Promise<string> {
-  const envRoot = process.env.MA_PROJECT_ROOT;
+  const envRoot = process.env.GOJAJA_PROJECT_ROOT;
   if (envRoot) return path.resolve(envRoot);
 
   let dir = path.resolve(cwd);

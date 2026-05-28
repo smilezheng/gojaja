@@ -2,7 +2,7 @@
  * Collaboration handbook — heuristics for "when to use which tool".
  *
  * Where PROTOCOL.md and the runtime loop tell the agent HOW to talk to
- * agentctl (mechanism), this body tells the agent WHEN it should pick
+ * gojaja (mechanism), this body tells the agent WHEN it should pick
  * which tool (policy). Loaded into the host's persistent area
  * (.cursor/rules/, ~/.codex/skills/, CLAUDE.md block), so the cost is
  * paid once per session and not per turn.
@@ -23,33 +23,33 @@
 export const COLLABORATION_HANDBOOK = `## Collaboration handbook
 
 Mechanism is in protocol/PROTOCOL.md. This section is about judgement:
-**when** to use each tool. Bias toward terse; let agentctl events carry
+**when** to use each tool. Bias toward terse; let gojaja events carry
 your work, not chat.
 
 ### Core stance
 
-- agentctl is the team protocol; chat is not durable. If it matters, it
-  goes through agentctl.
+- gojaja is the team protocol; chat is not durable. If it matters, it
+  goes through gojaja.
 - Default to resolving with another agent before bouncing to the user.
 - Be terse. Most "thinking" should land in commits and worklogs, not in
   chat scrollback.
 
 ### Turn shape (every turn, in order)
 
-1. \`agentctl plan\` — read manifest.roleReminder (you), manifest.events
+1. \`gojaja plan\` — read manifest.roleReminder (you), manifest.events
    (what changed), manifest.tasks (what to do), manifest.rfcs (what
    you must comment on or decide).
 2. Substantive work happens in the repository working tree.
-3. Emit visible outputs through agentctl, not chat (\`report\`,
+3. Emit visible outputs through gojaja, not chat (\`report\`,
    \`worklog\`, \`task status\`, \`rfc comment\`, \`rfc decide\`).
-4. \`agentctl ack --token <t>\` — only after step 3 produced its events.
-5. \`agentctl wait --in <duration>\` — every substantive turn must end
+4. \`gojaja ack --token <t>\` — only after step 3 produced its events.
+5. \`gojaja wait --in <duration>\` — every substantive turn must end
    with wait. Pick a deadline that matches what you expect (e.g.
    \`--in 10m\` for "I expect the next ping soon"; \`--in 1h --for
    task-assigned\` for "I'm out of work and waiting for the board").
    wait prints one of four verdicts:
-     ATTENTION / CONDITION_MET → run \`agentctl plan\`.
-     RESUME                    → re-run the exact \`agentctl wait\`
+     ATTENTION / CONDITION_MET → run \`gojaja plan\`.
+     RESUME                    → re-run the exact \`gojaja wait\`
                                 command the verdict prints. RESUME
                                 means the chunk timed out but your
                                 deadline has not been reached; the
@@ -68,7 +68,7 @@ Do:
   event (you edited a doc, changed config, ran a migration).
 
 Do NOT:
-- Worklog every \`agentctl task status\` call — the status change is
+- Worklog every \`gojaja task status\` call — the status change is
   already an event.
 - Worklog every shell command — audit is in events.log, not the worklog.
 - Repeat someone else's report back to them.
@@ -84,7 +84,7 @@ Do, when:
 Do NOT:
 - Use report as "broadcast + at-mention" — use worklog for broadcast.
 - Use report for cross-role decisions — open an RFC instead.
-- Spoof another role: \`from\` comes from MA_SESSION; misrepresenting
+- Spoof another role: \`from\` comes from GOJAJA_SESSION; misrepresenting
   intent will be obvious in the audit log.
 
 ### When to open an RFC instead of a report
@@ -119,21 +119,21 @@ listed in your own \`roleReminder.reportsTo\`.
 
 Decisions don't always settle in one round. The mechanism supports it:
 
-- \`agentctl rfc comment ... --reply-to <comment-id>\` threads a reply
+- \`gojaja rfc comment ... --reply-to <comment-id>\` threads a reply
   under another comment. Use it when you are reacting to a specific
   point; use top-level (no \`--reply-to\`) when you are raising a new
   angle.
-- \`agentctl rfc add-option <id>:<summary> --rationale ...\` introduces
+- \`gojaja rfc add-option <id>:<summary> --rationale ...\` introduces
   a new option mid-discussion. Use it the moment the existing options
   are clearly all wrong; do not pretend B is fine just because the
   proposal already lists it. add-option silently invalidates any
   active pre-decision (voters were ACKing an outdated option set);
   the decider can re-post \`rfc pre-decide\` once they're ready.
-- \`agentctl rfc pre-decide --option X --rationale ...\` (decider only)
+- \`gojaja rfc pre-decide --option X --rationale ...\` (decider only)
   posts a structured pre-decision. Every role in
   (voters union deciders) except the pre-decider must run
-  \`agentctl rfc ack\` (agree) or \`agentctl rfc object --rationale ...\`
-  (disagree) before \`agentctl rfc decide\` will succeed. Silence does
+  \`gojaja rfc ack\` (agree) or \`gojaja rfc object --rationale ...\`
+  (disagree) before \`gojaja rfc decide\` will succeed. Silence does
   NOT count as consent. There is no override. The only escape from a
   stalled ACK round is \`rfc reject\` followed by a new RFC.
 - If your manifest shows \`rfcs[*].pendingPreDecision.myAckOwed: true\`,
@@ -147,12 +147,12 @@ Decisions don't always settle in one round. The mechanism supports it:
   you still owe an explicit ack/object.
 - Re-posting \`rfc pre-decide\` (same or different option) invalidates
   all prior ACKs/objections — every required role must respond again.
-- \`agentctl rfc revise --rationale "rewrite section X"\` (decider only)
+- \`gojaja rfc revise --rationale "rewrite section X"\` (decider only)
   kicks the proposal back without rejecting the topic. Use revise
   when the topic is real but the writeup is too thin for you to act
   on. Use \`rfc reject\` when the topic itself is wrong.
 - The original creator (or any decider) can re-submit via
-  \`agentctl rfc edit --description "..." --rationale "..."\` while the
+  \`gojaja rfc edit --description "..." --rationale "..."\` while the
   RFC is in \`revising\`. Comments are preserved across the cycle.
 
 Three smaller rules:
@@ -164,7 +164,7 @@ Three smaller rules:
 - Link related tasks at creation with \`--task T-NNNN\` (or after the
   fact with \`rfc link-task\`). The task page is the context for the
   RFC; voters read it before commenting.
-- \`agentctl rfc show <id>\` updates your read marker for that RFC.
+- \`gojaja rfc show <id>\` updates your read marker for that RFC.
   Your next \`plan\` will report \`unreadComments: 0\` for it until new
   discussion arrives.
 
@@ -217,12 +217,12 @@ Bounce to the user **only** when one of:
 
 1. The decision needs authority no agent has: payment, credentials,
    production deploy.
-2. The protocol itself is inconsistent: \`MA_SESSION\` is unrecognised
-   (\`agentctl plan\` rejects), or an RFC is past its deadline with
+2. The protocol itself is inconsistent: \`GOJAJA_SESSION\` is unrecognised
+   (\`gojaja plan\` rejects), or an RFC is past its deadline with
    deciders silent for 2+ turns.
 3. Multiple agents have given you contradictory reports and no RFC
    channel can resolve it within scope.
-4. \`agentctl\` returned exit code 9 (FORBIDDEN). Do NOT edit
+4. \`gojaja\` returned exit code 9 (FORBIDDEN). Do NOT edit
    \`config.yaml\` yourself; let the user adjust \`owns\` if needed.
 5. \`state/project_state.md\` lacks the acceptance criterion you need
    to decide whether a task is Done.
@@ -242,7 +242,7 @@ Common temptations that are NOT the user's job:
 - Move a task to InProgress **as soon as you start**; not before, not
   retroactively.
 - If you discover a small follow-up while working: create it
-  (\`agentctl task new\`) and \`task assign\` to the right role. If the
+  (\`gojaja task new\`) and \`task assign\` to the right role. If the
   scope expansion is significant, open an RFC first.
 - "Done" means **every** acceptance criterion is satisfied. If
   acceptance is ambiguous, report to the task's owner role for
@@ -254,13 +254,13 @@ Tasks are **assigned** by the role that owns \`state/task_board.yaml\`
 (typically a coordinator role) or by a human user. Agents do not
 self-assign. If you believe a task should be yours, send a report
 explaining why to the role that owns the task board, and let them
-re-assign. Calling \`agentctl task assign <id> --to <yourself>\` from
+re-assign. Calling \`gojaja task assign <id> --to <yourself>\` from
 a role that happens to have task-board write access is a hard don't
 (see below).
 
-To discover what is yours, run \`agentctl plan\`; \`manifest.tasks\`
+To discover what is yours, run \`gojaja plan\`; \`manifest.tasks\`
 already lists only tasks where \`owner == you\`. You do not need
-\`agentctl task list\` for work discovery.
+\`gojaja task list\` for work discovery.
 
 ### Multi-role task pattern
 
@@ -273,7 +273,7 @@ role** (the one whose \`owns\` most overlaps the work). The lead's job:
 2. If a substantive trade-off needs sign-off, open an RFC; otherwise
    resolve via reports.
 3. Create one sub-task per peer:
-   \`agentctl task new --title "..." --owner <peer> --depends-on <parent>\`.
+   \`gojaja task new --title "..." --owner <peer> --depends-on <parent>\`.
 4. Move the parent task to \`Blocked\` (it now depends on its sub-tasks).
 5. Report the agreed breakdown back to the **assigner** (the task's
    original creator — the audit-trail witness), citing each sub-task id.
@@ -291,10 +291,10 @@ When you push a task to Review:
    Done — any role whose \`config.yaml:owns\` includes
    \`state/task_board.yaml\`. Typically the role in your
    \`roleReminder.reportsTo\` qualifies; if you are unsure, use
-   \`agentctl role list\` and \`agentctl role show <id>\` to inspect.
+   \`gojaja role list\` and \`gojaja role show <id>\` to inspect.
 2. The authorised role inspects your work, then either:
-   - \`agentctl task status <id> Done\` if they accept, or
-   - \`agentctl task status <id> InProgress\` plus a report
+   - \`gojaja task status <id> Done\` if they accept, or
+   - \`gojaja task status <id> InProgress\` plus a report
      explaining what is missing.
 3. Do not move your own task to Done. The owner-exception lets you
    change your task's status freely, but Done is a sign-off act
@@ -319,7 +319,7 @@ directly without needing task-board ownership.
 ### Idle (no work) — \`wait --for task-assigned\`
 
 When plan returns no tasks and no events to chase, the right move is
-\`agentctl wait --in <duration> --for task-assigned\` (e.g.
+\`gojaja wait --in <duration> --for task-assigned\` (e.g.
 \`--in 1h --for task-assigned\`).
 
 - On the FIRST chunk of that wait the framework auto-broadcasts a
@@ -338,7 +338,7 @@ my current task".
 
 ### What the manifest contains (PR8n)
 
-\`agentctl plan\` does NOT show you every event in the project. It
+\`gojaja plan\` does NOT show you every event in the project. It
 shows a per-role projection:
 
 - Directed events to you (\`REPORT\`, \`TASK_ASSIGNED\`).
@@ -360,7 +360,7 @@ Things you will NOT see:
 - Status changes on tasks you have no stake in.
 
 If you need the full event history (debugging, audit), read
-\`.multi-agent/comms/events/\` directly; the manifest projection is
+\`.gojaja/comms/events/\` directly; the manifest projection is
 for your turn-by-turn decisions, the events directory is the durable
 log.
 
@@ -370,7 +370,7 @@ When you need wide-open discussion (multiple ideas, risks, unknowns —
 no concrete choice to pick yet), open an RFC with **no** \`--options\`:
 
 \`\`\`bash
-agentctl rfc new q3-priorities \\
+gojaja rfc new q3-priorities \\
   --title "Q3 priorities — open discussion" \\
   --deciders <decider-role> --voters <r1,r2,r3> \\
   --description "..."
@@ -378,13 +378,13 @@ agentctl rfc new q3-priorities \\
 
 The RFC opens in brainstorm mode: voters post comments / replies, no
 ACK gate, no pre-decide required. Anyone can run
-\`agentctl rfc add-option <id> --option X:summary --rationale ...\`
+\`gojaja rfc add-option <id> --option X:summary --rationale ...\`
 to lift a thread into a concrete choice, at which point the RFC
 upgrades into a normal decision flow (decide then requires
 \`--option\`).
 
 If the discussion concludes without a specific choice, the decider
-runs \`agentctl rfc decide <id> --rationale "<takeaway>"\` (no
+runs \`gojaja rfc decide <id> --rationale "<takeaway>"\` (no
 \`--option\`); the decision is recorded as accepted with
 \`chosenOption: null\` and the rationale carries the substance.
 
@@ -400,7 +400,7 @@ Pick reports/worklogs when the question has a clear single answerer.
 ### Deliverables are gates, not suggestions (PR8j)
 
 If your task carries \`deliverables: [{ kind: file, ref: ... }]\`, the
-file must exist on disk before \`agentctl task status <id> Done\`
+file must exist on disk before \`gojaja task status <id> Done\`
 succeeds. The framework refuses the transition with USAGE listing
 every missing ref. Produce the file, then retry.
 
@@ -427,24 +427,24 @@ can distinguish the two.
 
 ### Hard "don't"s
 
-- Don't hand-edit anything under \`.multi-agent/\`. Use agentctl.
+- Don't hand-edit anything under \`.gojaja/\`. Use gojaja.
 - Don't ack a manifest you didn't actually read. Re-plan if you lost
   track.
 - Don't re-plan in a tight loop; that is what \`wait\` exists for.
 - Don't end a substantive turn without \`wait\` — the team reads your
   liveness from the wait result (and from the worklog auto-broadcast
   when you wait with \`--for task-assigned\`).
-- Don't spoof a different role by editing \`MA_SESSION\` or filing a
+- Don't spoof a different role by editing \`GOJAJA_SESSION\` or filing a
   report with someone else's \`from\`. Both are detectable.
 - Don't open an RFC for a question that has a single clear owner.
 - Don't bounce to the user as a first move.
 - Seeing "already claimed by a live session ..." on
-  \`agentctl claim <role>\` is an instruction to STOP and ask the
+  \`gojaja claim <role>\` is an instruction to STOP and ask the
   user. It is NOT an invitation to use \`--force\`. The previous
   window may be a peer doing real work; forcing takeover silently
   kills it.
 - Don't self-assign by calling
-  \`agentctl task assign <task-id> --to <yourself>\`. Tasks are
+  \`gojaja task assign <task-id> --to <yourself>\`. Tasks are
   push-assigned by the role that owns the task board or by the user.
   If you think a task should be yours, send a report explaining why
   and let the assigner reassign.

@@ -8,7 +8,7 @@ import { runRelease } from "../src/cli/commands/release";
 async function freshProject() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-release-"));
   const store = new LocalFsStore(
-    path.join(root, ".multi-agent"),
+    path.join(root, ".gojaja"),
     { safetyMarginMs: 0 },
   );
   await store.initialise("2.0.0-test");
@@ -30,22 +30,22 @@ function captureStdout(): Captured {
   return cap;
 }
 
-describe("agentctl release", () => {
+describe("gojaja release", () => {
   let ctx: { root: string; store: LocalFsStore };
-  const originalEnv = process.env.MA_SESSION;
+  const originalEnv = process.env.GOJAJA_SESSION;
   beforeEach(async () => {
     ctx = await freshProject();
-    delete process.env.MA_SESSION;
+    delete process.env.GOJAJA_SESSION;
   });
   afterEach(async () => {
-    if (originalEnv !== undefined) process.env.MA_SESSION = originalEnv;
-    else delete process.env.MA_SESSION;
+    if (originalEnv !== undefined) process.env.GOJAJA_SESSION = originalEnv;
+    else delete process.env.GOJAJA_SESSION;
     await fsp.rm(ctx.root, { recursive: true, force: true });
   });
 
-  it("Step 10: human output includes an `unset MA_SESSION` reminder", async () => {
+  it("Step 10: human output includes an `unset GOJAJA_SESSION` reminder", async () => {
     const s = await ctx.store.claimSession("PM", 60);
-    process.env.MA_SESSION = s.sessionId;
+    process.env.GOJAJA_SESSION = s.sessionId;
     const cap = captureStdout();
     try {
       const code = await runRelease({
@@ -56,9 +56,9 @@ describe("agentctl release", () => {
       expect(code).toBe(0);
       // Subtly important: agents that release but forget to unset get
       // confused on the very next command because the stale session id
-      // is still in the env. The hint must be exactly `unset MA_SESSION`
+      // is still in the env. The hint must be exactly `unset GOJAJA_SESSION`
       // (a shell-runnable line they can copy verbatim).
-      expect(cap.stdout).toContain("unset MA_SESSION");
+      expect(cap.stdout).toContain("unset GOJAJA_SESSION");
     } finally {
       cap.release();
     }

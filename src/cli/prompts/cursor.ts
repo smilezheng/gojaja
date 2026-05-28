@@ -3,21 +3,21 @@ import { activationSnippet, runtimeLoopBody, type RuntimeBodyOptions } from "./c
 import type { RuntimeArtifact } from "./types";
 
 function ruleFile(projectRoot: string): string {
-  return path.join(projectRoot, ".cursor", "rules", "multi-agent-runtime.mdc");
+  return path.join(projectRoot, ".cursor", "rules", "gojaja-runtime.mdc");
 }
 
 function ruleContent(projectRoot: string, opts: RuntimeBodyOptions): string {
   const effectiveOpts: RuntimeBodyOptions = { ...opts, target: "cursor" };
   return [
     "---",
-    'description: "Runtime loop for an agent window assigned to a role in this project\'s .multi-agent layer."',
+    'description: "Runtime loop for an agent window assigned to a role in this project\'s .gojaja layer."',
     "alwaysApply: true",
     "---",
     "",
     "# Multi-Agent Runtime",
     "",
     "This rule is active whenever you work in this project. If the shell",
-    "has `MA_SESSION` exported, you are the agent for the role bound to",
+    "has `GOJAJA_SESSION` exported, you are the agent for the role bound to",
     "that session; follow the runtime loop below for every turn.",
     "",
     runtimeLoopBody(projectRoot, effectiveOpts),
@@ -37,7 +37,7 @@ export function buildCursorRuntime(
     "project-scoped, role-agnostic, and applies to every Cursor session",
     "opened in this project.",
     "",
-    "After install, use `agentctl activate <role> --target cursor` to get",
+    "After install, use `gojaja activate <role> --target cursor` to get",
     "the chat-paste line for each window.",
     "",
     "---",

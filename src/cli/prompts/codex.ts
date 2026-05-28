@@ -8,12 +8,12 @@ function codexHome(): string {
 }
 
 function skillDir(): string {
-  return path.join(codexHome(), "skills", "multi-agent-runtime");
+  return path.join(codexHome(), "skills", "gojaja-runtime");
 }
 
 function skillMarkdown(opts: RuntimeBodyOptions): string {
   // M1: This skill ships to a USER-LEVEL location
-  // (~/.codex/skills/multi-agent-runtime/), so it MUST be reusable
+  // (~/.codex/skills/gojaja-runtime/), so it MUST be reusable
   // across every project the user works on. Hard-coding any specific
   // project root would mean each `prompt --write` from a different
   // project silently overwrites the previous install's projectRoot.
@@ -21,14 +21,14 @@ function skillMarkdown(opts: RuntimeBodyOptions): string {
   const effectiveOpts: RuntimeBodyOptions = { ...opts, target: "codex" };
   return [
     "---",
-    "name: multi-agent-runtime",
-    'description: Runtime loop for a Codex window assigned to a role in a project-local .multi-agent coordination layer. Activate when the user says they are playing a role in the multi-agent project.',
+    "name: gojaja-runtime",
+    'description: Runtime loop for a Codex window assigned to a role in a project-local .gojaja coordination layer. Activate when the user says they are playing a role in the multi-agent project.',
     "---",
     "",
     "# Multi-Agent Runtime",
     "",
     "Activate this skill when the user says they are playing a role in a",
-    "project-local `.multi-agent` coordination layer. Use it for the full",
+    "project-local `.gojaja` coordination layer. Use it for the full",
     "runtime loop until the user ends the conversation.",
     "",
     runtimeLoopBody("", effectiveOpts),
@@ -40,7 +40,7 @@ function openaiYaml(): string {
     "interface:",
     '  display_name: "Multi-Agent Runtime"',
     '  short_description: "Runtime loop for an assigned multi-agent role"',
-    '  default_prompt: "Use $multi-agent-runtime. Tell me which role I am playing and the project root, then enter the runtime loop."',
+    '  default_prompt: "Use $gojaja-runtime. Tell me which role I am playing and the project root, then enter the runtime loop."',
     "",
     "policy:",
     "  allow_implicit_invocation: true",
@@ -54,18 +54,18 @@ export function buildCodexRuntime(
 ): RuntimeArtifact {
   const dir = skillDir();
   // Note: projectRoot is intentionally ignored. The Codex skill ships
-  // to ~/.codex/skills/multi-agent-runtime/ which is user-level — one
+  // to ~/.codex/skills/gojaja-runtime/ which is user-level — one
   // install must service every project the user works on. The skill
   // body discovers the active project at runtime via cwd.
   const skill = skillMarkdown(opts);
   const body = [
-    "# Codex skill: multi-agent-runtime",
+    "# Codex skill: gojaja-runtime",
     "",
     "Run with `--write` to install (or refresh) the skill at:",
     "",
     `  ${dir}`,
     "",
-    "After install, use `agentctl activate <role> --target codex` to get",
+    "After install, use `gojaja activate <role> --target codex` to get",
     "the chat-paste line for each role. The skill is project-agnostic —",
     "the activation snippet carries the project context per window.",
     "",
@@ -83,5 +83,5 @@ export function buildCodexRuntime(
 }
 
 export function buildCodexActivation(role: string, projectRoot: string): string {
-  return `Use $multi-agent-runtime.\n${activationSnippet(role, projectRoot)}`;
+  return `Use $gojaja-runtime.\n${activationSnippet(role, projectRoot)}`;
 }

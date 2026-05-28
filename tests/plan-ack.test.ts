@@ -96,12 +96,12 @@ function planArgs(role: string, flags: Record<string, string | boolean>): Parsed
 }
 
 // runPlan uses openStoreOrThrow(root) which expects a PROJECT root and
-// appends `.multi-agent`. The freshStore above intentionally pins the
+// appends `.gojaja`. The freshStore above intentionally pins the
 // layer root directly for the unit-style tests; for CLI tests we need
 // the project shape.
 async function freshProject(): Promise<{ root: string; store: LocalFsStore }> {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-plan-proj-"));
-  const store = new LocalFsStore(path.join(root, ".multi-agent"), { safetyMarginMs: 0 });
+  const store = new LocalFsStore(path.join(root, ".gojaja"), { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   // PM owns the task board so the runPlan tests can createTask via PM
   // under PR7 ownership enforcement.
@@ -117,16 +117,16 @@ async function freshProject(): Promise<{ root: string; store: LocalFsStore }> {
 
 describe("runPlan — TTY-aware output", () => {
   let ctx: { root: string; store: LocalFsStore };
-  const originalEnv = process.env.MA_SESSION;
+  const originalEnv = process.env.GOJAJA_SESSION;
   beforeEach(async () => {
     ctx = await freshProject();
-    delete process.env.MA_SESSION;
+    delete process.env.GOJAJA_SESSION;
     const s = await ctx.store.claimSession("TL", 60);
-    process.env.MA_SESSION = s.sessionId;
+    process.env.GOJAJA_SESSION = s.sessionId;
   });
   afterEach(async () => {
-    if (originalEnv === undefined) delete process.env.MA_SESSION;
-    else process.env.MA_SESSION = originalEnv;
+    if (originalEnv === undefined) delete process.env.GOJAJA_SESSION;
+    else process.env.GOJAJA_SESSION = originalEnv;
     await fsp.rm(ctx.root, { recursive: true, force: true });
   });
 
@@ -274,7 +274,7 @@ describe("Store.openOrCreatePlan", () => {
     // contract if it has lost context. Cheaper than re-pasting the
     // activation snippet, and routes the agent through the right
     // CLI command.
-    expect(m1.roleReminder.protocol).toMatch(/agentctl role show/);
+    expect(m1.roleReminder.protocol).toMatch(/gojaja role show/);
     // Empty fields must NOT be serialised — keep manifests tight.
     expect(m1.roleReminder.owns).toBeUndefined();
     expect(m1.roleReminder.mustNotEdit).toBeUndefined();

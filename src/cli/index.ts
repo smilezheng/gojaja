@@ -1,5 +1,5 @@
 import { parseArgv } from "./argv";
-import { AgentctlError, UsageError } from "../core/errors";
+import { GojajaError, UsageError } from "../core/errors";
 import { runAck } from "./commands/ack";
 import { runActivate } from "./commands/activate";
 import { runClaim } from "./commands/claim";
@@ -75,7 +75,7 @@ dispatch().then(
     process.exitCode = code;
   },
   (err: unknown) => {
-    if (err instanceof AgentctlError) {
+    if (err instanceof GojajaError) {
       process.stderr.write(`${err.code}: ${err.message}\n`);
       process.exitCode = err.exitCode;
       return;

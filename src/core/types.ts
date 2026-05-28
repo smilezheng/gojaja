@@ -62,7 +62,7 @@ export interface CursorState {
 /**
  * Compact identity + protocol reminder for a role. Embedded into every
  * manifest so a context-compressed agent can re-anchor itself simply by
- * re-running `agentctl plan` — without paying the cost of a full role
+ * re-running `gojaja plan` — without paying the cost of a full role
  * file read on every turn.
  *
  * Fields are omitted when empty (e.g. an empty `owns` list is not
@@ -87,8 +87,8 @@ export interface RoleReminder {
  */
 export const PROTOCOL_ONE_LINER =
   "Loop: plan -> ack <t> -> wait. " +
-  "Lost your role? Run `agentctl role show <you>`. " +
-  "Writes via agentctl only; never hand-edit .multi-agent/.";
+  "Lost your role? Run `gojaja role show <you>`. " +
+  "Writes via gojaja only; never hand-edit .gojaja/.";
 
 /**
  * Snapshot of work pending for a role, produced by `plan` and consumed by
@@ -118,7 +118,7 @@ export interface Manifest {
    * Tasks currently requiring this role's attention. Tasks are owned by
    * exactly one role; this list is filtered by `owner == role` AND
    * `status ∈ ACTIVE_TASK_STATUSES`. Minimal fields by design — call
-   * `agentctl task show <id>` for the full record.
+   * `gojaja task show <id>` for the full record.
    */
   tasks: TaskSummary[];
   /**
@@ -433,7 +433,7 @@ export interface RfcProposal {
 
   /**
    * Tasks this RFC is decided in the context of. Lets voters/deciders
-   * pull up the affected work via `agentctl task show <id>`.
+   * pull up the affected work via `gojaja task show <id>`.
    * Validated against `state/task_board.yaml` at write time.
    */
   relatedTasks: string[];
@@ -642,7 +642,7 @@ export interface WaitCondition {
  *   1. De-duplicate the idle worklog broadcast for `--for task-assigned`
  *      across chunked invocations.
  *   2. Make "who is waiting for what until when" externally observable
- *      (PR9 `agentctl doctor`). Correctness does not rely on this file:
+ *      (PR9 `gojaja doctor`). Correctness does not rely on this file:
  *      if it goes missing the worst-case is a duplicated idle worklog.
  */
 export interface WaitState {
@@ -659,7 +659,7 @@ export interface WaitState {
 }
 
 /**
- * Terminal verdicts produced by `agentctl wait`. RESUME is the only
+ * Terminal verdicts produced by `gojaja wait`. RESUME is the only
  * non-terminal outcome: it tells the agent to invoke `wait` again with
  * the same `--until` / `--for`.
  */

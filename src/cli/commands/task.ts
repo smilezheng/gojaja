@@ -92,10 +92,10 @@ function parseTags(rawArgs: string[] | undefined): string[] {
 async function actorRole(args: ParsedArgs): Promise<{ root: string; actor: RoleId | "SYSTEM" }> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
-  // Tasks may be created by an agent (with MA_SESSION) or by the human
+  // Tasks may be created by an agent (with GOJAJA_SESSION) or by the human
   // running CLI manually before any role has claimed a session. Both
   // are valid; resolveActor distinguishes "no session at all" (SYSTEM
-  // bypass) from "stale/invalid MA_SESSION" (propagated as USAGE error
+  // bypass) from "stale/invalid GOJAJA_SESSION" (propagated as USAGE error
   // — must NOT silently fall through to SYSTEM).
   const { actor } = await resolveActor(store);
   return { root, actor };
@@ -143,7 +143,7 @@ async function runTaskAssign(args: ParsedArgs): Promise<number> {
   const taskId = args.positional[1];
   const newOwner = requireString(args.flags, "to");
   if (!taskId) {
-    throw new UsageError("Usage: agentctl task assign <task-id> --to <role>");
+    throw new UsageError("Usage: gojaja task assign <task-id> --to <role>");
   }
   const json = boolFlag(args.flags, "json");
   const { root, actor } = await actorRole(args);
@@ -162,7 +162,7 @@ async function runTaskStatus(args: ParsedArgs): Promise<number> {
   const newStatusRaw = args.positional[2];
   if (!taskId || !newStatusRaw) {
     throw new UsageError(
-      `Usage: agentctl task status <task-id> <${TASK_STATUSES.join("|")}>`,
+      `Usage: gojaja task status <task-id> <${TASK_STATUSES.join("|")}>`,
     );
   }
   if (!(TASK_STATUSES as readonly string[]).includes(newStatusRaw)) {
@@ -248,7 +248,7 @@ async function fileRefExists(projectRoot: string, ref: string): Promise<boolean>
 async function runTaskShow(args: ParsedArgs): Promise<number> {
   const taskId = args.positional[1];
   if (!taskId) {
-    throw new UsageError("Usage: agentctl task show <task-id>");
+    throw new UsageError("Usage: gojaja task show <task-id>");
   }
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
@@ -348,15 +348,15 @@ export async function runTask(args: ParsedArgs): Promise<number> {
       return runTaskShow(args);
     default:
       throw new UsageError(
-        "Usage: agentctl task <new|assign|status|list|show> [args]\n" +
-          "  agentctl task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3]\n" +
+        "Usage: gojaja task <new|assign|status|list|show> [args]\n" +
+          "  gojaja task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3]\n" +
           "                   [--depends-on T-XXXX,...] [--acceptance <text>] [--parent T-XXXX]\n" +
           "                   [--tag <label> ...] [--asset 'kind:ref::desc' ...]\n" +
           "                   [--deliverable 'kind:ref::desc' ...]\n" +
-          "  agentctl task assign <task-id> --to <role>\n" +
-          `  agentctl task status <task-id> <${TASK_STATUSES.join("|")}> [--force-incomplete]\n` +
-          "  agentctl task list [--owner <role>] [--status <s>] [--tag <label> ...]\n" +
-          "  agentctl task show <task-id>",
+          "  gojaja task assign <task-id> --to <role>\n" +
+          `  gojaja task status <task-id> <${TASK_STATUSES.join("|")}> [--force-incomplete]\n` +
+          "  gojaja task list [--owner <role>] [--status <s>] [--tag <label> ...]\n" +
+          "  gojaja task show <task-id>",
       );
   }
 }

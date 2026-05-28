@@ -39,7 +39,7 @@ export function buildRuntime(
  * Build the per-window activation snippet for a role. The snippet is
  * never persisted to disk; it lives entirely in the chat history of the
  * specific agent window that pastes it. This keeps role binding strictly
- * at the window layer (and `MA_SESSION` in the window's shell), never
+ * at the window layer (and `GOJAJA_SESSION` in the window's shell), never
  * at the project layer.
  *
  * For the generic target, the snippet has to bundle the runtime body
@@ -65,7 +65,7 @@ function expandHome(p: string): string {
   return p;
 }
 
-const RUNTIME_MARKER = "agentctl plan";
+const RUNTIME_MARKER = "gojaja plan";
 
 export async function writeArtifactFile(
   file: RuntimeArtifact["files"][number],
@@ -97,7 +97,7 @@ export async function writeArtifactFile(
     const prior = await fsp.readFile(target, "utf8");
     if (!prior.includes(RUNTIME_MARKER)) {
       throw new UsageError(
-        `Refusing to overwrite ${target}: file exists and does not look like a multi-agent-coordination artifact. ` +
+        `Refusing to overwrite ${target}: file exists and does not look like a gojaja artifact. ` +
           `Move or rename it, then re-run.`,
       );
     }

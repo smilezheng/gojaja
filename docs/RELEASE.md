@@ -10,10 +10,10 @@ output before moving on.
 
 ## Audience and pre-conditions
 
-- The repository at `git@github.com:smilezheng/multi-agent-coordination.git`
+- The repository at `git@github.com:smilezheng/gojaja.git`
   is **private** during alpha. It will be flipped to public when the
   protocol is judged stable — see "Going public" below.
-- npm-side, the package name `multi-agent-coordination` is registered
+- npm-side, the package name `gojaja` is registered
   publicly; npm has no concept of "private GitHub + public npm" working
   against each other. Anyone with the package name can `npm view` /
   `npm install` an alpha version once published.
@@ -120,11 +120,11 @@ npm publish --dry-run --tag next
 
 Expected output (verify each line):
 
-- ends with `+ multi-agent-coordination@<version>` and no error.
+- ends with `+ gojaja@<version>` and no error.
 - tarball size around 80–100 kB during alpha; warn if it suddenly
   jumps to several MB (something has slipped past the `files`
   whitelist).
-- file list contains `bin/agentctl`, all `dist/cli/**/*.js` and
+- file list contains `bin/gojaja`, all `dist/cli/**/*.js` and
   `dist/core/**/*.js`, `README.md`, `README.zh-CN.md`, `LICENSE`,
   `CHANGELOG.md`, `package.json`.
 - file list does NOT contain `src/`, `tests/`, `docs/` (those are
@@ -155,7 +155,7 @@ npm publish                              # default tag is "latest"
 Sanity check immediately after:
 
 ```bash
-npm view multi-agent-coordination dist-tags
+npm view gojaja dist-tags
 # during alpha:  { next: "2.0.0-alpha.10" }
 # after stable:  { latest: "2.0.0", next: "<latest alpha if still around>" }
 ```
@@ -166,9 +166,9 @@ In a separate shell, away from this repo:
 
 ```bash
 mkdir -p /tmp/ma-test && cd /tmp/ma-test
-npx -y multi-agent-coordination@next --version
-# → agentctl <version>
-npx -y multi-agent-coordination@next help
+npx -y gojaja@next --version
+# → gojaja <version>
+npx -y gojaja@next help
 # → full help, no stack traces
 ```
 
@@ -176,7 +176,7 @@ If `--version` or `help` errors, **immediately deprecate the broken
 release** (does not delete it, but warns installs):
 
 ```bash
-npm deprecate multi-agent-coordination@<version> "broken; use <next-good-version>"
+npm deprecate gojaja@<version> "broken; use <next-good-version>"
 ```
 
 Then fix-forward with a new patch / prerelease bump.
@@ -204,7 +204,7 @@ They become public the moment the repo is flipped to public.
 When you decide the protocol is stable enough to invite outside use:
 
 ```bash
-gh repo edit smilezheng/multi-agent-coordination --visibility public
+gh repo edit smilezheng/gojaja --visibility public
 ```
 
 There is no separate npm step — the package is already publicly
@@ -227,17 +227,17 @@ two are conventions, not requirements.
 When you ship `2.0.0` final:
 
 1. `npm publish` (no `--tag` flag — defaults to `latest`).
-2. `npm view multi-agent-coordination dist-tags` should now show
+2. `npm view gojaja dist-tags` should now show
    `latest: 2.0.0` and (if you want to keep them) older alpha versions
    still living under `next`.
-3. The README's `npm install -g multi-agent-coordination` instruction
+3. The README's `npm install -g gojaja` instruction
    (without `@next`) now works as expected; users get 2.0.0.
 
 If you want to retire the `next` tag entirely so it does not float on
 an old alpha:
 
 ```bash
-npm dist-tag rm multi-agent-coordination next
+npm dist-tag rm gojaja next
 ```
 
 ## Yanking a bad release
@@ -248,11 +248,11 @@ reserved). To withdraw a broken release:
 
 ```bash
 # 1. Mark it broken so npm warns on install:
-npm deprecate multi-agent-coordination@<bad-version> "broken; upgrade to <good-version>"
+npm deprecate gojaja@<bad-version> "broken; upgrade to <good-version>"
 
 # 2. Publish a fresh patch with the fix.
 # 3. If the broken version was on the `next` tag, point `next` away:
-npm dist-tag add multi-agent-coordination@<good-version> next
+npm dist-tag add gojaja@<good-version> next
 ```
 
 The deprecate message is shown to users at install time and shown

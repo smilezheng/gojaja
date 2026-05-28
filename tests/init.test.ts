@@ -6,7 +6,7 @@ import { LocalFsStore } from "../src/core/local-fs-store";
 
 async function freshLayer() {
   const projectRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-init-"));
-  const root = path.join(projectRoot, ".multi-agent");
+  const root = path.join(projectRoot, ".gojaja");
   const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   return { projectRoot, root, store };
 }

@@ -4,7 +4,7 @@ import { buildActivation, buildRuntime } from "../src/cli/prompts";
 
 const KEY_TRIGGER_PHRASES: ReadonlyArray<RegExp> = [
   // Core stance + turn shape
-  /agentctl is the team protocol/i,
+  /gojaja is the team protocol/i,
   /Default to resolving with another agent before bouncing to the user/i,
   /every substantive turn must end\s+with wait/i,
 
@@ -33,7 +33,7 @@ const KEY_TRIGGER_PHRASES: ReadonlyArray<RegExp> = [
   /halt your task work, and do NOT push commits on top/,
 
   // Hard don'ts block
-  /Don't hand-edit anything under \\?`?\.multi-agent/,
+  /Don't hand-edit anything under \\?`?\.gojaja/,
 
   // PR8e task-assignment rules
   /Task assignment is push, not pull/,
@@ -132,11 +132,11 @@ describe("COLLABORATION_HANDBOOK", () => {
 describe("buildRuntime handbook integration", () => {
   const PROJ = "/tmp/example-project";
 
-  it("PR8d gate: every target body announces 'applies only when this window has been bound to a role' and forbids speculative agentctl calls", () => {
+  it("PR8d gate: every target body announces 'applies only when this window has been bound to a role' and forbids speculative gojaja calls", () => {
     // Without the gate, an unactivated chat window (user opened a fresh
     // Cursor tab to ask an unrelated question, never ran `activate`)
     // would still see the runtime body in its system prompt and could
-    // reflexively run `agentctl plan` / `claim`, claiming a role the
+    // reflexively run `gojaja plan` / `claim`, claiming a role the
     // user never intended. The gate localises the loop to actively
     // bound windows only.
     // Tolerate whitespace / newlines because the bold marker text wraps
@@ -159,7 +159,7 @@ describe("buildRuntime handbook integration", () => {
       const a = buildRuntime(t, PROJ);
       expect(a.body).toContain("Collaboration handbook");
       // Runtime mechanics still present alongside the handbook.
-      expect(a.body).toContain("agentctl plan");
+      expect(a.body).toContain("gojaja plan");
       // Codex/Claude/Cursor also drop the handbook into the persistent file.
       if (t !== "generic") {
         expect(a.files[0].content).toContain("Collaboration handbook");
@@ -172,7 +172,7 @@ describe("buildRuntime handbook integration", () => {
       const a = buildRuntime(t, PROJ, { withHandbook: false });
       expect(a.body).not.toContain("Collaboration handbook");
       expect(a.body).not.toContain("Hard \"don't\"s");
-      expect(a.body).toContain("agentctl plan");
+      expect(a.body).toContain("gojaja plan");
       if (t !== "generic") {
         expect(a.files[0].content).not.toContain("Collaboration handbook");
       }

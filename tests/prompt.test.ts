@@ -15,7 +15,7 @@ import {
 
 async function freshProject() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-prompt-"));
-  const store = new LocalFsStore(path.join(root, ".multi-agent"), { safetyMarginMs: 0 });
+  const store = new LocalFsStore(path.join(root, ".gojaja"), { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   // Several roles are configured so the no-role-intrusion regression has
   // multiple strings to scan against.
@@ -32,15 +32,15 @@ describe("buildRuntime (role-free)", () => {
   beforeEach(async () => { ctx = await freshProject(); });
   afterEach(async () => { await fsp.rm(ctx.root, { recursive: true, force: true }); });
 
-  it("every target body contains plan + MA_SESSION but never a role id", async () => {
+  it("every target body contains plan + GOJAJA_SESSION but never a role id", async () => {
     const config = await ctx.store.readConfig();
     const roleIds = Object.keys(config.roles);
     expect(roleIds.length).toBeGreaterThanOrEqual(3);
 
     for (const t of TARGETS) {
       const a = buildRuntime(t, ctx.root);
-      expect(a.body).toContain("agentctl plan");
-      expect(a.body).toContain("MA_SESSION");
+      expect(a.body).toContain("gojaja plan");
+      expect(a.body).toContain("GOJAJA_SESSION");
       for (const id of roleIds) {
         // Body MUST NOT mention any role id; role binding lives in
         // activate (per-window), not in the host-shared runtime.
@@ -58,11 +58,11 @@ describe("buildRuntime (role-free)", () => {
     expect(names).toEqual(["SKILL.md", "openai.yaml"]);
   });
 
-  it("cursor artifact targets .cursor/rules/multi-agent-runtime.mdc with alwaysApply", () => {
+  it("cursor artifact targets .cursor/rules/gojaja-runtime.mdc with alwaysApply", () => {
     const a = buildRuntime("cursor", ctx.root);
     expect(a.files).toHaveLength(1);
     expect(a.files[0].path).toBe(
-      path.join(ctx.root, ".cursor", "rules", "multi-agent-runtime.mdc"),
+      path.join(ctx.root, ".cursor", "rules", "gojaja-runtime.mdc"),
     );
     expect(a.files[0].content).toContain("alwaysApply: true");
   });
@@ -83,7 +83,7 @@ describe("buildRuntime (role-free)", () => {
 
   it("PR8i: cursor body pins a short --poll-interval (chunked wait survives short host shell timeout)", () => {
     const a = buildRuntime("cursor", ctx.root);
-    expect(a.body).toContain("agentctl wait --in 10m --poll-interval 30s");
+    expect(a.body).toContain("gojaja wait --in 10m --poll-interval 30s");
     // Removed flags from the pre-PR8i shape must not return as cargo
     // text in any generated artifact.
     expect(a.body).not.toContain("--mode exit");
@@ -93,7 +93,7 @@ describe("buildRuntime (role-free)", () => {
   it("PR8i: non-cursor bodies use the simple `wait --in 10m`", () => {
     for (const t of ["codex", "claude", "generic"] as const) {
       const a = buildRuntime(t, ctx.root);
-      expect(a.body).toContain("agentctl wait --in 10m");
+      expect(a.body).toContain("gojaja wait --in 10m");
       expect(a.body).not.toContain("--poll-interval");
       expect(a.body).not.toContain("--mode exit");
     }
@@ -126,9 +126,9 @@ describe("buildActivation (role-bound, never persisted)", () => {
     }
   });
 
-  it("codex activation includes the $multi-agent-runtime trigger phrase", () => {
+  it("codex activation includes the $gojaja-runtime trigger phrase", () => {
     const s = buildActivation("codex", "PM", ctx.root);
-    expect(s).toContain("$multi-agent-runtime");
+    expect(s).toContain("$gojaja-runtime");
   });
 
   it("cursor and claude activations stay short — they assume the runtime body is installed", () => {
@@ -136,7 +136,7 @@ describe("buildActivation (role-bound, never persisted)", () => {
     const claude = buildActivation("claude", "PM", ctx.root);
     // Short: well under 2 KB, NOT the multi-KB runtime body. The
     // budget was bumped from 800 to 1500 in PR8e to accommodate the
-    // "run role show + agentctl -h" three-step onboarding sequence
+    // "run role show + gojaja -h" three-step onboarding sequence
     // that prevents the agent from skipping self-introduction.
     expect(cursor.length).toBeLessThan(1500);
     expect(claude.length).toBeLessThan(1500);
@@ -145,9 +145,9 @@ describe("buildActivation (role-bound, never persisted)", () => {
     // PR8e content invariants: the new snippet must address the agent
     // in the second person and route it through eval + role show + -h.
     expect(cursor).toContain("You are the PM agent");
-    expect(cursor).toContain('eval "$(agentctl claim PM --eval)"');
-    expect(cursor).toContain("agentctl role show PM");
-    expect(cursor).toContain("agentctl -h");
+    expect(cursor).toContain('eval "$(gojaja claim PM --eval)"');
+    expect(cursor).toContain("gojaja role show PM");
+    expect(cursor).toContain("gojaja -h");
   });
 
   it("generic activation bundles the runtime body because there is no install location", () => {
@@ -162,7 +162,7 @@ describe("buildActivation (role-bound, never persisted)", () => {
   it("generic activation with withHandbook=false omits the handbook", () => {
     const s = buildActivation("generic", "PM", ctx.root, { withHandbook: false });
     expect(s).not.toContain("Collaboration handbook");
-    expect(s).toContain("agentctl plan");
+    expect(s).toContain("gojaja plan");
   });
 });
 
@@ -187,15 +187,15 @@ describe("writeArtifactFile", () => {
     const a = buildRuntime("codex", ctx.root);
     for (const f of a.files) await writeArtifactFile(f);
     const skill = await fsp.readFile(
-      path.join(codexHomeTmp, "skills", "multi-agent-runtime", "SKILL.md"),
+      path.join(codexHomeTmp, "skills", "gojaja-runtime", "SKILL.md"),
       "utf8",
     );
     const openai = await fsp.readFile(
-      path.join(codexHomeTmp, "skills", "multi-agent-runtime", "agents", "openai.yaml"),
+      path.join(codexHomeTmp, "skills", "gojaja-runtime", "agents", "openai.yaml"),
       "utf8",
     );
-    expect(skill).toContain("multi-agent-runtime");
-    expect(skill).toContain("agentctl plan");
+    expect(skill).toContain("gojaja-runtime");
+    expect(skill).toContain("gojaja plan");
     expect(openai).toContain("display_name");
   });
 
@@ -203,11 +203,11 @@ describe("writeArtifactFile", () => {
     const a = buildRuntime("cursor", ctx.root);
     for (const f of a.files) await writeArtifactFile(f);
     const content = await fsp.readFile(
-      path.join(ctx.root, ".cursor", "rules", "multi-agent-runtime.mdc"),
+      path.join(ctx.root, ".cursor", "rules", "gojaja-runtime.mdc"),
       "utf8",
     );
     expect(content).toContain("alwaysApply: true");
-    expect(content).toContain("agentctl plan");
+    expect(content).toContain("gojaja plan");
   });
 
   it("claude --write upserts a marker block; idempotent on re-run", async () => {

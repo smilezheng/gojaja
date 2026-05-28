@@ -5,7 +5,7 @@ Cross-references: [DESIGN](./DESIGN.md), [PROTOCOL](./PROTOCOL.md),
 RFC lifecycle).
 
 [PROTOCOL.md](./PROTOCOL.md) is the **mechanism** layer: it tells the
-agent how to talk to `agentctl` (which command, what arguments, what
+agent how to talk to `gojaja` (which command, what arguments, what
 events that produces). This document is the **policy** layer: it tells
 the agent **when** to choose which tool.
 
@@ -13,9 +13,9 @@ The canonical text is exported from
 [`src/cli/prompts/handbook.ts`](../src/cli/prompts/handbook.ts) as the
 `COLLABORATION_HANDBOOK` constant, and is injected by default into
 every host's persistent prompt area (`.cursor/rules/`,
-`~/.codex/skills/multi-agent-runtime/SKILL.md`,
+`~/.codex/skills/gojaja-runtime/SKILL.md`,
 `<project>/CLAUDE.md` marker block). Opt out per-call with
-`agentctl prompt … --no-handbook`.
+`gojaja prompt … --no-handbook`.
 
 Role-neutrality is enforced at CI: `tests/handbook.test.ts` scans the
 handbook for any `<Capital> should|must|will|may|...` pattern that
@@ -83,7 +83,7 @@ In scope:
   Operational events (sessions, locks, RFC repairs) and irrelevant
   RFC discussion / task transitions are hidden so the agent's
   per-turn attention stays on its own slice. The full audit log is
-  always in `.multi-agent/comms/events/`.
+  always in `.gojaja/comms/events/`.
 
 Out of scope:
 

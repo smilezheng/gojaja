@@ -57,7 +57,7 @@ function args(flags: Record<string, string | boolean>): ParsedArgs {
 }
 
 async function initLayer(projectRoot: string): Promise<void> {
-  const layerRoot = path.join(projectRoot, ".multi-agent");
+  const layerRoot = path.join(projectRoot, ".gojaja");
   const store = new LocalFsStore(layerRoot, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   await store.createRole({ id: "PM", title: "PM" });
@@ -66,7 +66,7 @@ async function initLayer(projectRoot: string): Promise<void> {
 async function writeCursorRule(projectRoot: string, content = "managed rule"): Promise<void> {
   const dir = path.join(projectRoot, ".cursor", "rules");
   await fsp.mkdir(dir, { recursive: true });
-  await fsp.writeFile(path.join(dir, "multi-agent-runtime.mdc"), content);
+  await fsp.writeFile(path.join(dir, "gojaja-runtime.mdc"), content);
 }
 
 async function writeClaudeWithBlock(projectRoot: string, surrounding: string = ""): Promise<string> {
@@ -79,29 +79,29 @@ async function writeClaudeWithBlock(projectRoot: string, surrounding: string = "
   return text;
 }
 
-describe("agentctl reset", () => {
+describe("gojaja reset", () => {
   let savedSession: string | undefined;
   let cap: ReturnType<typeof capture>;
   beforeEach(() => {
-    savedSession = process.env.MA_SESSION;
-    delete process.env.MA_SESSION;
+    savedSession = process.env.GOJAJA_SESSION;
+    delete process.env.GOJAJA_SESSION;
     cap = capture();
   });
   afterEach(() => {
     cap.release();
-    if (savedSession === undefined) delete process.env.MA_SESSION;
-    else process.env.MA_SESSION = savedSession;
+    if (savedSession === undefined) delete process.env.GOJAJA_SESSION;
+    else process.env.GOJAJA_SESSION = savedSession;
   });
 
-  it("refuses when MA_SESSION is set", async () => {
+  it("refuses when GOJAJA_SESSION is set", async () => {
     const { projectRoot } = await freshProject();
-    process.env.MA_SESSION = "01HZSESSION";
+    process.env.GOJAJA_SESSION = "01HZSESSION";
     try {
       await expect(runReset(args({ root: projectRoot }))).rejects.toMatchObject({
         code: "USAGE",
       });
     } finally {
-      delete process.env.MA_SESSION;
+      delete process.env.GOJAJA_SESSION;
       await fsp.rm(projectRoot, { recursive: true, force: true });
     }
   });
@@ -125,12 +125,12 @@ describe("agentctl reset", () => {
       const code = await runReset(args({ root: projectRoot }));
       expect(code).toBe(0);
       expect(cap.stdout).toContain("Reset preview");
-      expect(cap.stdout).toContain(".multi-agent");
-      expect(cap.stdout).toContain("multi-agent-runtime.mdc");
-      expect(cap.stdout).toContain(`agentctl reset --confirm ${basename}`);
+      expect(cap.stdout).toContain(".gojaja");
+      expect(cap.stdout).toContain("gojaja-runtime.mdc");
+      expect(cap.stdout).toContain(`gojaja reset --confirm ${basename}`);
       // Still on disk.
-      expect(await exists(path.join(projectRoot, ".multi-agent"))).toBe(true);
-      expect(await exists(path.join(projectRoot, ".cursor/rules/multi-agent-runtime.mdc"))).toBe(true);
+      expect(await exists(path.join(projectRoot, ".gojaja"))).toBe(true);
+      expect(await exists(path.join(projectRoot, ".cursor/rules/gojaja-runtime.mdc"))).toBe(true);
     } finally {
       await fsp.rm(projectRoot, { recursive: true, force: true });
     }
@@ -143,7 +143,7 @@ describe("agentctl reset", () => {
       const code = await runReset(args({ root: projectRoot, confirm: basename, "dry-run": true }));
       expect(code).toBe(0);
       expect(cap.stdout).toContain("Dry-run: nothing was removed.");
-      expect(await exists(path.join(projectRoot, ".multi-agent"))).toBe(true);
+      expect(await exists(path.join(projectRoot, ".gojaja"))).toBe(true);
     } finally {
       await fsp.rm(projectRoot, { recursive: true, force: true });
     }
@@ -156,21 +156,21 @@ describe("agentctl reset", () => {
       await expect(
         runReset(args({ root: projectRoot, confirm: "totally-wrong" })),
       ).rejects.toMatchObject({ code: "USAGE" });
-      expect(await exists(path.join(projectRoot, ".multi-agent"))).toBe(true);
+      expect(await exists(path.join(projectRoot, ".gojaja"))).toBe(true);
     } finally {
       await fsp.rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it("full reset removes .multi-agent/ and the Cursor rule (+ empty parent dirs)", async () => {
+  it("full reset removes .gojaja/ and the Cursor rule (+ empty parent dirs)", async () => {
     const { projectRoot, basename } = await freshProject();
     try {
       await initLayer(projectRoot);
       await writeCursorRule(projectRoot);
       const code = await runReset(args({ root: projectRoot, confirm: basename }));
       expect(code).toBe(0);
-      expect(await exists(path.join(projectRoot, ".multi-agent"))).toBe(false);
-      expect(await exists(path.join(projectRoot, ".cursor/rules/multi-agent-runtime.mdc"))).toBe(false);
+      expect(await exists(path.join(projectRoot, ".gojaja"))).toBe(false);
+      expect(await exists(path.join(projectRoot, ".cursor/rules/gojaja-runtime.mdc"))).toBe(false);
       // Empty .cursor/rules/ and .cursor/ also cleaned.
       expect(await exists(path.join(projectRoot, ".cursor/rules"))).toBe(false);
       expect(await exists(path.join(projectRoot, ".cursor"))).toBe(false);
@@ -212,7 +212,7 @@ describe("agentctl reset", () => {
   it("--purge-codex-skill removes ~/.codex skill when present (via CODEX_HOME override)", async () => {
     const { projectRoot, basename } = await freshProject();
     const fakeHome = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-reset-codex-"));
-    const skillDir = path.join(fakeHome, "skills", "multi-agent-runtime");
+    const skillDir = path.join(fakeHome, "skills", "gojaja-runtime");
     await fsp.mkdir(skillDir, { recursive: true });
     await fsp.writeFile(path.join(skillDir, "SKILL.md"), "managed");
     const savedCodex = process.env.CODEX_HOME;
@@ -237,7 +237,7 @@ describe("agentctl reset", () => {
   it("without --purge-codex-skill leaves the Codex skill untouched", async () => {
     const { projectRoot, basename } = await freshProject();
     const fakeHome = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-reset-codex-"));
-    const skillDir = path.join(fakeHome, "skills", "multi-agent-runtime");
+    const skillDir = path.join(fakeHome, "skills", "gojaja-runtime");
     await fsp.mkdir(skillDir, { recursive: true });
     await fsp.writeFile(path.join(skillDir, "SKILL.md"), "managed");
     const savedCodex = process.env.CODEX_HOME;

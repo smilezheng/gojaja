@@ -8,7 +8,7 @@ import type { ParsedArgs } from "../src/cli/argv";
 
 async function freshProject(opts: { fillRoleDescription?: boolean } = {}) {
   const projectRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-activate-"));
-  const root = path.join(projectRoot, ".multi-agent");
+  const root = path.join(projectRoot, ".gojaja");
   const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   await store.createRole({
@@ -48,7 +48,7 @@ function args(role: string, flags: Record<string, string | boolean>): ParsedArgs
   return { command: "activate", positional: [role], flags };
 }
 
-describe("agentctl activate", () => {
+describe("gojaja activate", () => {
   let ctx: { projectRoot: string; root: string; store: LocalFsStore };
   afterEach(async () => {
     if (ctx) await fsp.rm(ctx.projectRoot, { recursive: true, force: true });
@@ -83,10 +83,10 @@ describe("agentctl activate", () => {
       expect(begin).toBeGreaterThan(-1);
       expect(end).toBeGreaterThan(begin);
       // Snippet teaches the agent the right next steps.
-      expect(cap.stdout).toContain("agentctl role show PM");
-      expect(cap.stdout).toContain("agentctl -h");
+      expect(cap.stdout).toContain("gojaja role show PM");
+      expect(cap.stdout).toContain("gojaja -h");
       // Uses --eval form so the agent doesn't forget to export.
-      expect(cap.stdout).toContain('eval "$(agentctl claim PM --eval)"');
+      expect(cap.stdout).toContain('eval "$(gojaja claim PM --eval)"');
     } finally {
       cap.release();
     }

@@ -19,7 +19,7 @@ import type { Store } from "../../core/store";
 /**
  * Default deadline when neither `--until` nor `--in` is supplied. Mirrors
  * the pre-PR8i `--idle 10` block-mode default so handbook muscle memory
- * keeps working: bare `agentctl wait` still buys ~10 minutes of patience
+ * keeps working: bare `gojaja wait` still buys ~10 minutes of patience
  * for new attention.
  */
 const DEFAULT_WAIT_MS = 10 * 60 * 1000;
@@ -47,8 +47,8 @@ function rejectRemovedFlags(args: ParsedArgs): void {
   for (const name of removed) {
     if (args.flags[name] !== undefined) {
       throw new UsageError(
-        `--${name} was removed in PR8i. Use \`agentctl wait --in <duration>\` ` +
-          `or \`--until <ISO>\` instead; see \`agentctl wait -h\`.`,
+        `--${name} was removed in PR8i. Use \`gojaja wait --in <duration>\` ` +
+          `or \`--until <ISO>\` instead; see \`gojaja wait -h\`.`,
       );
     }
   }
@@ -255,14 +255,14 @@ function emit(
       process.stdout.write(
         `ATTENTION role=${ctx.role} newEvents=${extra.newEventCount ?? 0} ` +
           `deadline=${ctx.deadlineIso}\n` +
-          `Next: agentctl plan\n`,
+          `Next: gojaja plan\n`,
       );
       return 0;
     case "condition_met":
       process.stdout.write(
         `CONDITION_MET condition=${formatConditionToken(ctx.cond)} ` +
           `role=${ctx.role}\n` +
-          `Next: agentctl plan\n`,
+          `Next: gojaja plan\n`,
       );
       return 0;
     case "resume": {
@@ -273,7 +273,7 @@ function emit(
       process.stdout.write(
         `RESUME deadline=${ctx.deadlineIso} ` +
           `chunkSleptMs=${extra.chunkSleptMs ?? 0}\n` +
-          `Next: agentctl wait --until ${ctx.deadlineIso}${forSuffix}\n`,
+          `Next: gojaja wait --until ${ctx.deadlineIso}${forSuffix}\n`,
       );
       return 0;
     }
@@ -309,8 +309,8 @@ export async function runWait(args: ParsedArgs): Promise<number> {
     throw new UsageError(
       `Role '${role}' has an outstanding manifest awaiting ack ` +
         `(token ${cursorState.pendingManifest}). ` +
-        `Run 'agentctl ack --token ${cursorState.pendingManifest}' first; ` +
-        `then 'agentctl wait'.`,
+        `Run 'gojaja ack --token ${cursorState.pendingManifest}' first; ` +
+        `then 'gojaja wait'.`,
     );
   }
 

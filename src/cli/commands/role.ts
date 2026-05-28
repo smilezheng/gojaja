@@ -34,13 +34,13 @@ export async function roleMarkdownHasTbd(store: Store, role: RoleId): Promise<bo
 }
 
 async function runRoleCreate(args: ParsedArgs): Promise<number> {
-  // `agentctl role create <id> [<title>]` — title is also accepted as the
+  // `gojaja role create <id> [<title>]` — title is also accepted as the
   // second positional argument for ergonomics, since most users will spell
   // it out at the same time as the id.
   const id = args.positional[1];
   if (!id) {
     throw new UsageError(
-      "Usage: agentctl role create <id> [<title>] [--description <text>] [--owns <a,b>] [--reports-to <r1,r2>] [--must-not-edit <a,b>]",
+      "Usage: gojaja role create <id> [<title>] [--description <text>] [--owns <a,b>] [--reports-to <r1,r2>] [--must-not-edit <a,b>]",
     );
   }
   const title =
@@ -69,7 +69,7 @@ async function runRoleCreate(args: ParsedArgs): Promise<number> {
   // questions back to the user. Surface this in both JSON and human
   // output so installer scripts and humans both notice.
   const needsFill = await roleMarkdownHasTbd(store, id);
-  const rolePath = `.multi-agent/roles/${id}.md`;
+  const rolePath = `.gojaja/roles/${id}.md`;
 
   if (json) {
     process.stdout.write(
@@ -83,9 +83,9 @@ async function runRoleCreate(args: ParsedArgs): Promise<number> {
   } else {
     process.stdout.write(
       `Created role '${id}' (${roleConfig.title}).\n` +
-        `Edit '.multi-agent/config.yaml' under 'roles.${id}' to set owns / reportsTo / mustNotEdit.\n` +
-        `Next step: 'agentctl prompt --target <codex|claude|cursor|generic> --write' to install the runtime, ` +
-        `then 'agentctl activate ${id} --target <host>' for each agent window.\n`,
+        `Edit '.gojaja/config.yaml' under 'roles.${id}' to set owns / reportsTo / mustNotEdit.\n` +
+        `Next step: 'gojaja prompt --target <codex|claude|cursor|generic> --write' to install the runtime, ` +
+        `then 'gojaja activate ${id} --target <host>' for each agent window.\n`,
     );
     if (needsFill) {
       // Hard-printed so a user who skims past the line above still sees
@@ -95,7 +95,7 @@ async function runRoleCreate(args: ParsedArgs): Promise<number> {
       process.stdout.write(
         `\nTODO: open ${rolePath} and fill in the TBD sections\n` +
           `      (Role description and Responsibilities). Without these,\n` +
-          `      the agent runs with only its id and title, and 'agentctl\n` +
+          `      the agent runs with only its id and title, and 'gojaja\n` +
           `      activate ${id} ...' will refuse to issue an activation\n` +
           `      snippet until they are filled in.\n`,
       );
@@ -129,7 +129,7 @@ async function runRoleList(args: ParsedArgs): Promise<number> {
   }
   if (ids.length === 0) {
     process.stdout.write(
-      "No roles configured. Create one with: agentctl role create <id> <title>\n",
+      "No roles configured. Create one with: gojaja role create <id> <title>\n",
     );
     return 0;
   }
@@ -144,7 +144,7 @@ async function runRoleList(args: ParsedArgs): Promise<number> {
 async function runRoleShow(args: ParsedArgs): Promise<number> {
   const id = args.positional[1];
   if (!id) {
-    throw new UsageError("Usage: agentctl role show <id>");
+    throw new UsageError("Usage: gojaja role show <id>");
   }
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
@@ -187,20 +187,20 @@ async function runRoleDelete(args: ParsedArgs): Promise<number> {
   const id = args.positional[1];
   if (!id) {
     throw new UsageError(
-      "Usage: agentctl role delete <id>\n" +
-        "  Project-governance operation; must be run from a shell with no MA_SESSION exported.",
+      "Usage: gojaja role delete <id>\n" +
+        "  Project-governance operation; must be run from a shell with no GOJAJA_SESSION exported.",
     );
   }
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
   // role delete is restricted to SYSTEM at the store layer; we don't
-  // call resolveIdentity / resolveActor here because MA_SESSION must be
+  // call resolveIdentity / resolveActor here because GOJAJA_SESSION must be
   // unset for this to succeed and we want a clear error path if not.
-  if (typeof process.env.MA_SESSION === "string" && process.env.MA_SESSION.length > 0) {
+  if (typeof process.env.GOJAJA_SESSION === "string" && process.env.GOJAJA_SESSION.length > 0) {
     throw new UsageError(
-      "`role delete` must be run from a shell with no MA_SESSION exported. " +
-        "Run `unset MA_SESSION` (or open a fresh shell) and try again.",
+      "`role delete` must be run from a shell with no GOJAJA_SESSION exported. " +
+        "Run `unset GOJAJA_SESSION` (or open a fresh shell) and try again.",
     );
   }
   const { role, removedSessions } = await store.deleteRole({ id, actor: "SYSTEM" });
@@ -215,15 +215,15 @@ async function runRoleDelete(args: ParsedArgs): Promise<number> {
   if (removedSessions > 0) {
     process.stdout.write(
       `Invalidated 1 live session for '${role}'. Any agent window that still has\n` +
-        `MA_SESSION exported for this role will hit a USAGE "session not found" error\n` +
-        `on its next authenticated command — that window should \`unset MA_SESSION\`\n` +
+        `GOJAJA_SESSION exported for this role will hit a USAGE "session not found" error\n` +
+        `on its next authenticated command — that window should \`unset GOJAJA_SESSION\`\n` +
         `or claim a new role.\n`,
     );
   }
   process.stdout.write(
     `Open task assignments owned by '${role}' (if any) are left in place.\n` +
       `Recreating a role with the same id reinherits them, or use\n` +
-      `  agentctl task assign <task-id> --to <other-role>\n` +
+      `  gojaja task assign <task-id> --to <other-role>\n` +
       `to move them.\n`,
   );
   return 0;
@@ -242,11 +242,11 @@ export async function runRole(args: ParsedArgs): Promise<number> {
       return runRoleDelete(args);
     default:
       throw new UsageError(
-        "Usage: agentctl role <create|list|show|delete> [args]\n" +
-          "  agentctl role create <id> [<title>] [--description <text>] [--owns <a,b>] [--reports-to <r1,r2>] [--must-not-edit <a,b>]\n" +
-          "  agentctl role list\n" +
-          "  agentctl role show <id>\n" +
-          "  agentctl role delete <id>",
+        "Usage: gojaja role <create|list|show|delete> [args]\n" +
+          "  gojaja role create <id> [<title>] [--description <text>] [--owns <a,b>] [--reports-to <r1,r2>] [--must-not-edit <a,b>]\n" +
+          "  gojaja role list\n" +
+          "  gojaja role show <id>\n" +
+          "  gojaja role delete <id>",
       );
   }
 }

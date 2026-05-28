@@ -24,7 +24,7 @@ export async function runVersion(args: ParsedArgs): Promise<number> {
       JSON.stringify({ cli: cliVersion, schema: schemaVersion }) + "\n",
     );
   } else {
-    process.stdout.write(`agentctl ${cliVersion}\n`);
+    process.stdout.write(`gojaja ${cliVersion}\n`);
     if (schemaVersion) {
       process.stdout.write(`schema   ${schemaVersion}\n`);
     } else {

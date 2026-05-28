@@ -202,7 +202,7 @@ async function tryBreakStale(
     // Someone else successfully claimed the lock between our move-aside
     // and this restore. Leave `aside` as forensic evidence; never
     // delete a record that may correspond to a now-stale-but-once-live
-    // owner. Operators / `agentctl doctor` (planned) will reconcile.
+    // owner. Operators / `gojaja doctor` (planned) will reconcile.
   }
   return false;
 }

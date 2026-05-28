@@ -14,7 +14,7 @@ import type { RoleConfig, RoleId } from "./types";
  *   2. The startup checklist references real commands (plan / ack / wait).
  *      It is short on purpose: the deep protocol lives in
  *      `docs/PROTOCOL.md`, and the live identity/state lives in the
- *      manifest returned by `agentctl plan`.
+ *      manifest returned by `gojaja plan`.
  */
 export function renderRoleMarkdown(input: { id: RoleId } & RoleConfig): string {
   const { id, title, description } = input;
@@ -42,10 +42,10 @@ export function renderRoleMarkdown(input: { id: RoleId } & RoleConfig): string {
     "",
     "## Startup checklist (every turn)",
     "",
-    "1. `agentctl plan` — fetch your manifest of unread events and assigned work.",
+    "1. `gojaja plan` — fetch your manifest of unread events and assigned work.",
     "2. Process each item.",
-    "3. `agentctl ack --token <t>` — confirm what you saw.",
-    "4. `agentctl wait` — keep the window alive without burning tokens.",
+    "3. `gojaja ack --token <t>` — confirm what you saw.",
+    "4. `gojaja wait` — keep the window alive without burning tokens.",
     "",
     "See [docs/PROTOCOL.md](../../docs/PROTOCOL.md) for the wire-level contract.",
     "",

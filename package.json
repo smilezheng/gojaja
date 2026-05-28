@@ -1,11 +1,11 @@
 {
-  "name": "multi-agent-coordination",
-  "version": "2.0.0-alpha.21",
-  "description": "Agent-agnostic file-system coordination layer for multi-LLM-agent collaboration (Codex, Claude Code, Cursor, ...).",
+  "name": "gojaja",
+  "version": "2.0.0-alpha.22",
+  "description": "gojaja (过家家) — file-system coordination layer for multi-LLM-agent collaboration (Codex, Claude Code, Cursor, ...). Let your agents play house on a shared codebase.",
   "keywords": [
+    "gojaja",
     "multi-agent",
     "agent-coordination",
-    "agentctl",
     "llm",
     "llm-agents",
     "codex",
@@ -15,13 +15,13 @@
     "task-board",
     "cli"
   ],
-  "homepage": "https://github.com/smilezheng/multi-agent-coordination#readme",
+  "homepage": "https://github.com/smilezheng/gojaja#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/smilezheng/multi-agent-coordination.git"
+    "url": "git+https://github.com/smilezheng/gojaja.git"
   },
   "bugs": {
-    "url": "https://github.com/smilezheng/multi-agent-coordination/issues"
+    "url": "https://github.com/smilezheng/gojaja/issues"
   },
   "author": {
     "name": "smilezheng",
@@ -29,9 +29,7 @@
   },
   "license": "MIT",
   "bin": {
-    "agentctl": "bin/agentctl",
-    "multi-agent": "bin/agentctl",
-    "multi-agent-coordination": "bin/agentctl"
+    "gojaja": "bin/gojaja"
   },
   "files": [
     "bin/",

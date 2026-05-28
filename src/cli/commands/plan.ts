@@ -4,10 +4,10 @@ import { resolveIdentity } from "../identity";
 
 export async function runPlan(args: ParsedArgs): Promise<number> {
   const explicitRole = args.positional[0];
-  // JSON output is the agent-facing default. Humans running `agentctl
+  // JSON output is the agent-facing default. Humans running `gojaja
   // plan` interactively get the text rendering; everything piped, redirected
   // or invoked from a child_process gets JSON automatically. Without this
-  // an agent that simply runs `agentctl plan` ends up parsing the human
+  // an agent that simply runs `gojaja plan` ends up parsing the human
   // text and missing manifest.tasks / manifest.rfcs, which the runtime
   // contract (PROTOCOL.md, runtime body) promises will always be there.
   const json = boolFlag(args.flags, "json") || !process.stdout.isTTY;
@@ -59,7 +59,7 @@ export async function runPlan(args: ParsedArgs): Promise<number> {
   }
 
   process.stdout.write(
-    `\nWhen done processing, run:\n  agentctl ack ${role} --token ${manifest.ackToken}\n`,
+    `\nWhen done processing, run:\n  gojaja ack ${role} --token ${manifest.ackToken}\n`,
   );
   return 0;
 }

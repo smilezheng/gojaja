@@ -61,12 +61,12 @@ Each RFC partitions the project's roles at **creation time**:
 
 | Bucket          | Set by                                                  | What they can do                                                                                  |
 |-----------------|---------------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| **creator**     | implicit (`MA_SESSION` role, or `SYSTEM`)               | call `rfc new`; rewrite via `rfc edit` while `revising`.                                          |
+| **creator**     | implicit (`GOJAJA_SESSION` role, or `SYSTEM`)               | call `rfc new`; rewrite via `rfc edit` while `revising`.                                          |
 | **voters**      | `--voters X,Y` (optional, may be empty)                 | should comment; **must `ack` or `object` whenever there is an active pre-decision** (see §3).     |
 | **deciders**    | `--deciders Z` (required, non-empty)                    | the **only** roles that can call `rfc pre-decide` / `rfc decide` / `rfc reject` / `rfc revise`. **Must also `ack` or `object` when another decider pre-decides** (see §3). |
 
 Roles in none of these buckets do not see the RFC in their manifest.
-They can still inspect with `agentctl rfc show <id>` (reads are
+They can still inspect with `gojaja rfc show <id>` (reads are
 unrestricted) but it does not draw their attention.
 
 Decider scope is **per-RFC**, set at `rfc new` time. There is no
@@ -84,18 +84,18 @@ role in `(voters ∪ deciders) − {pre-decider}` becomes a required
 responder. Each must run one of:
 
 ```bash
-agentctl rfc ack <rfc-id>                                  # I agree
-agentctl rfc object <rfc-id> --rationale "..." [--option Y] # I disagree
+gojaja rfc ack <rfc-id>                                  # I agree
+gojaja rfc object <rfc-id> --rationale "..." [--option Y] # I disagree
 ```
 
-before `agentctl rfc decide` will succeed. The gate is enforced inside
+before `gojaja rfc decide` will succeed. The gate is enforced inside
 `decideRfc`:
 
 > RFC RFC-0001 has an active pre-decision (option 'C' by TL);
-> waiting for ACK from: DevOps, PM. Each role must run `agentctl rfc
-> ack RFC-0001` or `agentctl rfc object RFC-0001 --rationale ...`
+> waiting for ACK from: DevOps, PM. Each role must run `gojaja rfc
+> ack RFC-0001` or `gojaja rfc object RFC-0001 --rationale ...`
 > before this RFC can be decided. There is no override; if a role is
-> unreachable, run `agentctl rfc reject RFC-0001 --rationale ...`
+> unreachable, run `gojaja rfc reject RFC-0001 --rationale ...`
 > and open a new RFC without that role in voters/deciders.
 
 **No silence = consent.** Silence (or only regular `rfc comment`
@@ -156,7 +156,7 @@ The framework does NOT auto-expire open RFCs. `deadline` is decorative.
 ## 5. On-disk layout
 
 ```
-.multi-agent/
+.gojaja/
   config.yaml                                       # rfcCounter: N
   rfcs/RFC-NNNN-<slug>/
     proposal.yaml                                   # carries status, description, relatedTasks
@@ -255,13 +255,13 @@ Event types (all broadcast `to: "*"`):
 
 | Event                          | Triggered by                                                                                          |
 |--------------------------------|-------------------------------------------------------------------------------------------------------|
-| `RFC_CREATED`                  | `agentctl rfc new`                                                                                    |
-| `RFC_COMMENT`                  | `agentctl rfc comment` / `ack` / `object` / `pre-decide` (payload carries `kind`)                     |
-| `RFC_OPTION_ADDED`             | `agentctl rfc add-option` — also implicitly invalidates any pending pre-decision                      |
-| `RFC_REVISION_REQUESTED`       | `agentctl rfc revise`                                                                                 |
-| `RFC_REVISED`                  | `agentctl rfc edit`                                                                                   |
-| `RFC_DECIDED`                  | `agentctl rfc decide` / `rfc reject`                                                                  |
-| `RFC_TASK_LINKED` / `RFC_TASK_UNLINKED` | `agentctl rfc link-task` / `unlink-task`                                                     |
+| `RFC_CREATED`                  | `gojaja rfc new`                                                                                    |
+| `RFC_COMMENT`                  | `gojaja rfc comment` / `ack` / `object` / `pre-decide` (payload carries `kind`)                     |
+| `RFC_OPTION_ADDED`             | `gojaja rfc add-option` — also implicitly invalidates any pending pre-decision                      |
+| `RFC_REVISION_REQUESTED`       | `gojaja rfc revise`                                                                                 |
+| `RFC_REVISED`                  | `gojaja rfc edit`                                                                                   |
+| `RFC_DECIDED`                  | `gojaja rfc decide` / `rfc reject`                                                                  |
+| `RFC_TASK_LINKED` / `RFC_TASK_UNLINKED` | `gojaja rfc link-task` / `unlink-task`                                                     |
 | `RFC_REPAIRED`                 | self-heal when a half-written decide is detected on read (PR8c)                                       |
 
 PR8g had `RFC_PRE_DECISION` and `RFC_PRE_DECISION_OBJECTED`; PR8g.1
@@ -271,7 +271,7 @@ collapsed both into `RFC_COMMENT` with `payload.kind`.
 
 ## 6. Command reference
 
-All commands need `MA_SESSION` exported.
+All commands need `GOJAJA_SESSION` exported.
 
 | Command                                                                                                | Who                                | Notes                                                                                       |
 |--------------------------------------------------------------------------------------------------------|------------------------------------|---------------------------------------------------------------------------------------------|
@@ -296,7 +296,7 @@ ACK gate refusals.
 
 ---
 
-## 7. What appears in `agentctl plan`
+## 7. What appears in `gojaja plan`
 
 `plan` returns `manifest.rfcs: RfcSummary[]` per role. The rules
 (PR8g.1):
@@ -335,8 +335,8 @@ Each entry shape (PR8g.1):
 }
 ```
 
-`agentctl rfc comment` and `rfc ack` / `rfc object` automatically
-advance the commenter's read cursor. `agentctl rfc show` advances it
+`gojaja rfc comment` and `rfc ack` / `rfc object` automatically
+advance the commenter's read cursor. `gojaja rfc show` advances it
 explicitly (unless `--no-mark-seen`).
 
 ---
@@ -346,10 +346,10 @@ explicitly (unless `--no-mark-seen`).
 Four roles:
 
 ```bash
-agentctl role create PM       "Product Manager"   --owns "state/project_state.md,state/task_board.yaml"
-agentctl role create TL       "Tech Lead"         --owns "state/architecture.md"  --reports-to PM
-agentctl role create Backend  "Backend Engineer"  --owns "src/api/,src/db/"        --reports-to TL,PM
-agentctl role create DevOps   "DevOps"            --owns "infra/"                  --reports-to TL
+gojaja role create PM       "Product Manager"   --owns "state/project_state.md,state/task_board.yaml"
+gojaja role create TL       "Tech Lead"         --owns "state/architecture.md"  --reports-to PM
+gojaja role create Backend  "Backend Engineer"  --owns "src/api/,src/db/"        --reports-to TL,PM
+gojaja role create DevOps   "DevOps"            --owns "infra/"                  --reports-to TL
 ```
 
 PM has assigned task `T-0042 Improve login latency` to Backend. Backend
@@ -359,7 +359,7 @@ fix is migrating to Postgres.
 ### Turn 1 — Backend opens the RFC
 
 ```bash
-$ agentctl rfc new switch-to-postgres \
+$ gojaja rfc new switch-to-postgres \
     --title       "Move primary store from SQLite to Postgres" \
     --description "Login latency root-caused to SQLite contention; A is the migration, B is a tuning band-aid." \
     --options     "A:Migrate now (4 weeks),B:WAL tuning first" \
@@ -373,9 +373,9 @@ Created RFC-0001 (open): Move primary store from SQLite to Postgres
   options:       A, B
   relatedTasks:  T-0042
 
-$ agentctl task status T-0042 Blocked
-$ agentctl ack --token <plan-token>
-$ agentctl wait
+$ gojaja task status T-0042 Blocked
+$ gojaja ack --token <plan-token>
+$ gojaja wait
 ```
 
 ### Turn 2 — Discussion (regular comments + add-option)
@@ -383,16 +383,16 @@ $ agentctl wait
 DevOps leaves an early discussion comment:
 
 ```bash
-$ agentctl rfc show RFC-0001        # advances read cursor
-$ agentctl task show T-0042
-$ agentctl rfc comment RFC-0001 --option A \
+$ gojaja rfc show RFC-0001        # advances read cursor
+$ gojaja task show T-0042
+$ gojaja rfc comment RFC-0001 --option A \
     --rationale "Postgres already in staging; migration is straightforward."
 ```
 
 PM replies under DevOps's comment:
 
 ```bash
-$ agentctl rfc comment RFC-0001 \
+$ gojaja rfc comment RFC-0001 \
     --reply-to 01HZA000000000000000COMM1 \
     --rationale "Can M2 slip 2 weeks if needed?"
 ```
@@ -401,7 +401,7 @@ Backend realises neither A nor B captures "managed Postgres" and adds
 option C:
 
 ```bash
-$ agentctl rfc add-option RFC-0001 \
+$ gojaja rfc add-option RFC-0001 \
     --option "C:Managed Postgres on RDS with phased cutover" \
     --rationale "A is too binary; this carves out the operational angle."
 ```
@@ -411,22 +411,22 @@ $ agentctl rfc add-option RFC-0001 \
 TL reads the full picture and posts a pre-decision:
 
 ```bash
-$ agentctl rfc show RFC-0001        # advances TL's read cursor
-$ agentctl rfc pre-decide RFC-0001 --option C \
+$ gojaja rfc show RFC-0001        # advances TL's read cursor
+$ gojaja rfc pre-decide RFC-0001 --option C \
     --rationale "Lean C; this captures DevOps's operational concern."
 Posted pre-decision on RFC-0001 as option 'C' by TL (comment 01HZA...COMM5).
 
 Required ACK from: DevOps, PM.
-Each role must run `agentctl rfc ack RFC-0001` or `agentctl rfc object RFC-0001 --rationale ...`
-before `agentctl rfc decide RFC-0001 --option C --rationale ...` will succeed.
+Each role must run `gojaja rfc ack RFC-0001` or `gojaja rfc object RFC-0001 --rationale ...`
+before `gojaja rfc decide RFC-0001 --option C --rationale ...` will succeed.
 Silence does NOT count as consent. The only escape from a stalled ACK round is
-`agentctl rfc reject RFC-0001`.
+`gojaja rfc reject RFC-0001`.
 ```
 
 TL tries to decide immediately and is refused:
 
 ```bash
-$ agentctl rfc decide RFC-0001 --option C --rationale "go"
+$ gojaja rfc decide RFC-0001 --option C --rationale "go"
 USAGE: RFC RFC-0001 has an active pre-decision (option 'C' by TL);
 waiting for ACK from: DevOps, PM. ...
 ```
@@ -434,14 +434,14 @@ waiting for ACK from: DevOps, PM. ...
 DevOps acks:
 
 ```bash
-$ agentctl rfc ack RFC-0001
+$ gojaja rfc ack RFC-0001
 Acked the active pre-decision on RFC-0001 as DevOps (comment 01HZA...COMM6).
 ```
 
 PM has a budget concern and objects:
 
 ```bash
-$ agentctl rfc object RFC-0001 \
+$ gojaja rfc object RFC-0001 \
     --rationale "Managed RDS adds ~\$400/mo; not budgeted this quarter."
 Objected to the active pre-decision on RFC-0001 as PM (comment 01HZA...COMM7).
 ```
@@ -452,7 +452,7 @@ PM's objection is in the audit trail; TL reads it and chats with PM via
 report. PM clears the budget concern in a follow-up comment:
 
 ```bash
-$ agentctl rfc comment RFC-0001 \
+$ gojaja rfc comment RFC-0001 \
     --option C \
     --reply-to 01HZA...COMM7 \
     --rationale "Confirmed: $400/mo fits next quarter's budget."
@@ -462,7 +462,7 @@ This regular comment does NOT advance the gate (PM still has an
 outstanding `object` recorded). To clear PM's objection, TL re-pre-decides:
 
 ```bash
-$ agentctl rfc pre-decide RFC-0001 --option C \
+$ gojaja rfc pre-decide RFC-0001 --option C \
     --rationale "Re-issue: PM's budget concern resolved per comment 01HZA...COMM8."
 ```
 
@@ -471,15 +471,15 @@ object. Everyone re-ACKs:
 
 ```bash
 # DevOps
-$ agentctl rfc ack RFC-0001
+$ gojaja rfc ack RFC-0001
 # PM
-$ agentctl rfc ack RFC-0001
+$ gojaja rfc ack RFC-0001
 ```
 
 ### Turn 5 — TL finalises
 
 ```bash
-$ agentctl rfc decide RFC-0001 --option C \
+$ gojaja rfc decide RFC-0001 --option C \
     --rationale "All required roles ACKed second pre-decision."
 Accepted RFC-0001 (option C) by TL.
 ```
@@ -491,10 +491,10 @@ Accepted RFC-0001 (option C) by TL.
 - **Backend** spawns sub-tasks:
 
   ```bash
-  $ agentctl task new --title "Provision Postgres RDS staging"      --owner DevOps  --depends-on T-0042
-  $ agentctl task new --title "Schema migration scripts"            --owner Backend --depends-on T-0042
-  $ agentctl task new --title "Cutover plan and rollback"           --owner Backend --depends-on T-0042
-  $ agentctl task status T-0042 InProgress
+  $ gojaja task new --title "Provision Postgres RDS staging"      --owner DevOps  --depends-on T-0042
+  $ gojaja task new --title "Schema migration scripts"            --owner Backend --depends-on T-0042
+  $ gojaja task new --title "Cutover plan and rollback"           --owner Backend --depends-on T-0042
+  $ gojaja task status T-0042 InProgress
   ```
 
 Audit chain (events, oldest first):
@@ -574,7 +574,7 @@ When the question is "what should we even do about X?" — no concrete
 choices on the table yet — open an RFC **without** `--options`:
 
 ```bash
-agentctl rfc new q3-priorities \
+gojaja rfc new q3-priorities \
   --title "Q3 priorities — what should we be optimising for?" \
   --deciders <leader-role> --voters <r1,r2,r3> \
   --description "..."
@@ -588,19 +588,19 @@ on an options-empty RFC and points at `add-option`).
 Two ways the RFC can close:
 
 1. **Discussion converges on a concrete choice.** Anyone runs
-   `agentctl rfc add-option <id> --option X:summary --rationale "..."`
+   `gojaja rfc add-option <id> --option X:summary --rationale "..."`
    to add it. From that point on, the RFC behaves like a normal
    decision RFC: `rfc decide` requires `--option <X>`, `rfc pre-decide`
    works again, the ACK gate arms when pre-decide is called.
 
 2. **Discussion concludes without a specific choice.** The decider
-   runs `agentctl rfc decide <id> --rationale "<takeaway>"` (no
+   runs `gojaja rfc decide <id> --rationale "<takeaway>"` (no
    `--option`). The decision is `accepted` with `chosenOption: null`;
    the rationale carries the substance of the conclusion (e.g.
    "Q3 stays focused on perf; deferring the auth rewrite to Q4").
 
 A brainstorm RFC that needs to die without consensus runs
-`agentctl rfc reject <id> --rationale "<why>"`. Same as a decision
+`gojaja rfc reject <id> --rationale "<why>"`. Same as a decision
 RFC reject: `chosenOption: null`, `outcome: "rejected"`.
 
 The brainstorm flavour is the same primitive — same on-disk layout,

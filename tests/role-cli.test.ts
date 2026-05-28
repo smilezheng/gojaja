@@ -8,7 +8,7 @@ import type { ParsedArgs } from "../src/cli/argv";
 
 async function freshProject() {
   const projectRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-role-cli-"));
-  const root = path.join(projectRoot, ".multi-agent");
+  const root = path.join(projectRoot, ".gojaja");
   const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   return { projectRoot, root, store };
@@ -32,7 +32,7 @@ function args(positional: string[], flags: Record<string, string | boolean>): Pa
   return { command: "role", positional, flags };
 }
 
-describe("agentctl role (CLI: TBD nags)", () => {
+describe("gojaja role (CLI: TBD nags)", () => {
   let ctx: { projectRoot: string; root: string; store: LocalFsStore };
   beforeEach(async () => { ctx = await freshProject(); });
   afterEach(async () => { await fsp.rm(ctx.projectRoot, { recursive: true, force: true }); });
@@ -67,7 +67,7 @@ describe("agentctl role (CLI: TBD nags)", () => {
       ));
       const parsed = JSON.parse(cap.stdout);
       expect(parsed.needsFill).toBe(true);
-      expect(parsed.rolePath).toBe(".multi-agent/roles/PM.md");
+      expect(parsed.rolePath).toBe(".gojaja/roles/PM.md");
     } finally {
       cap.release();
     }

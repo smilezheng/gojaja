@@ -9,7 +9,7 @@ import type { ParsedArgs } from "../src/cli/argv";
 async function freshProject() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-claim-"));
   const store = new LocalFsStore(
-    path.join(root, ".multi-agent"),
+    path.join(root, ".gojaja"),
     { safetyMarginMs: 0 },
   );
   await store.initialise("2.0.0-test");
@@ -46,7 +46,7 @@ function captureStdio(): Captured {
   return cap;
 }
 
-describe("agentctl claim — role registration gate", () => {
+describe("gojaja claim — role registration gate", () => {
   let ctx: { root: string; store: LocalFsStore };
   beforeEach(async () => { ctx = await freshProject(); });
   afterEach(async () => { await fsp.rm(ctx.root, { recursive: true, force: true }); });
@@ -77,8 +77,8 @@ describe("agentctl claim — role registration gate", () => {
     }
   });
 
-  it("Step 4a: --eval prints exactly one `export MA_SESSION=<ulid>` line suitable for shell eval", async () => {
-    // Output contract: agent runs `eval "$(agentctl claim PM --eval)"`.
+  it("Step 4a: --eval prints exactly one `export GOJAJA_SESSION=<ulid>` line suitable for shell eval", async () => {
+    // Output contract: agent runs `eval "$(gojaja claim PM --eval)"`.
     // Anything other than a single line of `export VAR=value\n` would
     // either fail eval or — worse — get partially interpreted as a
     // chained command. Strict format matters.
@@ -86,7 +86,7 @@ describe("agentctl claim — role registration gate", () => {
     try {
       const code = await runClaim(args("PM", { root: ctx.root, eval: true }));
       expect(code).toBe(0);
-      expect(cap.stdout).toMatch(/^export MA_SESSION=[0-9A-Z]{26}\n$/);
+      expect(cap.stdout).toMatch(/^export GOJAJA_SESSION=[0-9A-Z]{26}\n$/);
       expect(cap.stderr).toBe("");
     } finally {
       cap.release();

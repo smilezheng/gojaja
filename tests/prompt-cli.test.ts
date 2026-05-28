@@ -9,7 +9,7 @@ import type { ParsedArgs } from "../src/cli/argv";
 async function freshProject() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-prompt-cli-"));
   const store = new LocalFsStore(
-    path.join(root, ".multi-agent"),
+    path.join(root, ".gojaja"),
     { safetyMarginMs: 0 },
   );
   await store.initialise("2.0.0-test");
@@ -35,7 +35,7 @@ function args(flags: Record<string, string | boolean>): ParsedArgs {
   return { command: "prompt", positional: [], flags };
 }
 
-describe("agentctl prompt", () => {
+describe("gojaja prompt", () => {
   let ctx: { root: string; store: LocalFsStore };
   beforeEach(async () => { ctx = await freshProject(); });
   afterEach(async () => { await fsp.rm(ctx.root, { recursive: true, force: true }); });

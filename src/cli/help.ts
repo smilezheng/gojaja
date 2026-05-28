@@ -1,36 +1,36 @@
 import { CLI_VERSION } from "./runtime";
 
-export const HELP_TEXT = `agentctl ${CLI_VERSION}
-Multi-agent coordination layer. A filesystem-backed protocol that lets
-multiple LLM agent windows (Cursor / Claude Code / Codex CLI / ...)
-collaborate on the same project without stepping on each other:
+export const HELP_TEXT = `gojaja ${CLI_VERSION} (过家家)
+Filesystem-backed coordination layer for multi-LLM-agent collaboration.
+Let multiple agent windows (Cursor / Claude Code / Codex CLI / ...)
+play house on the same project without stepping on each other:
 durable messaging, a shared task board, ownership-gated state writes,
 and an RFC mechanism for cross-role decisions.
 
 Quickstart (one-time setup, you in your shell):
 
   cd /path/to/your-project
-  agentctl init                                          # creates .multi-agent/
-  agentctl role create PM "Product Manager"  --owns "state/project_state.md,state/task_board.yaml"
-  agentctl role create TL "Tech Lead"        --owns "state/architecture.md"
-  agentctl role create Backend "Backend Engineer"
+  gojaja init                                          # creates .gojaja/
+  gojaja role create PM "Product Manager"  --owns "state/project_state.md,state/task_board.yaml"
+  gojaja role create TL "Tech Lead"        --owns "state/architecture.md"
+  gojaja role create Backend "Backend Engineer"
   # ... then open roles/<id>.md and fill in TBD sections ...
 
-  agentctl prompt --target cursor --write                # repeat per agent host
+  gojaja prompt --target cursor --write                # repeat per agent host
   # IMPORTANT: install before opening any agent window; hosts inject
   # rules into the system prompt only at window-open time.
 
   # For each agent window you want to staff:
-  agentctl activate PM --target cursor                   # auto-copies snippet
+  gojaja activate PM --target cursor                   # auto-copies snippet
   #   → paste into the Cursor window for PM (snippet tells the agent
-  #     to claim the role, read its own contract, and skim agentctl -h)
+  #     to claim the role, read its own contract, and skim gojaja -h)
 
 Usage:
-  agentctl <command> [options]
+  gojaja <command> [options]
 
 Setup (you, in your shell — runs once per project unless noted):
   init [--root <path>]
-      Initialise a .multi-agent/ layer in the current project.
+      Initialise a .gojaja/ layer in the current project.
   role create <id> [<title>] [--description <text>] [--owns <a,b>]
                               [--reports-to <r1,r2>] [--must-not-edit <a,b>]
       Register a role. Writes roles/<id>.md (with TBD sections you must
@@ -52,7 +52,7 @@ Setup (you, in your shell — runs once per project unless noted):
       Print the role's config.yaml entry and the full roles/<id>.md.
       Agents should run this on activation to learn who they are.
   role delete <id>
-      Project-governance op (SYSTEM only — no MA_SESSION in the shell).
+      Project-governance op (SYSTEM only — no GOJAJA_SESSION in the shell).
       Removes the role from config.yaml, deletes roles/<id>.md, and
       invalidates any live session. Open task assignments are left in
       place; recreating the same id reinherits them.
@@ -74,16 +74,16 @@ Setup (you, in your shell — runs once per project unless noted):
 Session lifecycle (per agent window; agent or user runs this):
   claim <role> [--ttl <s>] [--eval] [--force] [--json]
       Acquire a session for <role> in this shell.
-      Tip: 'eval "\$(agentctl claim <role> --eval)"' claims and exports
-      MA_SESSION in a single step.
+      Tip: 'eval "\$(gojaja claim <role> --eval)"' claims and exports
+      GOJAJA_SESSION in a single step.
       --force is for humans only; agents seeing "already claimed by a
       live session" should STOP and ask the user, not retry with --force.
   release [<role>] [--json]
-      Release the current session. After release, run 'unset MA_SESSION'
+      Release the current session. After release, run 'unset GOJAJA_SESSION'
       in the same shell so subsequent commands don't try to authenticate
       with a now-invalid token.
 
-Per-turn loop (agent, requires MA_SESSION):
+Per-turn loop (agent, requires GOJAJA_SESSION):
   plan [<role>] [--json]
       Fetch a manifest of unread events, active tasks, open RFCs, plus
       an ackToken. Defaults to JSON when stdout is not a TTY.
@@ -91,7 +91,7 @@ Per-turn loop (agent, requires MA_SESSION):
       Confirm the manifest you just processed. Cursor advances exactly
       to the snapshot the manifest captured — never further.
 
-Messaging (agent, requires MA_SESSION):
+Messaging (agent, requires GOJAJA_SESSION):
   report --to <role> --message <text> [--ref <id>]
       Directed message to one role. Use for "I need you to act next".
       Refuses unregistered recipient roles.
@@ -115,7 +115,7 @@ Task board (any role that owns state/task_board.yaml):
       --tag is a free-form label. Repeat for multiple tags.
       --asset is a pointer the owner needs to read:
         kind=file -> repo-relative path (must stay inside the repo
-                      and outside .multi-agent/);
+                      and outside .gojaja/);
         kind=url  -> external link (Figma, Notion, ...).
       --deliverable is a HARD output that must exist on Done:
         kind=file   -> repo path, existence-checked on Done;
@@ -161,7 +161,7 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
         needs to weigh in. If empty the CLI prints a soft warning; in
         a future release this will be hard-required.
       --task links one or more existing task ids so voters/deciders
-        can pull context with 'agentctl task show <id>'.
+        can pull context with 'gojaja task show <id>'.
 
   rfc comment <rfc-id> --rationale <text> [--option <opt>]
                        [--reply-to <comment-id>]
@@ -179,7 +179,7 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
   rfc pre-decide <rfc-id> --option <opt> --rationale <text>
       Decider posts a structured pre-decision comment ("I lean X").
       RFC status stays 'open'. Every role in (voters union deciders)
-      except the pre-decider must run 'agentctl rfc ack' or 'rfc
+      except the pre-decider must run 'gojaja rfc ack' or 'rfc
       object' before 'rfc decide' will succeed. Silence does NOT
       count as consent — there is no override; the only escape from
       a stalled ACK round is 'rfc reject'.
@@ -246,7 +246,7 @@ Shared-state editing (ownership-gated; --file must live under state/):
       No regex anywhere; old/new are literal strings.
       All modes are atomic and respect config.yaml's owns / mustNotEdit.
 
-Keepalive (agent, requires MA_SESSION):
+Keepalive (agent, requires GOJAJA_SESSION):
   wait [<role>] [--until <ISO> | --in <duration>]
                 [--for <condition>] [--poll-interval <duration>] [--json]
       Sleeps in chunks until either new attention arrives, the
@@ -281,20 +281,20 @@ Keepalive (agent, requires MA_SESSION):
 Project lifecycle (user, NOT for agents):
   reset [--dry-run] [--confirm <basename>] [--purge-codex-skill]
       Remove everything this tool installed into the project: the
-      .multi-agent/ layer (all events, state, RFCs, worklogs, sessions
-      and locks), .cursor/rules/multi-agent-runtime.mdc, and the
+      .gojaja/ layer (all events, state, RFCs, worklogs, sessions
+      and locks), .cursor/rules/gojaja-runtime.mdc, and the
       managed BEGIN/END block inside CLAUDE.md (preserves the rest of
       the file; deletes it if nothing else was inside).
 
       Default invocation prints a preview and refuses to delete. Pass
       --confirm <basename-of-project-root> to actually delete.
 
-      The Codex skill at ~/.codex/skills/multi-agent-runtime/ is
+      The Codex skill at ~/.codex/skills/gojaja-runtime/ is
       user-level and shared across every project that activated a
       Codex agent; it is NOT touched by default. Pass
       --purge-codex-skill to also remove it.
 
-      Must be run from a shell with no MA_SESSION exported (mirrors
+      Must be run from a shell with no GOJAJA_SESSION exported (mirrors
       role delete; destructive ops belong to the user, not an agent).
 
 Global options:
@@ -308,7 +308,7 @@ Information:
 Exit codes (relevant for scripted callers):
   0  OK
   2  USAGE       — your invocation is wrong; fix arguments and re-run.
-  6  NOT_INIT    — .multi-agent/ not initialised in this project.
+  6  NOT_INIT    — .gojaja/ not initialised in this project.
   9  FORBIDDEN   — permission denied (ownership / deciders gate).
                    Agents: escalate to your reportsTo, do not retry.
  10  STATE_CORRUPTION — on-disk state is malformed; stop and ask the user.

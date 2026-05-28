@@ -14,20 +14,74 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   `reviewers` field, `STATE_UPDATED` event, `dependsOn` cycle
   detection, schema-version compatibility check). `--description`
   becoming hard-required on `rfc new` also lands here. Maybe a
-  read-only `agentctl rfc audit <id>` to surface
+  read-only `gojaja rfc audit <id>` to surface
   "who has acked / objected / not responded yet" without the agent
   having to read `rfc show`.
 - PR8k: org-hierarchy ergonomics. `directReports` reverse field,
   multi-target `report --to`, role-level RFC `decisionScopes`. Goal:
   3+ layer organisations are pleasant rather than noisy. PR8n
   subsumed the original "idle-broadcast retargeting" sub-task.
-- PR8m: gate `agentctl role create` behind ownership of
+- PR8m: gate `gojaja role create` behind ownership of
   `config.yaml`, so an HR/Admin role can be granted role-creation
   authority via the normal ownership model.
 
+## [2.0.0-alpha.22] — 2026-05-28
+
+### Rename — `multi-agent-coordination` → `gojaja` (过家家)
+
+Project, CLI, layer directory, env vars, and host artifacts all
+rename in one sweep. The name 过家家 (gòu-jiā-jiā) is a Chinese
+phrase for kids' role-play games where each kid pretends to be a
+family member — exactly what this tool lets your LLM agents do on
+a shared codebase.
+
+> **Breaking — every existing project must re-init.** No on-disk
+> schema migration is provided; the directory name, env var names,
+> and host artifact names all change. Alpha stage, no users, hard
+> cut.
+
+What renamed:
+
+| Before | After |
+| --- | --- |
+| npm package `multi-agent-coordination` | `gojaja` |
+| CLI binary `agentctl` | `gojaja` |
+| Layer directory `.multi-agent/` | `.gojaja/` |
+| Env var `MA_SESSION` | `GOJAJA_SESSION` |
+| Env var `MA_PROJECT_ROOT` | `GOJAJA_PROJECT_ROOT` |
+| Cursor rule file `multi-agent-runtime.mdc` | `gojaja-runtime.mdc` |
+| Codex skill `~/.codex/skills/multi-agent-runtime/` | `~/.codex/skills/gojaja-runtime/` |
+| Claude marker `<!-- multi-agent-runtime:BEGIN/END -->` | `<!-- gojaja-runtime:BEGIN/END -->` |
+| Error base class `AgentctlError` | `GojajaError` |
+| Repo URL `smilezheng/multi-agent-coordination` | `smilezheng/gojaja` |
+
+What stays:
+
+- Concept terminology — phrases like "a multi-agent collaboration
+  framework" or "multi-agent project" stay; the rename targets the
+  tool's self-identity, not its category.
+- Schema version string `2.0.0-manifest-filter` — on-disk protocol
+  marker, unaffected by branding.
+- Project root directory in this repo (`codex-agent/`) — purely a
+  local working name; not visible to users of the package.
+
+Migration for any project that hand-claimed an alpha:
+
+```bash
+# In an existing project that was on alpha.21 or earlier
+unset MA_SESSION          # old env var no longer recognised
+agentctl reset --confirm <basename>   # if you still have the old CLI
+rm -rf .multi-agent       # if reset is no longer available
+npm install -g gojaja
+gojaja init
+# re-create roles, re-write project_state.md, etc.
+```
+
+Suite 316 -> 316 (mass token rename; no semantic changes).
+
 ## [2.0.0-alpha.21] — 2026-05-28
 
-### `agentctl reset` — project uninstall (PR8o)
+### `gojaja reset` — project uninstall (PR8o)
 
 New command. Removes everything this tool installed into a project so
 you can tear down the coordination layer without hand-deleting files.
@@ -35,23 +89,23 @@ you can tear down the coordination layer without hand-deleting files.
 Surface:
 
 ```
-agentctl reset                                           # preview, no delete
-agentctl reset --dry-run [--confirm <basename>]          # preview, no delete
-agentctl reset --confirm <project-basename>              # delete
-agentctl reset --confirm <project-basename> --purge-codex-skill
+gojaja reset                                           # preview, no delete
+gojaja reset --dry-run [--confirm <basename>]          # preview, no delete
+gojaja reset --confirm <project-basename>              # delete
+gojaja reset --confirm <project-basename> --purge-codex-skill
 ```
 
 What it removes (when present):
 
-- `<project>/.multi-agent/` recursively — events, state, RFCs,
+- `<project>/.gojaja/` recursively — events, state, RFCs,
   worklogs, sessions, locks. Everything this tool wrote.
-- `<project>/.cursor/rules/multi-agent-runtime.mdc`, plus the empty
+- `<project>/.cursor/rules/gojaja-runtime.mdc`, plus the empty
   `.cursor/rules/` and `.cursor/` directories after, so the project
   tree is not left with empty parents that belong to us.
-- The `<!-- multi-agent-runtime:BEGIN ... :END -->` block inside
+- The `<!-- gojaja-runtime:BEGIN ... :END -->` block inside
   `<project>/CLAUDE.md`. Content outside the block is preserved.
   `CLAUDE.md` is deleted only if the marker block was its only content.
-- `${CODEX_HOME:-~/.codex}/skills/multi-agent-runtime/` only when
+- `${CODEX_HOME:-~/.codex}/skills/gojaja-runtime/` only when
   `--purge-codex-skill` is passed. Off by default because the Codex
   skill is user-level and shared across every project the user works on.
 
@@ -60,7 +114,7 @@ Safety:
 - `--confirm <token>` is required to actually delete. The token must
   equal `path.basename(projectRoot)`; mismatches raise `UsageError`
   (exit 2).
-- `MA_SESSION` must be unset — destructive ops belong to the user, not
+- `GOJAJA_SESSION` must be unset — destructive ops belong to the user, not
   to an agent (same posture as `role delete`).
 - Default invocation prints a preview listing every path that would be
   touched and the exact `--confirm` token to use.
@@ -73,7 +127,7 @@ Suite 302 -> 316 (14 new reset tests + 2 helper tests).
 
 The events directory (`comms/events/`) stays the durable broadcast
 log: every event ever produced lives there for audit and future
-`agentctl doctor`. The per-role manifest is now a **projection** of
+`gojaja doctor`. The per-role manifest is now a **projection** of
 that stream onto the slice the role should attend to. Two layers,
 one source of truth.
 
@@ -107,7 +161,7 @@ Guarantees:
 - The cursor advance is computed against the pre-filter list, so
   events excluded by the per-type rule do NOT re-surface on the next
   `plan`. The event remains in `comms/events/` forever.
-- `agentctl wait --for attention` uses the same projection, so wait
+- `gojaja wait --for attention` uses the same projection, so wait
   fires only on events that would actually appear in the manifest.
   No more "wake the agent to look at a manifest that hides everything"
   loops.
@@ -151,8 +205,8 @@ nothing concrete to lock in until at least one option exists.
 Schema version unchanged; this is a pure constraint relaxation. CLI
 signature change is purely additive:
 
-- `agentctl rfc new <slug> ...` — `--options` is now OPTIONAL.
-- `agentctl rfc decide <id> --rationale ...` — `--option` is now
+- `gojaja rfc new <slug> ...` — `--options` is now OPTIONAL.
+- `gojaja rfc decide <id> --rationale ...` — `--option` is now
   CONDITIONAL (required iff the RFC has options).
 
 `Store.decideRfc.chosenOption` widened to `string | null`.
@@ -207,7 +261,7 @@ Added:
 Constraints / refusals:
 
 - Asset / deliverable file refs that escape the project tree (`..`)
-  are refused at create time. Refs pointing inside `.multi-agent/`
+  are refused at create time. Refs pointing inside `.gojaja/`
   are refused too — those are framework state, not project artifacts.
 - `--force-incomplete` does not run the bypass event when all
   file deliverables are present (no bookkeeping noise for the clean
@@ -239,7 +293,7 @@ emit its idle WORKLOG exactly once per session even across resumes.
 
 Added:
 
-- `agentctl wait [--until <ISO> | --in <duration>] [--for <condition>] [--poll-interval <duration>]`
+- `gojaja wait [--until <ISO> | --in <duration>] [--for <condition>] [--poll-interval <duration>]`
 - Conditions: `attention` (default), `rfc-decided:<id>`,
   `rfc-acked:<id>`, `task-assigned`, `report-from:<role>`,
   `event-ref:<id>`.
@@ -253,9 +307,9 @@ Added:
 
 Runtime artifacts:
 
-- Cursor runtime body pins `agentctl wait --in 10m --poll-interval 30s`
+- Cursor runtime body pins `gojaja wait --in 10m --poll-interval 30s`
   so each chunk fits inside Cursor's shell timeout.
-- Codex / Claude / generic bodies use `agentctl wait --in 10m`; a
+- Codex / Claude / generic bodies use `gojaja wait --in 10m`; a
   10-minute wait collapses to a single sleep on those hosts.
 - Handbook gains a verdict table and a `wait --for task-assigned`
   guidance block; budget bumped 14 KB → 16 KB.
@@ -282,7 +336,7 @@ required role to explicitly `rfc ack` or `rfc object` before
 > refuses any `proposal.yaml` with `status: pre-decide` or a
 > `preDecision: {...}` field (both are PR8g shapes). Manual migration:
 > edit `status: open`, drop `preDecision`; the pre-decision data is
-> lost and agents should re-issue `rfc pre-decide`. Or `agentctl init`
+> lost and agents should re-issue `rfc pre-decide`. Or `gojaja init`
 > a fresh project.
 
 Suite 247 -> 260.
@@ -296,13 +350,13 @@ ledger and are surfaced via a read-time computation.
 
 #### Two new CLI verbs + reshape of one
 
-- `agentctl rfc ack <rfc-id> [--rationale ...]` (new): structured
+- `gojaja rfc ack <rfc-id> [--rationale ...]` (new): structured
   agreement with the active pre-decision. Required-ACK roles only;
   pre-decider cannot ack their own.
-- `agentctl rfc object <rfc-id> --rationale ... [--option Y]` (new):
+- `gojaja rfc object <rfc-id> --rationale ... [--option Y]` (new):
   structured disagreement. Rationale required; optional preferred
   alternative.
-- `agentctl rfc pre-decide ...` (reshaped): now posts a `kind:
+- `gojaja rfc pre-decide ...` (reshaped): now posts a `kind:
   "pre-decision"` comment. RFC status stays `open`. The hard work
   happens in `decideRfc`'s ACK gate.
 
@@ -385,7 +439,7 @@ Suite 247 -> 260.
   semantics (no silence-as-consent; required roles must use
   `rfc ack` or `rfc object`; regular comments do not advance the
   gate; reject is the only escape).
-- `agentctl -h`: RFC section updated similarly.
+- `gojaja -h`: RFC section updated similarly.
 
 ## [2.0.0-alpha.15] — 2026-05-28
 
@@ -398,7 +452,7 @@ Substantial rework of the RFC mechanism. Suite 216 -> 247.
 > to a single threaded ledger (`rfcs/<dir>/comments.yaml`). The CLI
 > detects the legacy layout on first read and refuses with a clear
 > `code: USAGE` message pointing at this entry. No auto-migrator —
-> projects on alpha.14 or earlier should `agentctl init` fresh or
+> projects on alpha.14 or earlier should `gojaja init` fresh or
 > hand-migrate.
 
 #### State machine grew
@@ -416,18 +470,18 @@ transitions:
 
 #### New CLI verbs
 
-- `agentctl rfc add-option <id>:<summary> --rationale ...` — surface
+- `gojaja rfc add-option <id>:<summary> --rationale ...` — surface
   a new option mid-discussion. Allowed in `open` or `revising`.
-- `agentctl rfc pre-decide --option X --rationale ...` — decider
+- `gojaja rfc pre-decide --option X --rationale ...` — decider
   posts "I lean X; any objections?". Voters either stay silent
   (consent) or comment (auto-reopens).
-- `agentctl rfc revise --rationale "rewrite section X"` — decider
+- `gojaja rfc revise --rationale "rewrite section X"` — decider
   kicks the proposal back without rejecting the topic.
-- `agentctl rfc edit --rationale ... [--title T --description D
+- `gojaja rfc edit --rationale ... [--title T --description D
   --options A:s,B:s --deadline ISO]` — creator or decider applies
   the rewrite; status returns to `open`. Comments preserved.
-- `agentctl rfc link-task --task T-NNNN` /
-  `agentctl rfc unlink-task --task T-NNNN` — idempotent task pointers
+- `gojaja rfc link-task --task T-NNNN` /
+  `gojaja rfc unlink-task --task T-NNNN` — idempotent task pointers
   on the proposal; task ids validated against `state/task_board.yaml`.
 
 #### New flags on existing verbs
@@ -454,7 +508,7 @@ transitions:
 new states: voter hidden during `revising` unless they are the
 creator; voter in `pre-decide` who commented after the pre-decision
 ts drops from the manifest (both objection and silent-consent paths
-end up clean). `agentctl rfc show <id>` advances the caller's per-RFC
+end up clean). `gojaja rfc show <id>` advances the caller's per-RFC
 read marker so `unreadComments` reflects "I am caught up".
 
 #### Auto behaviours worth knowing
@@ -501,7 +555,7 @@ optional `preDecision: { decidedBy, chosenOption, ts, rationale }`.
 
 Three small follow-ups to PR8f-B. No new behaviour beyond the rename.
 
-- **`agentctl write-state` is renamed to `agentctl state edit`.** The
+- **`gojaja write-state` is renamed to `gojaja state edit`.** The
   old name was misleading once append/replace modes landed in PR8f-B
   — "write" reads as overwrite-only. The new name uses the
   subcommand-group style consistent with `task <new|assign|...>`,
@@ -509,16 +563,16 @@ Three small follow-ups to PR8f-B. No new behaviour beyond the rename.
   (alpha-stage; no backward-compatible alias): the old command name
   is gone and existing scripts must update. The Store-level interface
   `writeStateFile` is untouched (still the implementation hook).
-- **`agentctl -h` now lists all three modes** for `state edit` with
+- **`gojaja -h` now lists all three modes** for `state edit` with
   copy-pasteable invocations and the `--batch` semantics. The
   previous help text only showed `--content`, which was correct
   before PR8f-B but stale after it.
 - **`manifest.roleReminder.protocol` carries a `role show` hint.**
   Compressed wording so the JSON-serialised reminder stays under the
   300-byte budget: now reads
-  ``Loop: plan -> ack <t> -> wait. Lost your role? Run `agentctl
-  role show <you>`. Writes via agentctl only; never hand-edit
-  .multi-agent/.`` — the new sentence routes any agent that has lost
+  ``Loop: plan -> ack <t> -> wait. Lost your role? Run `gojaja
+  role show <you>`. Writes via gojaja only; never hand-edit
+  .gojaja/.`` — the new sentence routes any agent that has lost
   its self-understanding to the right CLI command, every turn.
 
 Tests:
@@ -526,7 +580,7 @@ Tests:
   (same coverage; updated imports + positional args + 2 new
   dispatcher tests for unknown / missing subcommand).
 - `tests/plan-ack.test.ts` adds an assertion that
-  `roleReminder.protocol` contains `agentctl role show`.
+  `roleReminder.protocol` contains `gojaja role show`.
 
 Docs:
 - README.md / README.zh-CN.md cheatsheet rows.
@@ -539,7 +593,7 @@ Docs:
 
 Two related behaviour additions. Suite 198 -> 214.
 
-- **`agentctl init` now seeds `state/project_state.md` with a TBD
+- **`gojaja init` now seeds `state/project_state.md` with a TBD
   skeleton.** Previously the file was not auto-created and the
   handbook told agents to keep asking the user to make one — a slow
   failure mode. The new skeleton ships with three sections (Vision,
@@ -547,7 +601,7 @@ Two related behaviour additions. Suite 198 -> 214.
   it is obvious what to fill. Re-running `initialise` is still
   refused (existing AlreadyInitializedError), so the user's
   in-progress edits to the skeleton are never clobbered.
-- **`agentctl write-state` gains `--append` and `--replace`/`--with`
+- **`gojaja write-state` gains `--append` and `--replace`/`--with`
   modes** alongside the existing `--content` (overwrite). Goal:
   agents that need to change a small fragment of a long file no
   longer have to re-emit the whole file (token cost), and accidental
@@ -595,7 +649,7 @@ README rewrite around the user-vs-agent boundary. Suite 185 -> 198.
 - **`role list` annotates TBD rows.** Rows for roles whose markdown
   still has TBD show `(TBD: fill role markdown)`. JSON output carries
   `needsFill` per row.
-- **`agentctl activate <role>` refuses while the role contract has TBD.**
+- **`gojaja activate <role>` refuses while the role contract has TBD.**
   Hard refusal at the most actionable moment — the user is about to
   bind the role to a window and would otherwise discover the missing
   self-introduction much later via every-turn agent confusion.
@@ -609,13 +663,13 @@ README rewrite around the user-vs-agent boundary. Suite 185 -> 198.
 - **Activation snippet rewritten for the agent's perspective.** Now
   reads `You are the <role> agent for ...` (second person, addresses
   the agent directly). Three numbered steps: claim via `--eval`, run
-  `agentctl role show <role>` to learn its own contract, run
-  `agentctl -h` to learn the CLI surface. Closes the gap where weak
+  `gojaja role show <role>` to learn its own contract, run
+  `gojaja -h` to learn the CLI surface. Closes the gap where weak
   models skipped the export step or never read their own contract.
-- **`agentctl -h` rewritten.** Opens with a one-paragraph description
+- **`gojaja -h` rewritten.** Opens with a one-paragraph description
   of what the tool is, then a runnable Quickstart, then per-section
   command listings with inline tips (`eval "$(... --eval)"`,
-  `unset MA_SESSION` after release, Cursor `wait --mode exit`). Adds
+  `unset GOJAJA_SESSION` after release, Cursor `wait --mode exit`). Adds
   an exit-codes table with agent-actionable hints (USAGE / FORBIDDEN
   / STATE_CORRUPTION) and a See-also block to the doc set.
 - **Handbook adds task-assignment rules.** New section "Task
@@ -652,9 +706,9 @@ README rewrite around the user-vs-agent boundary. Suite 185 -> 198.
   ("You play one role per window. Your role is bound by ...") assumed
   every agent window that loaded the rule had been claimed for a role.
   In practice users open agent windows for unrelated work too; without
-  a gate, those windows would reflexively run `agentctl plan` /
+  a gate, those windows would reflexively run `gojaja plan` /
   `claim` against random roles. New leading section limits the
-  protocol to windows where either `MA_SESSION` is exported or the
+  protocol to windows where either `GOJAJA_SESSION` is exported or the
   user has explicitly told the agent its role. Test in
   [tests/handbook.test.ts](./tests/handbook.test.ts) asserts every
   target body carries the gate.
@@ -675,17 +729,17 @@ README rewrite around the user-vs-agent boundary. Suite 185 -> 198.
   byte-equal short-circuit so the operator can confirm the on-disk
   file came from the current template (useful while debugging install
   drift). Refuses without `--write` to keep semantics narrow.
-- **New `agentctl role delete <id>` command.** Removes the role from
+- **New `gojaja role delete <id>` command.** Removes the role from
   `config.yaml`, deletes `roles/<id>.md`, deletes the live session
-  file (so any lingering `MA_SESSION` fails fast on the next command),
+  file (so any lingering `GOJAJA_SESSION` fails fast on the next command),
   and emits a `ROLE_DELETED` system event. Open task assignments are
   left in place — recreating the same role id reinherits them.
-  Restricted to `SYSTEM` (no `MA_SESSION` exported); CLI refuses if
+  Restricted to `SYSTEM` (no `GOJAJA_SESSION` exported); CLI refuses if
   the calling shell has a session exported, with a clear hint to
-  `unset MA_SESSION`. Nine tests in
+  `unset GOJAJA_SESSION`. Nine tests in
   [tests/role-delete.test.ts](./tests/role-delete.test.ts) cover
   config / md / session cleanup, ROLE_DELETED audit, orphan-task
-  survival, non-SYSTEM rejection, MA_SESSION fail-fast after delete,
+  survival, non-SYSTEM rejection, GOJAJA_SESSION fail-fast after delete,
   and concurrent `deleteRole` + `createRfc` under `config-yaml` lock.
 
 ### Cross-cutting
@@ -742,7 +796,7 @@ business-process simulation. Every fix is covered by a regression test
   existing test's `previousStatus` assertion adjusted.
 - **Step 6 — Cursor runtime body now recommends `wait --mode exit`.**
   Cursor's chat shell kills long-running tool calls within seconds, so
-  the default block-mode `agentctl wait` (10-minute idle) was always
+  the default block-mode `gojaja wait` (10-minute idle) was always
   killed. `runtimeLoopBody` takes a `target` argument; only the Cursor
   artifact swaps to exit mode. Codex / Claude / Generic keep cheaper
   block mode. Two new tests in `tests/prompt.test.ts`.
@@ -756,7 +810,7 @@ business-process simulation. Every fix is covered by a regression test
 #### C. Safety / consistency P1
 
 - **M1 — Codex `SKILL.md` is now project-agnostic.** The skill installs
-  to `~/.codex/skills/multi-agent-runtime/`, a user-level singleton,
+  to `~/.codex/skills/gojaja-runtime/`, a user-level singleton,
   so the previous baking of `projectRoot` meant `prompt --write` from
   project B overwrote project A's install. Skill body now says "the
   project where this skill is activated (discovered from cwd at
@@ -782,14 +836,14 @@ business-process simulation. Every fix is covered by a regression test
 
 #### D. UX
 
-- **Step 10 — `release` reminds you to `unset MA_SESSION`.** Without
+- **Step 10 — `release` reminds you to `unset GOJAJA_SESSION`.** Without
   the hint, the shell still has the stale session id exported and
   every subsequent command fails with "session not found." Output
   now includes the exact shell-runnable line.
-- **Step 4a — new `agentctl claim --eval` mode.** Outputs exactly
-  `export MA_SESSION=<ulid>\n` for shell `eval`:
+- **Step 4a — new `gojaja claim --eval` mode.** Outputs exactly
+  `export GOJAJA_SESSION=<ulid>\n` for shell `eval`:
   ```
-  eval "$(agentctl claim PM --eval)"
+  eval "$(gojaja claim PM --eval)"
   ```
   Single-step claim+export so weaker LLM agents cannot forget to
   copy the export line manually. Regular text output now also shows
@@ -822,7 +876,7 @@ business-process simulation. Every fix is covered by a regression test
 Ten independent fixes from two consolidated reviews (one external
 text-based, one canvas-based). Each maps to a regression test.
 
-- **C-03 argv boolean-flag whitelist.** `agentctl plan --json PM` used
+- **C-03 argv boolean-flag whitelist.** `gojaja plan --json PM` used
   to greedily consume `PM` as the value of `--json`, silently losing
   the role argument. New `BOOLEAN_FLAGS` set in
   [src/cli/argv.ts](./src/cli/argv.ts) keeps known booleans (`--json`,
@@ -856,11 +910,11 @@ text-based, one canvas-based). Each maps to a regression test.
   now detects that inconsistent shape, forward-completes the proposal
   status from the decision's outcome, and emits a new `RFC_REPAIRED`
   event for the audit trail.
-- **MA_SESSION strict / `resolveActor` helper.** Replaced the
+- **GOJAJA_SESSION strict / `resolveActor` helper.** Replaced the
   `try { resolveIdentity(...) } catch { actor = "SYSTEM" }` pattern in
   `task`, `rfc`, and `write-state` commands with a strict helper:
-  `MA_SESSION` set → must resolve successfully; only unset means
-  SYSTEM bypass. A stale or invalid `MA_SESSION` token no longer
+  `GOJAJA_SESSION` set → must resolve successfully; only unset means
+  SYSTEM bypass. A stale or invalid `GOJAJA_SESSION` token no longer
   silently downgrades to SYSTEM, which had been an effective ownership
   bypass.
 - **H-01 createRole atomic order + recovery.** Write order is now
@@ -874,11 +928,11 @@ text-based, one canvas-based). Each maps to a regression test.
   this the count was computed against the pre-plan cursor, so every
   event already in the pending manifest contributed to `count > 0`,
   producing a permanent false ATTENTION verdict and an agent loop.
-- **claim + report registration gate.** `agentctl claim` now refuses
+- **claim + report registration gate.** `gojaja claim` now refuses
   unknown role ids (typo `claim Forntend` no longer creates a phantom
   session). `Store.publishReport` now refuses an unknown recipient
   role, matching the PROTOCOL.md contract.
-- **plan TTY-aware output.** `agentctl plan` defaults to JSON whenever
+- **plan TTY-aware output.** `gojaja plan` defaults to JSON whenever
   `process.stdout.isTTY` is false — agents invoking via shell now get
   the structured manifest the runtime contract promises. The
   human-text rendering additionally prints `Tasks (N)` and
@@ -906,19 +960,19 @@ reset) is unaffected. PR8c (secondary correctness + polish) is queued.
 
 ### Changed — BREAKING (prompt / activate split)
 
-`agentctl prompt` was overloaded: it built both the host-shared runtime
+`gojaja prompt` was overloaded: it built both the host-shared runtime
 artifact (role-free) AND the per-window activation snippet (role-bound).
 The role positional made it look as if the persistent file contained
 role-specific instructions, which it never did. This release splits the
 two responsibilities into separate commands so role identifiers cannot
 leak into project-shared files.
 
-- `agentctl prompt` is now strictly role-free:
+- `gojaja prompt` is now strictly role-free:
   - Signature: `prompt --target codex|claude|cursor|generic [--write] [--no-handbook] [--json]`.
   - Refuses any positional argument with a USAGE error pointing at the
     new `activate` command (no silent fallback or back-compat alias —
     we don't want a "two ways to do the same thing" period).
-- `agentctl activate <role> --target <host>` (new):
+- `gojaja activate <role> --target <host>` (new):
   - Prints the chat-paste snippet that binds `<role>` to one specific
     agent window. Never writes to disk.
   - For codex/claude/cursor, the snippet is short (a few hundred
@@ -949,7 +1003,7 @@ the CLI surface.
 ### Tests (121 -> 127)
 
 - New regression in `tests/prompt.test.ts`:
-  "every target body contains plan + MA_SESSION **but never a role id**".
+  "every target body contains plan + GOJAJA_SESSION **but never a role id**".
   The test scans the runtime body and every written file against every
   role id in `config.yaml`. Future contributors who accidentally embed
   a role will see CI go red.
@@ -960,17 +1014,17 @@ the CLI surface.
   (< 800 bytes; no handbook embedded).
 - `activate` for generic bundles the full body (with or without the
   handbook depending on `--no-handbook`).
-- Codex activation includes the `$multi-agent-runtime` skill-trigger
+- Codex activation includes the `$gojaja-runtime` skill-trigger
   phrase.
 
 ### Migration
 
 For anyone scripting the previous CLI: replace
-`agentctl prompt PM --target cursor --write` with the two-step pair:
+`gojaja prompt PM --target cursor --write` with the two-step pair:
 
 ```bash
-agentctl prompt --target cursor --write   # once per host, no role
-agentctl activate PM --target cursor      # per agent window, role only
+gojaja prompt --target cursor --write   # once per host, no role
+gojaja activate PM --target cursor      # per agent window, role only
 ```
 
 The shapes of the on-disk artifacts (Cursor rule, CLAUDE.md block,
@@ -1003,12 +1057,12 @@ neutral handbook that tells the agent **when** to choose which tool.
   - Hard "don't"s.
 - Wired into the runtime body so every host artifact carries it by
   default:
-  - `agentctl prompt <role> --target codex|claude|cursor|generic`
+  - `gojaja prompt <role> --target codex|claude|cursor|generic`
     output bodies include the handbook.
-  - `--write` persists it into `.cursor/rules/multi-agent-runtime.mdc`,
-    `~/.codex/skills/multi-agent-runtime/SKILL.md`, and the marker
+  - `--write` persists it into `.cursor/rules/gojaja-runtime.mdc`,
+    `~/.codex/skills/gojaja-runtime/SKILL.md`, and the marker
     block inside `<project>/CLAUDE.md`.
-- New flag `agentctl prompt --no-handbook` for projects with their own
+- New flag `gojaja prompt --no-handbook` for projects with their own
   behavioural standards or unusually tight context budgets. Dropping
   the handbook shrinks each artifact by ~3 KB.
 - New `docs/HANDBOOK.md` documenting the policy layer and the
@@ -1017,7 +1071,7 @@ neutral handbook that tells the agent **when** to choose which tool.
   test suite asserts that key trigger phrases survive future edits
   (`Blocked on T-XXXX (no movement 2t)`, `exit code 9 (FORBIDDEN)`,
   `Do NOT release the role`, `Don't hand-edit anything under
-  .multi-agent`, ...), that the handbook is role-neutral (no PM / TL /
+  .gojaja`, ...), that the handbook is role-neutral (no PM / TL /
   Backend / QA / DevOps mentions), and that the total size stays under
   the 8 KB budget.
 
@@ -1058,9 +1112,9 @@ shipped per turn the way `manifest.roleReminder` is.
     update its OWN task's status, even without blanket task-board
     ownership. This lets engineering roles (Backend, QA, ...) report
     progress without being granted PM-level scope.
-- New CLI `agentctl write-state --file <state/path> [--content <text>]`:
+- New CLI `gojaja write-state --file <state/path> [--content <text>]`:
   - Content comes from `--content` if given, otherwise from stdin.
-  - Identity from `MA_SESSION` (or `"SYSTEM"` if unset).
+  - Identity from `GOJAJA_SESSION` (or `"SYSTEM"` if unset).
 - 14 new vitest cases (`tests/ownership.test.ts`): writeStateFile
   allow/deny per role, mustNotEdit override, SYSTEM bypass, refusal
   outside `state/`, path-traversal refusal, directory-prefix matching,
@@ -1081,10 +1135,10 @@ shipped per turn the way `manifest.roleReminder` is.
 
 ### Added (PR6 — RFC state machine)
 
-- Per-RFC directory `.multi-agent/rfcs/RFC-NNNN-<slug>/` with
+- Per-RFC directory `.gojaja/rfcs/RFC-NNNN-<slug>/` with
   `proposal.yaml`, `comments/<role>.json`, and `decision.json` (created
   on decide / reject).
-- New `agentctl rfc` command group:
+- New `gojaja rfc` command group:
   - `rfc new <slug> --title <text> --deciders <r1,...>
       --options <A:summary,B:summary> [--voters <r1,...>] [--deadline <iso>]`
   - `rfc comment <rfc-id> --rationale <text> [--option <opt>]`
@@ -1104,7 +1158,7 @@ shipped per turn the way `manifest.roleReminder` is.
   needing this role's action (voter that hasn't commented, or
   decider until close). Fields are minimal (`id`, `title`, `status`,
   `role: "voter" | "decider"`, `commented: boolean`); full proposal +
-  comments + decision come from `agentctl rfc show <id>`.
+  comments + decision come from `gojaja rfc show <id>`.
 - 20 new vitest cases (`tests/rfc.test.ts`); 81 -> 101 total.
 
 ### Design choices for the RFC layer
@@ -1124,12 +1178,12 @@ shipped per turn the way `manifest.roleReminder` is.
 
 ### Added (PR5 — task board)
 
-- New on-disk artifact: `.multi-agent/state/task_board.yaml`. Schema:
+- New on-disk artifact: `.gojaja/state/task_board.yaml`. Schema:
   `schemaVersion`, `nextId` (auto-allocator counter), and a `tasks`
   map keyed by `T-NNNN` id with `title`, `status`, `owner`, `priority`,
   `dependsOn`, `acceptance`, `createdAt`, `updatedAt`. Statuses:
   `Backlog | Ready | InProgress | Blocked | Review | Done`.
-- New CLI surface `agentctl task`:
+- New CLI surface `gojaja task`:
   - `task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3]
     [--depends-on T-NNNN,...] [--acceptance <text>]`.
   - `task assign <task-id> --to <role>`.
@@ -1138,13 +1192,13 @@ shipped per turn the way `manifest.roleReminder` is.
   - `task show <task-id>`.
 - New event types `TASK_CREATED`, `TASK_ASSIGNED`,
   `TASK_STATUS_CHANGED`, all emitted automatically by the
-  corresponding command. `from` is the role bound to `MA_SESSION` when
+  corresponding command. `from` is the role bound to `GOJAJA_SESSION` when
   available, otherwise `"SYSTEM"`.
 - Manifest carries a new `tasks` array (`TaskSummary[]`): tasks where
   `owner == role` AND `status ∈ {Ready, InProgress, Blocked, Review}`.
   Each summary keeps just `id`, `title`, `status`, `priority`, and
   `blockedBy` (the subset of `dependsOn` that is not yet `Done`).
-  Full task records are fetched on demand via `agentctl task show <id>`.
+  Full task records are fetched on demand via `gojaja task show <id>`.
 - New `Store` methods: `readTaskBoard`, `createTask`, `assignTask`,
   `setTaskStatus`, `readTask`. All mutations go through a `task-board`
   lock; auto-id allocation is monotonic even across crashes.
@@ -1157,7 +1211,7 @@ shipped per turn the way `manifest.roleReminder` is.
 - Task status transitions are unrestricted in v2 by design — any role
   may set any status. A constrained state machine (PR7+) can layer on
   top of this once ownership enforcement lands.
-- `agentctl init` now seeds an empty `state/task_board.yaml` alongside
+- `gojaja init` now seeds an empty `state/task_board.yaml` alongside
   `VERSION` and `config.yaml`.
 
 ## [2.0.0-alpha.3] — 2026-05-27
@@ -1165,7 +1219,7 @@ shipped per turn the way `manifest.roleReminder` is.
 ### Added (PR4 — manifest self-anchoring)
 
 - `Manifest.roleReminder`: a compact identity block embedded in every
-  `agentctl plan` output. Carries `id`, `title`, optional `owns`,
+  `gojaja plan` output. Carries `id`, `title`, optional `owns`,
   `mustNotEdit`, `reportsTo`, plus a 95-char `protocol` one-liner.
   Empty fields are intentionally omitted to keep agent prompts tight
   (a fully populated reminder serialises to under 300 bytes).
@@ -1177,7 +1231,7 @@ shipped per turn the way `manifest.roleReminder` is.
 ### Rationale
 
 A context-compressed agent that has lost its role contract can now
-recover its identity by running `agentctl plan` once. The reminder
+recover its identity by running `gojaja plan` once. The reminder
 trades ~250 bytes per manifest for an order-of-magnitude reduction
 in "agent forgot which role it is" failure modes.
 
@@ -1185,35 +1239,35 @@ in "agent forgot which role it is" failure modes.
 
 ### Added (PR3 — role / prompt / wait)
 
-- `agentctl role create <id> [<title>] [--description] [--owns]
+- `gojaja role create <id> [<title>] [--description] [--owns]
   [--reports-to] [--must-not-edit]` provisions a role end-to-end: it
-  registers `<id>` in `.multi-agent/config.yaml` AND writes the human
-  contract under `.multi-agent/roles/<id>.md`. Refuses duplicates.
-- `agentctl role list` and `agentctl role show <id>`.
-- `agentctl prompt <role> --target codex|claude|cursor|generic`
+  registers `<id>` in `.gojaja/config.yaml` AND writes the human
+  contract under `.gojaja/roles/<id>.md`. Refuses duplicates.
+- `gojaja role list` and `gojaja role show <id>`.
+- `gojaja prompt <role> --target codex|claude|cursor|generic`
   prints an activation prompt. With `--write`, it also installs the
   host-specific persistent artifact:
-  - `codex`: `${CODEX_HOME:-~/.codex}/skills/multi-agent-runtime/`
+  - `codex`: `${CODEX_HOME:-~/.codex}/skills/gojaja-runtime/`
     SKILL.md + agents/openai.yaml.
-  - `claude`: a marker-block `<!-- multi-agent-runtime:BEGIN..END -->`
+  - `claude`: a marker-block `<!-- gojaja-runtime:BEGIN..END -->`
     inside `<project>/CLAUDE.md`, preserving surrounding content.
-  - `cursor`: `<project>/.cursor/rules/multi-agent-runtime.mdc` with
+  - `cursor`: `<project>/.cursor/rules/gojaja-runtime.mdc` with
     `alwaysApply: true`.
   - `generic`: prints only.
   The persistent artifacts are role-agnostic (they teach the agent how
-  to find its identity via `MA_SESSION`); a per-window activation
+  to find its identity via `GOJAJA_SESSION`); a per-window activation
   snippet binds the role.
-- `agentctl wait [--idle <min>] [--mode block|exit]` provides the
+- `gojaja wait [--idle <min>] [--mode block|exit]` provides the
   cheap-keepalive primitive. `block` does a shell-level sleep, then
   one cursor-free check, exits 0 with `ATTENTION` or `IDLE`. `exit`
   writes a `.wait` sentinel and returns immediately. Never overloads
   exit codes; never mutates the cursor (closes v0.1 wait bugs).
 - New Store methods: `createRole`, `readRoleFile`, `readConfig`,
   `writeConfig`, `writeWaitSentinel`.
-- New on-disk artifact: `.multi-agent/config.yaml` (created by
-  `agentctl init`). See [docs/SCHEMA.md → config.yaml](./docs/SCHEMA.md#configyaml).
-- New on-disk artifact: `.multi-agent/comms/pending/<role>/.wait`
-  sentinel (written by `agentctl wait --mode exit`).
+- New on-disk artifact: `.gojaja/config.yaml` (created by
+  `gojaja init`). See [docs/SCHEMA.md → config.yaml](./docs/SCHEMA.md#configyaml).
+- New on-disk artifact: `.gojaja/comms/pending/<role>/.wait`
+  sentinel (written by `gojaja wait --mode exit`).
 - New dependency: `js-yaml` (plus `@types/js-yaml`) for config.yaml
   round-tripping.
 - New `src/cli/prompts/` module: `core.ts` (shared body) + per-target
@@ -1225,9 +1279,9 @@ in "agent forgot which role it is" failure modes.
 
 ### Changed
 
-- `agentctl init` now also seeds `.multi-agent/config.yaml` with the
+- `gojaja init` now also seeds `.gojaja/config.yaml` with the
   current schemaVersion and an empty `roles` map.
-- `agentctl help` reorganised around the three real audiences: things
+- `gojaja help` reorganised around the three real audiences: things
   the user runs once (init / role / prompt), things the user runs once
   per window (claim / release), and things the agent runs on every turn
   (plan / ack / report / worklog / wait).
@@ -1239,23 +1293,23 @@ in "agent forgot which role it is" failure modes.
 
 ### Added (PR2 — claim / plan / ack / report / worklog)
 
-- `agentctl claim <role> [--ttl <s>] [--force]` leases a role for the
+- `gojaja claim <role> [--ttl <s>] [--force]` leases a role for the
   current shell and prints the session id.
-- `agentctl release [<role>]` ends the current session.
-- `agentctl plan [<role>]` produces a JSON `Manifest` of unread events
+- `gojaja release [<role>]` ends the current session.
+- `gojaja plan [<role>]` produces a JSON `Manifest` of unread events
   scoped to the role, persists it under
   `comms/pending/<role>/<ack-token>.json`, and stamps
   `cursor.pendingManifest`. Idempotent: calling twice in a row returns
   the same manifest with the same `ackToken`.
-- `agentctl ack [<role>] --token <t>` advances the cursor exactly to
+- `gojaja ack [<role>] --token <t>` advances the cursor exactly to
   the manifest's `advanceCursorTo`. Token mismatch is rejected;
   events that arrived between `plan` and `ack` are preserved unread.
-- `agentctl report --to <role> --message <text> [--ref <id>]`
-  publishes a REPORT event. `from` is derived from `MA_SESSION`; the
+- `gojaja report --to <role> --message <text> [--ref <id>]`
+  publishes a REPORT event. `from` is derived from `GOJAJA_SESSION`; the
   agent cannot impersonate another role.
-- `agentctl worklog --message <text>` broadcasts a WORKLOG event and
+- `gojaja worklog --message <text>` broadcasts a WORKLOG event and
   also writes `worklog/<role>/<id>.md` for git-readable history.
-- `MA_SESSION` environment variable carries identity between commands;
+- `GOJAJA_SESSION` environment variable carries identity between commands;
   `src/cli/identity.ts:resolveIdentity` enforces it.
 - New `Store` methods: `findSessionById`, `publishReport`,
   `publishWorklog`, `openOrCreatePlan`, `ackManifest`.
@@ -1282,7 +1336,7 @@ in "agent forgot which role it is" failure modes.
 
 ### Added (PR1 — storage core)
 
-- TypeScript-based `agentctl` CLI replacing the v0.1 bash prototype.
+- TypeScript-based `gojaja` CLI replacing the v0.1 bash prototype.
 - `Store` interface (`src/core/store.ts`) shaped to allow a future HTTP
   transport without command-layer changes.
 - `LocalFsStore` (`src/core/local-fs-store.ts`):
@@ -1297,8 +1351,8 @@ in "agent forgot which role it is" failure modes.
 - ULID id generation (monotonic process-local factory).
 - Strict path validation: `resolveInside` rejects absolute paths and
   `..` escapes; role-id and lock-key whitelists.
-- CLI commands: `agentctl --version`, `agentctl help`, `agentctl init`,
-  `agentctl version`. All commands support `--json`.
+- CLI commands: `gojaja --version`, `gojaja help`, `gojaja init`,
+  `gojaja version`. All commands support `--json`.
 - Stable error class → exit code map (see [DESIGN](./docs/DESIGN.md#errors-and-exit-codes)).
 - Documentation set: `docs/DESIGN.md`, `docs/SCHEMA.md`,
   `docs/PROTOCOL.md`, `docs/ROADMAP.md`, this changelog.
@@ -1310,7 +1364,7 @@ in "agent forgot which role it is" failure modes.
 
 - The entire v0.1 bash prototype: `templates/multi-agent/` (scripts,
   protocol markdown, role files, RFC templates), `skills/`, the
-  `.multi-agent → templates/multi-agent` symlink, and the
+  `.gojaja → templates/multi-agent` symlink, and the
   `bin/multi-agent.js` installer.
 - The AGENTS.md "multi-agent-bridge" block (replaced by repo-level dev
   notes; the new bridge is reintroduced as part of PR6's installer).
@@ -1320,4 +1374,4 @@ in "agent forgot which role it is" failure modes.
 - This release is an alpha. The wire protocol between CLI and agent is
   still in flux; do not depend on it from production tooling.
 - v0.1 is not supported. No migration path is provided. Anyone who used
-  v0.1 should start fresh with `agentctl init`.
+  v0.1 should start fresh with `gojaja init`.

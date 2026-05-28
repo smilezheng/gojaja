@@ -9,7 +9,7 @@ import type { ParsedArgs } from "../src/cli/argv";
 
 async function freshProject() {
   const projectRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-role-del-"));
-  const root = path.join(projectRoot, ".multi-agent");
+  const root = path.join(projectRoot, ".gojaja");
   const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
   await store.createRole({
@@ -102,19 +102,19 @@ describe("Store.deleteRole", () => {
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("an authenticated command using the old MA_SESSION fails after role delete", async () => {
+  it("an authenticated command using the old GOJAJA_SESSION fails after role delete", async () => {
     const s = await ctx.store.claimSession("Backend", 60);
     await ctx.store.deleteRole({ id: "Backend", actor: "SYSTEM" });
 
-    // Simulate the agent's lingering MA_SESSION: findSessionById should
+    // Simulate the agent's lingering GOJAJA_SESSION: findSessionById should
     // now return null because the session file is gone.
     const found = await ctx.store.findSessionById(s.sessionId);
     expect(found).toBeNull();
 
     // And driving through the CLI confirms the user-visible failure
     // mode: USAGE rather than a silent success on a phantom role.
-    const originalEnv = process.env.MA_SESSION;
-    process.env.MA_SESSION = s.sessionId;
+    const originalEnv = process.env.GOJAJA_SESSION;
+    process.env.GOJAJA_SESSION = s.sessionId;
     try {
       await expect(
         runWorklog({
@@ -124,8 +124,8 @@ describe("Store.deleteRole", () => {
         }),
       ).rejects.toMatchObject({ code: "USAGE" });
     } finally {
-      if (originalEnv !== undefined) process.env.MA_SESSION = originalEnv;
-      else delete process.env.MA_SESSION;
+      if (originalEnv !== undefined) process.env.GOJAJA_SESSION = originalEnv;
+      else delete process.env.GOJAJA_SESSION;
     }
   });
 
@@ -147,16 +147,16 @@ describe("Store.deleteRole", () => {
   });
 });
 
-describe("agentctl role delete (CLI)", () => {
+describe("gojaja role delete (CLI)", () => {
   let ctx: { projectRoot: string; root: string; store: LocalFsStore };
-  const originalEnv = process.env.MA_SESSION;
+  const originalEnv = process.env.GOJAJA_SESSION;
   beforeEach(async () => {
     ctx = await freshProject();
-    delete process.env.MA_SESSION;
+    delete process.env.GOJAJA_SESSION;
   });
   afterEach(async () => {
-    if (originalEnv !== undefined) process.env.MA_SESSION = originalEnv;
-    else delete process.env.MA_SESSION;
+    if (originalEnv !== undefined) process.env.GOJAJA_SESSION = originalEnv;
+    else delete process.env.GOJAJA_SESSION;
     await fsp.rm(ctx.projectRoot, { recursive: true, force: true });
   });
 
@@ -172,8 +172,8 @@ describe("agentctl role delete (CLI)", () => {
     } finally { cap.release(); }
   });
 
-  it("refuses to run when MA_SESSION is exported, with a clear hint to unset it", async () => {
-    process.env.MA_SESSION = "01HXSOMESESSIONXSOMETHING1";
+  it("refuses to run when GOJAJA_SESSION is exported, with a clear hint to unset it", async () => {
+    process.env.GOJAJA_SESSION = "01HXSOMESESSIONXSOMETHING1";
     const cap = captureStdout();
     try {
       await expect(

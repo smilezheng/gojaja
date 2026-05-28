@@ -20,7 +20,7 @@ export interface ParsedArgs {
 
 /**
  * Flags that are unambiguously boolean — they MUST NOT consume the next
- * token as a value. Without this, `agentctl plan --json PM` greedily
+ * token as a value. Without this, `gojaja plan --json PM` greedily
  * parses as `flags.json="PM"` and `positional=[]`, losing the role
  * argument and silently disabling the JSON contract that agents rely on.
  *

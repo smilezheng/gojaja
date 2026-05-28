@@ -8,12 +8,12 @@ import { validateRoleId } from "../core/role-id";
  * authenticated role.
  *
  * Resolution rules:
- *   1. If `MA_SESSION` is set in the environment, look it up in
+ *   1. If `GOJAJA_SESSION` is set in the environment, look it up in
  *      `comms/sessions/`. Missing or unknown → UsageError.
- *   2. If both `MA_SESSION` and an explicit role argument are present,
+ *   2. If both `GOJAJA_SESSION` and an explicit role argument are present,
  *      they must agree; otherwise UsageError.
- *   3. If `MA_SESSION` is absent and `requireSession` is true → UsageError.
- *   4. If `MA_SESSION` is absent and only a role argument is given,
+ *   3. If `GOJAJA_SESSION` is absent and `requireSession` is true → UsageError.
+ *   4. If `GOJAJA_SESSION` is absent and only a role argument is given,
  *      validate the role name format but do not perform a session check.
  *      (Used by read-only or bootstrap commands like `init`.)
  */
@@ -26,7 +26,7 @@ export async function resolveIdentity(
   store: Store,
   opts: { explicitRole?: string; requireSession: boolean },
 ): Promise<ResolvedIdentity> {
-  const envSession = process.env.MA_SESSION;
+  const envSession = process.env.GOJAJA_SESSION;
   if (envSession) {
     const session = await store.findSessionById(envSession);
     if (!session) {
@@ -35,14 +35,14 @@ export async function resolveIdentity(
       // is intentionally generic so an attacker probing for valid ids
       // cannot tell which case they triggered.
       throw new UsageError(
-        `MA_SESSION='${envSession}' is not a live session. ` +
-          `Either remove the env var, or run 'agentctl claim <role>' first.`,
+        `GOJAJA_SESSION='${envSession}' is not a live session. ` +
+          `Either remove the env var, or run 'gojaja claim <role>' first.`,
       );
     }
     if (opts.explicitRole && opts.explicitRole !== session.role) {
       throw new UsageError(
         `Role argument '${opts.explicitRole}' does not match the role of ` +
-          `MA_SESSION ('${session.role}'). Drop the argument, or unset MA_SESSION.`,
+          `GOJAJA_SESSION ('${session.role}'). Drop the argument, or unset GOJAJA_SESSION.`,
       );
     }
     // Auto-renew the lease on every authenticated command. Without this
@@ -56,13 +56,13 @@ export async function resolveIdentity(
   }
   if (opts.requireSession) {
     throw new UsageError(
-      "MA_SESSION is required for this command. Run 'agentctl claim <role>' first " +
-        "and export the printed session id as MA_SESSION.",
+      "GOJAJA_SESSION is required for this command. Run 'gojaja claim <role>' first " +
+        "and export the printed session id as GOJAJA_SESSION.",
     );
   }
   if (!opts.explicitRole) {
     throw new UsageError(
-      "No role specified and MA_SESSION is unset. Pass the role as a positional " +
+      "No role specified and GOJAJA_SESSION is unset. Pass the role as a positional " +
         "argument, or claim a role first.",
     );
   }
@@ -72,10 +72,10 @@ export async function resolveIdentity(
 
 /**
  * Helper for commands that accept either an authenticated agent (with
- * `MA_SESSION` set) OR a bare human invocation (no session → `"SYSTEM"`
+ * `GOJAJA_SESSION` set) OR a bare human invocation (no session → `"SYSTEM"`
  * bypass for bootstrap / repair).
  *
- * Critical semantic: if `MA_SESSION` is SET, resolution MUST succeed.
+ * Critical semantic: if `GOJAJA_SESSION` is SET, resolution MUST succeed.
  * A stale or invalid token does NOT silently fall through to SYSTEM,
  * which would otherwise bypass every ownership check. The previous
  * pattern (`try { resolveIdentity(...) } catch { return "SYSTEM" }`) was
@@ -84,7 +84,7 @@ export async function resolveIdentity(
 export async function resolveActor(
   store: Store,
 ): Promise<{ actor: RoleId | "SYSTEM" }> {
-  if (process.env.MA_SESSION) {
+  if (process.env.GOJAJA_SESSION) {
     const { role } = await resolveIdentity(store, { requireSession: true });
     return { actor: role };
   }
