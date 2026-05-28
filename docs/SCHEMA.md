@@ -140,9 +140,10 @@ tasks:
       - rate-limited to 10/min
     createdAt: 2026-05-27T05:23:00.000Z
     updatedAt: 2026-05-27T05:23:00.000Z
-    # PR8j fields (defaults when omitted; readTaskBoard backfills them)
+    # PR8j / PR8u fields (defaults when omitted; readTaskBoard backfills them)
     parent: null                    # parent task id, or null
-    assignedBy: PM                  # who created/assigned originally
+    creator: PM                     # who created the task (immutable; PR8u)
+    reviewers: [TL]                 # roles authorised to mark Done (PR8u)
     assets:                         # info-only references; not gated
       - kind: url
         ref: https://figma.com/file/xxx
@@ -167,7 +168,8 @@ tasks:
     dependsOn: [T-0001]
     acceptance: ""
     parent: T-0001                  # subtask of T-0001
-    assignedBy: PM
+    creator: PM
+    reviewers: []
     assets: []
     deliverables: []
     tags: []
@@ -190,9 +192,15 @@ Field rules:
 - `parent` (PR8j) is another task id or `null`. The task graph is
   cycle-checked at read time; chains deeper than 5 are refused. Parent
   status is NOT automatically derived from children.
-- `assignedBy` (PR8j) is the role that originally created the task.
-  `assignTask` does NOT update this field — the event stream carries
-  reassignment history.
+- `creator` (PR8u; was `assignedBy` in PR8j) is the role that
+  originally created the task. Immutable after creation — `assignTask`
+  does NOT update this field; the event stream carries reassignment
+  history. Legacy pre-PR8u boards (only `assignedBy` on disk) are
+  auto-promoted on read.
+- `reviewers` (PR8u) is the list of roles authorised to mark this task
+  `Done` regardless of ownership. Reviewers are also stakeholders for
+  the task's `TASK_STATUS_CHANGED` events — pushing to Review
+  auto-surfaces in their manifest, no explicit report needed.
 - `assets` (PR8j) are reference pointers the owner needs to read. Each
   entry is `{ kind: "file" | "url", ref, description }`. File refs are
   validated for path-traversal at create time but the file is not

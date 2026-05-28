@@ -272,13 +272,18 @@ export interface Store {
    * Create a new task. The store assigns `id` (next `T-NNNN`) and
    * timestamps; emits `TASK_CREATED`. Owner may be null; if non-null and
    * the role is configured, also emits `TASK_ASSIGNED`. Records the
-   * `actor` as the task's `assignedBy` (audit; not changed by later
+   * `actor` as the task's `creator` (audit; not changed by later
    * `assignTask` calls).
    *
    * PR8j: extra optional inputs land directly on the task record.
    * `parent` is validated for existence + non-cyclicity + depth limit.
    * `assets` / `deliverables` are validated for path shape (file refs
    * must stay inside the project tree and outside `.gojaja/`).
+   *
+   * PR8u: `reviewers` are roles authorised to mark this task Done
+   * regardless of ownership; they also become stakeholders for the
+   * task's `TASK_STATUS_CHANGED` events (visible in their manifest
+   * without the owner sending an explicit report).
    */
   createTask(input: {
     title: string;
@@ -292,6 +297,8 @@ export interface Store {
     assets?: TaskAsset[];
     deliverables?: Deliverable[];
     tags?: string[];
+    // PR8u
+    reviewers?: RoleId[];
   }): Promise<Task>;
 
   /**

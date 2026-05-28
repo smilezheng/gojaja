@@ -284,25 +284,26 @@ describe("PR8j: task model expansion", () => {
     await fsp.rm(ctx.projectRoot, { recursive: true, force: true });
   });
 
-  it("createTask records assignedBy from actor", async () => {
+  it("createTask records creator from actor (PR8u: was assignedBy)", async () => {
     const t = await ctx.store.createTask({
       title: "thing", owner: "Frontend", actor: "PM",
     });
-    expect(t.assignedBy).toBe("PM");
+    expect(t.creator).toBe("PM");
     expect(t.parent).toBeNull();
     expect(t.assets).toEqual([]);
     expect(t.deliverables).toEqual([]);
     expect(t.tags).toEqual([]);
+    expect(t.reviewers).toEqual([]);
   });
 
-  it("assignTask does NOT change assignedBy (it records the original creator)", async () => {
+  it("assignTask does NOT change creator (it records the original creator)", async () => {
     const t = await ctx.store.createTask({ title: "x", owner: "Frontend", actor: "PM" });
-    expect(t.assignedBy).toBe("PM");
+    expect(t.creator).toBe("PM");
     // Add another role so we can reassign.
     await ctx.store.createRole({ id: "Backend", title: "Backend" });
     await ctx.store.assignTask({ taskId: t.id, newOwner: "Backend", actor: "PM" });
     const after = await ctx.store.readTask(t.id);
-    expect(after.assignedBy).toBe("PM");
+    expect(after.creator).toBe("PM");
     expect(after.owner).toBe("Backend");
   });
 
@@ -371,24 +372,31 @@ describe("PR8j: task model expansion", () => {
   });
 
   it("setTaskStatus Done refuses when a file deliverable is missing", async () => {
+    // PR8u: PM creates + reviews (PM also owns state/task_board.yaml,
+    // which is the legacy Done authority); Frontend is the worker.
+    // PM is the one calling task status Done — that's the realistic
+    // review flow.
     const t = await ctx.store.createTask({
       title: "x", owner: "Frontend", actor: "PM",
       deliverables: [{ kind: "file", ref: "docs/spec.md", description: "Final spec" }],
     });
-    // Move through the lifecycle but keep the file absent.
+    // Frontend pushes through the lifecycle (owner-exception for
+    // non-Done). The file is absent throughout.
     await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "InProgress", actor: "Frontend" });
+    // PM tries Done while the deliverable is still missing — refused.
     await expect(
-      ctx.store.setTaskStatus({ taskId: t.id, newStatus: "Done", actor: "Frontend" }),
+      ctx.store.setTaskStatus({ taskId: t.id, newStatus: "Done", actor: "PM" }),
     ).rejects.toMatchObject({ code: "USAGE" });
     // Touch the file; now Done succeeds.
     await touch(path.join(ctx.projectRoot, "docs", "spec.md"));
     const done = await ctx.store.setTaskStatus({
-      taskId: t.id, newStatus: "Done", actor: "Frontend",
+      taskId: t.id, newStatus: "Done", actor: "PM",
     });
     expect(done.status).toBe("Done");
   });
 
   it("setTaskStatus Done with --force-incomplete emits TASK_DELIVERABLE_BYPASSED before status change", async () => {
+    // PR8u: PM (task-board owner) is the Done-er; Frontend is the worker.
     const t = await ctx.store.createTask({
       title: "x", owner: "Frontend", actor: "PM",
       deliverables: [
@@ -398,7 +406,7 @@ describe("PR8j: task model expansion", () => {
     });
     const before = (await ctx.store.listEventsAfter("")).length;
     await ctx.store.setTaskStatus({
-      taskId: t.id, newStatus: "Done", actor: "Frontend", forceIncomplete: true,
+      taskId: t.id, newStatus: "Done", actor: "PM", forceIncomplete: true,
     });
     const newEvents = (await ctx.store.listEventsAfter("")).slice(before);
     const bypass = newEvents.find((e) => e.type === "TASK_DELIVERABLE_BYPASSED");
@@ -411,7 +419,7 @@ describe("PR8j: task model expansion", () => {
     expect((bypass!.payload as { missing: string[] }).missing.sort()).toEqual(
       ["docs/api.md", "docs/spec.md"],
     );
-    expect(bypass!.payload.by).toBe("Frontend");
+    expect(bypass!.payload.by).toBe("PM");
   });
 
   it("forceIncomplete on a Done with NO missing deliverables does NOT emit the bypass event", async () => {
@@ -422,7 +430,7 @@ describe("PR8j: task model expansion", () => {
     await touch(path.join(ctx.projectRoot, "docs", "ok.md"));
     const before = (await ctx.store.listEventsAfter("")).length;
     await ctx.store.setTaskStatus({
-      taskId: t.id, newStatus: "Done", actor: "Frontend", forceIncomplete: true,
+      taskId: t.id, newStatus: "Done", actor: "PM", forceIncomplete: true,
     });
     const newEvents = (await ctx.store.listEventsAfter("")).slice(before);
     expect(newEvents.some((e) => e.type === "TASK_DELIVERABLE_BYPASSED")).toBe(false);
@@ -438,7 +446,7 @@ describe("PR8j: task model expansion", () => {
       ],
     });
     const done = await ctx.store.setTaskStatus({
-      taskId: t.id, newStatus: "Done", actor: "Frontend",
+      taskId: t.id, newStatus: "Done", actor: "PM",
     });
     expect(done.status).toBe("Done");
   });
@@ -502,10 +510,11 @@ tasks:
     const board = await ctx.store.readTaskBoard();
     const t = board.tasks["T-0001"];
     expect(t.parent).toBeNull();
-    expect(t.assignedBy).toBeNull();
+    expect(t.creator).toBeNull();
     expect(t.assets).toEqual([]);
     expect(t.deliverables).toEqual([]);
     expect(t.tags).toEqual([]);
+    expect(t.reviewers).toEqual([]);
   });
 });
 
@@ -628,5 +637,167 @@ describe("PR8n: manifest event filter", () => {
     expect(qa2.events).toEqual([]);
     // Cursor advanced past SESSION_CLAIMED.
     expect(qa2.fromCursor).not.toBe("");
+  });
+});
+
+// ---------- PR8u: reviewers + creator + new Done permission ----------
+
+describe("PR8u: reviewers + creator + Done permission", () => {
+  let ctx: { root: string; store: LocalFsStore };
+  beforeEach(async () => { ctx = await freshStore(); });
+  afterEach(async () => { await fsp.rm(ctx.root, { recursive: true, force: true }); });
+
+  it("createTask accepts and stores --reviewers (deduped)", async () => {
+    const t = await ctx.store.createTask({
+      title: "x", owner: "Backend", actor: "PM",
+      reviewers: ["QA", "QA", "Backend"],
+    });
+    // Dedup preserves first occurrence order.
+    expect(t.reviewers).toEqual(["QA", "Backend"]);
+  });
+
+  it("createTask refuses --reviewer that is not a registered role", async () => {
+    await expect(
+      ctx.store.createTask({
+        title: "x", owner: "Backend", actor: "PM",
+        reviewers: ["Nonexistent"],
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("owner who is also creator can mark Done (self-managed task)", async () => {
+    // PM creates a task for themselves: creator === owner === PM.
+    const t = await ctx.store.createTask({
+      title: "self-task", owner: "PM", actor: "PM",
+    });
+    await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "InProgress", actor: "PM" });
+    const done = await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "Done", actor: "PM",
+    });
+    expect(done.status).toBe("Done");
+  });
+
+  it("owner who is NOT creator is REFUSED for Done (sign-off act)", async () => {
+    // PM creates, Backend owns. Backend can do non-Done transitions
+    // but cannot self-Done. No reviewers, no extra board ownership.
+    const t = await ctx.store.createTask({
+      title: "delegated", owner: "Backend", actor: "PM",
+    });
+    await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "InProgress", actor: "Backend" });
+    await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "Review", actor: "Backend" });
+    await expect(
+      ctx.store.setTaskStatus({ taskId: t.id, newStatus: "Done", actor: "Backend" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("reviewer can mark Done even when not owner or creator or task-board owner", async () => {
+    // PM creates, Backend owns, QA reviews. QA is none of the legacy
+    // authorities but the reviewers field grants Done permission.
+    const t = await ctx.store.createTask({
+      title: "reviewed", owner: "Backend", actor: "PM",
+      reviewers: ["QA"],
+    });
+    await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "InProgress", actor: "Backend" });
+    await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "Review", actor: "Backend" });
+    const done = await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "Done", actor: "QA",
+    });
+    expect(done.status).toBe("Done");
+  });
+
+  it("reviewer can push status back to InProgress (rejection)", async () => {
+    // Same setup as above. QA looks, finds work incomplete, pushes
+    // back to InProgress. The reviewer-exception also covers non-Done
+    // transitions so they can shepherd the task without sending a
+    // separate report-then-owner-reverts dance.
+    const t = await ctx.store.createTask({
+      title: "rejected", owner: "Backend", actor: "PM",
+      reviewers: ["QA"],
+    });
+    await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "InProgress", actor: "Backend" });
+    await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "Review", actor: "Backend" });
+    const back = await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "InProgress", actor: "QA",
+    });
+    expect(back.status).toBe("InProgress");
+  });
+
+  it("task-board owner can still mark Done as a legacy escape (no reviewers configured)", async () => {
+    // PM owns state/task_board.yaml in the fixture. Even though PM is
+    // neither the owner nor a reviewer, the legacy task-board-owner
+    // protocol grants Done permission.
+    const t = await ctx.store.createTask({
+      title: "legacy-route", owner: "Backend", actor: "PM",
+    });
+    await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "Review", actor: "Backend" });
+    const done = await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "Done", actor: "PM",
+    });
+    expect(done.status).toBe("Done");
+  });
+
+  it("reviewers are stakeholders: TASK_STATUS_CHANGED to Review auto-surfaces in reviewer's manifest", async () => {
+    // The whole point: no explicit report needed. Backend pushes
+    // task to Review, and on QA's very next plan they see the
+    // TASK_STATUS_CHANGED event.
+    const t = await ctx.store.createTask({
+      title: "auto-notify", owner: "Backend", actor: "PM",
+      reviewers: ["QA"],
+    });
+    await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "InProgress", actor: "Backend" });
+    await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "Review", actor: "Backend" });
+    const m = await ctx.store.openOrCreatePlan("QA");
+    const events = m.events.filter(
+      (e) => e.type === "TASK_STATUS_CHANGED" && e.ref === t.id,
+    );
+    // QA should see both transitions (InProgress and Review) since
+    // they are a reviewer-stakeholder for the whole lifecycle.
+    expect(events.length).toBeGreaterThanOrEqual(1);
+    // Specifically the Review transition is in there.
+    expect(
+      events.some(
+        (e) => (e.payload as { newStatus: string }).newStatus === "Review",
+      ),
+    ).toBe(true);
+  });
+
+  it("reviewers list appears in TaskSummary on manifest", async () => {
+    const t = await ctx.store.createTask({
+      title: "summary", owner: "Backend", actor: "PM",
+      reviewers: ["QA"],
+    });
+    const m = await ctx.store.openOrCreatePlan("Backend");
+    const summary = m.tasks.find((x) => x.id === t.id);
+    expect(summary?.reviewers).toEqual(["QA"]);
+  });
+
+  it("legacy task with creator=null (backfill) keeps owner-Done as before", async () => {
+    // Hand-write a board with a legacy task (no creator, no
+    // assignedBy) — backfill sets creator=null. Owner-Done must still
+    // work so existing alpha projects don't lock up after upgrade.
+    const boardPath = path.join(ctx.root, "state", "task_board.yaml");
+    const legacy = `schemaVersion: "2.0.0-legacy"
+nextId: 1
+tasks:
+  T-0001:
+    id: T-0001
+    title: Old task
+    status: Ready
+    owner: Backend
+    priority: P2
+    dependsOn: []
+    acceptance: ''
+    createdAt: '2024-01-01T00:00:00.000Z'
+    updatedAt: '2024-01-01T00:00:00.000Z'
+`;
+    await fsp.writeFile(boardPath, legacy);
+    const board = await ctx.store.readTaskBoard();
+    expect(board.tasks["T-0001"].creator).toBeNull();
+    expect(board.tasks["T-0001"].reviewers).toEqual([]);
+    // Backend (owner, creator unknown) can still Done.
+    const done = await ctx.store.setTaskStatus({
+      taskId: "T-0001", newStatus: "Done", actor: "Backend",
+    });
+    expect(done.status).toBe("Done");
   });
 });

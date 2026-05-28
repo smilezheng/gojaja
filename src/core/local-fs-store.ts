@@ -85,10 +85,24 @@ function backfillTaskFields(t: Task): void {
   if (!Array.isArray(t.dependsOn)) t.dependsOn = [];
   if (typeof t.acceptance !== "string") t.acceptance = "";
   if (t.parent === undefined) t.parent = null;
-  if (t.assignedBy === undefined) t.assignedBy = null;
+  // PR8u: assignedBy → creator rename. Promote any legacy field, then
+  // drop it from the in-memory record so subsequent writes use the new
+  // shape. Legacy tasks with neither field land as creator=null;
+  // setTaskStatus(... Done) treats null as "no creator restriction" so
+  // existing alpha task boards keep working for owner-Done.
+  const legacy = t as unknown as { assignedBy?: RoleId | "SYSTEM" | null };
+  if (t.creator === undefined) {
+    t.creator = legacy.assignedBy ?? null;
+  }
+  if ("assignedBy" in (t as object)) {
+    delete (t as unknown as Record<string, unknown>).assignedBy;
+  }
   if (!Array.isArray(t.assets)) t.assets = [];
   if (!Array.isArray(t.deliverables)) t.deliverables = [];
   if (!Array.isArray(t.tags)) t.tags = [];
+  // PR8u: reviewers default to empty list. Legacy tasks fall through
+  // to the task-board-owner protocol for Done sign-off.
+  if (!Array.isArray(t.reviewers)) t.reviewers = [];
 }
 
 /**
@@ -182,6 +196,11 @@ function isTaskStakeholder(role: RoleId, taskId: string, board: TaskBoard): bool
   for (const other of Object.values(board.tasks)) {
     if (other.owner === role && other.dependsOn.includes(taskId)) return true;
   }
+  // PR8u: reviewers are also stakeholders. TASK_STATUS_CHANGED on a
+  // task they review (most importantly: the transition to Review)
+  // surfaces in their manifest without the owner needing to send an
+  // explicit report.
+  if (task.reviewers.includes(role)) return true;
   return false;
 }
 
@@ -1621,6 +1640,7 @@ export class LocalFsStore implements Store {
     assets?: TaskAsset[];
     deliverables?: Deliverable[];
     tags?: string[];
+    reviewers?: RoleId[];
   }): Promise<Task> {
     const title = String(input.title ?? "").trim();
     if (title.length === 0) {
@@ -1628,12 +1648,12 @@ export class LocalFsStore implements Store {
     }
     const priority = (input.priority ?? "P2").trim();
     const owner = input.owner === undefined ? null : input.owner;
+    const config = await this.readConfig();
     if (owner !== null) {
       validateRoleId(owner);
       // Step 12: owner must be a registered role. Otherwise the
       // TASK_ASSIGNED event we emit goes to a nobody and the typo
       // (e.g. `--owner Forntend`) is silently accepted.
-      const config = await this.readConfig();
       if (!config.roles[owner]) {
         throw new UsageError(
           `Owner role '${owner}' is not registered. Run \`gojaja role list\` ` +
@@ -1648,6 +1668,21 @@ export class LocalFsStore implements Store {
     const assets = input.assets ?? [];
     const deliverables = input.deliverables ?? [];
     const tags = (input.tags ?? []).map((t) => String(t));
+    // PR8u: reviewers validated like owner — each must be a registered
+    // role. We dedup to keep the audit log tidy; duplicate listings
+    // would otherwise show up in `task show` and confuse readers.
+    const rawReviewers = (input.reviewers ?? []).map((r) => validateRoleId(r));
+    const reviewerSet = new Set<RoleId>();
+    for (const r of rawReviewers) {
+      if (!config.roles[r]) {
+        throw new UsageError(
+          `Reviewer role '${r}' is not registered. Run \`gojaja role list\` ` +
+            `to see registered roles or \`gojaja role create ${r} ...\` to add it first.`,
+        );
+      }
+      reviewerSet.add(r);
+    }
+    const reviewers: RoleId[] = [...reviewerSet];
 
     // PR8j: validate asset / deliverable refs up front so the user
     // gets a single error per invocation rather than discovering
@@ -1717,10 +1752,11 @@ export class LocalFsStore implements Store {
         createdAt: now,
         updatedAt: now,
         parent,
-        assignedBy: input.actor,
+        creator: input.actor,
         assets,
         deliverables,
         tags,
+        reviewers,
       };
       board.nextId = idNumber;
       board.tasks[id] = task;
@@ -1800,11 +1836,62 @@ export class LocalFsStore implements Store {
       if (!task) {
         throw new UsageError(`Unknown task '${input.taskId}'.`);
       }
-      // Either the actor owns the task board, or the actor IS this task's
-      // owner. The owner-exception lets agents update their own status
-      // without requiring blanket task_board write access.
+      // PR8u permission model:
+      //
+      //   For Done transitions (sign-off act):
+      //     - SYSTEM: allowed (CLI run by the human user directly).
+      //     - actor in task.reviewers: allowed (explicit review hop).
+      //     - actor === task.owner AND actor === task.creator: allowed
+      //       (self-managed — you created and own this task).
+      //     - actor === task.owner AND task.creator === null: allowed
+      //       (legacy alpha task without a creator field on disk;
+      //       back-compat with pre-PR8u boards).
+      //     - else: fall through to requireOwnership(task_board.yaml).
+      //
+      //   For non-Done transitions (normal work):
+      //     - SYSTEM: allowed.
+      //     - actor === task.owner: allowed (owner-exception).
+      //     - actor in task.reviewers: allowed (reviewer can push the
+      //       task back to InProgress when they reject).
+      //     - else: fall through to requireOwnership.
       const isTaskOwner = input.actor !== "SYSTEM" && task.owner === input.actor;
-      if (!isTaskOwner) {
+      const isCreator = input.actor !== "SYSTEM" && task.creator === input.actor;
+      const isReviewer =
+        input.actor !== "SYSTEM" && task.reviewers.includes(input.actor);
+      const isSystem = input.actor === "SYSTEM";
+      let permitted = false;
+      if (input.newStatus === "Done") {
+        if (isSystem) permitted = true;
+        else if (isReviewer) permitted = true;
+        else if (isTaskOwner && (isCreator || task.creator === null)) permitted = true;
+      } else {
+        if (isSystem) permitted = true;
+        else if (isTaskOwner) permitted = true;
+        else if (isReviewer) permitted = true;
+      }
+      if (!permitted) {
+        // Last resort: task-board-owner can do anything (legacy
+        // coordinator protocol). requireOwnership throws ForbiddenError
+        // (exit 9) if the actor is not on the owns list either.
+        if (
+          input.newStatus === "Done" &&
+          isTaskOwner &&
+          !isCreator &&
+          task.creator !== null
+        ) {
+          // Special-case the most common new failure mode so the
+          // error is informative: owner trying to Done a task they
+          // did not create AND with no reviewers configured.
+          throw new ForbiddenError(
+            `Role '${input.actor}' is the owner of ${task.id} but not its creator. ` +
+              `Done is a sign-off act; ask a reviewer or task-board owner to accept. ` +
+              (task.reviewers.length > 0
+                ? `Reviewers configured: ${task.reviewers.join(", ")}.`
+                : `No reviewers configured for this task; either add one via ` +
+                  `\`gojaja task reviewer ...\` (planned) or escalate to the role ` +
+                  `that owns state/task_board.yaml.`),
+          );
+        }
         await this.requireOwnership(input.actor, Paths.taskBoardFile);
       }
       const previousStatus = task.status;
@@ -1958,6 +2045,7 @@ export class LocalFsStore implements Store {
       };
       if (t.parent) summary.parent = t.parent;
       if (t.tags.length > 0) summary.tags = t.tags.slice();
+      if (t.reviewers.length > 0) summary.reviewers = t.reviewers.slice();
 
       const children = childrenByParent.get(t.id);
       if (children && children.length > 0) {

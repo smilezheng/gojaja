@@ -89,6 +89,16 @@ function parseTags(rawArgs: string[] | undefined): string[] {
     .filter((t) => t.length > 0);
 }
 
+/**
+ * PR8u: pull all `--reviewer <role>` repetitions from raw argv.
+ * Each value is a role id; validation happens in `Store.createTask`.
+ */
+function parseReviewers(rawArgs: string[] | undefined): string[] {
+  return multiFlag(rawArgs, "reviewer")
+    .map((r) => r.trim())
+    .filter((r) => r.length > 0);
+}
+
 async function actorRole(args: ParsedArgs): Promise<{ root: string; actor: RoleId | "SYSTEM" }> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
@@ -111,6 +121,7 @@ async function runTaskNew(args: ParsedArgs): Promise<number> {
   const assets = parseAssets(args.rawArgs);
   const deliverables = parseDeliverables(args.rawArgs);
   const tags = parseTags(args.rawArgs);
+  const reviewers = parseReviewers(args.rawArgs);
   const json = boolFlag(args.flags, "json");
   const { root, actor } = await actorRole(args);
   const store = await openStoreOrThrow(root);
@@ -125,6 +136,7 @@ async function runTaskNew(args: ParsedArgs): Promise<number> {
     assets,
     deliverables,
     tags,
+    reviewers,
   });
   if (json) {
     process.stdout.write(JSON.stringify({ status: "created", task }) + "\n");
@@ -286,7 +298,9 @@ async function runTaskShow(args: ParsedArgs): Promise<number> {
   if (task.parent) process.stdout.write(`parent:     ${task.parent}\n`);
   process.stdout.write(`priority:   ${task.priority}\n`);
   if (task.tags.length > 0) process.stdout.write(`tags:       ${task.tags.join(", ")}\n`);
-  if (task.assignedBy) process.stdout.write(`assignedBy: ${task.assignedBy}\n`);
+  if (task.creator) process.stdout.write(`creator:    ${task.creator}\n`);
+  if (task.reviewers.length > 0)
+    process.stdout.write(`reviewers:  ${task.reviewers.join(", ")}\n`);
   process.stdout.write(`dependsOn:  ${task.dependsOn.join(", ") || "(none)"}\n`);
   process.stdout.write(`createdAt:  ${task.createdAt}\n`);
   process.stdout.write(`updatedAt:  ${task.updatedAt}\n`);
@@ -351,7 +365,8 @@ export async function runTask(args: ParsedArgs): Promise<number> {
         "Usage: gojaja task <new|assign|status|list|show> [args]\n" +
           "  gojaja task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3]\n" +
           "                   [--depends-on T-XXXX,...] [--acceptance <text>] [--parent T-XXXX]\n" +
-          "                   [--tag <label> ...] [--asset 'kind:ref::desc' ...]\n" +
+          "                   [--tag <label> ...] [--reviewer <role> ...]\n" +
+          "                   [--asset 'kind:ref::desc' ...]\n" +
           "                   [--deliverable 'kind:ref::desc' ...]\n" +
           "  gojaja task assign <task-id> --to <role>\n" +
           `  gojaja task status <task-id> <${TASK_STATUSES.join("|")}> [--force-incomplete]\n` +

@@ -317,7 +317,7 @@ Tasks are the unit of "what should this role be working on right now".
 The full schema is documented in
 [SCHEMA -> task_board.yaml](./SCHEMA.md#statetask_boardyaml).
 
-### `gojaja task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3] [--depends-on T-NNNN,...] [--acceptance <text>] [--parent T-NNNN] [--tag <label> ...] [--asset 'kind:ref::desc' ...] [--deliverable 'kind:ref::desc' ...]`
+### `gojaja task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3] [--depends-on T-NNNN,...] [--acceptance <text>] [--parent T-NNNN] [--tag <label> ...] [--reviewer <role> ...] [--asset 'kind:ref::desc' ...] [--deliverable 'kind:ref::desc' ...]`
 
 - The store assigns the next `T-NNNN` id atomically (under a
   `task-board` lock); ids are never reused even if a task is deleted.
@@ -326,7 +326,8 @@ The full schema is documented in
 - `from` for the events is the actor's role (from `GOJAJA_SESSION`) when
   available, otherwise `"SYSTEM"` (so a human one-off invocation still
   produces audit events). The same actor is recorded as the task's
-  `assignedBy` (PR8j); `assignTask` does NOT update this field.
+  `creator` (PR8u, renamed from PR8j's `assignedBy`); `assignTask`
+  does NOT update this field.
 - `--parent` (PR8j) attaches the new task as a subtask. Parent must
   exist on the board; the chain is cycle-checked at read time and
   refused if it would exceed depth 5. Parent status is NOT auto-derived
@@ -334,6 +335,13 @@ The full schema is documented in
   `manifest.tasks[].childCounts`.
 - `--tag` (PR8j) is repeatable; each value lands in `task.tags`. Used
   for filtered listing via `task list --tag <label>`.
+- `--reviewer` (PR8u) is repeatable; each value lands in
+  `task.reviewers`. Reviewers are the roles authorised to mark this
+  task `Done` regardless of ownership AND they become automatic
+  stakeholders for the task — `TASK_STATUS_CHANGED` events surface in
+  their manifest without the owner needing to send an explicit report.
+  Duplicates are deduped at create time; each reviewer must be a
+  registered role (USAGE if not).
 - `--asset` / `--deliverable` (PR8j) accept `kind:ref` or
   `kind:ref::description`. `::` is the separator so URLs survive
   intact. Kinds:
@@ -349,7 +357,7 @@ The full schema is documented in
 - Sets `task.owner` and emits `TASK_ASSIGNED` with `previousOwner` and
   `newOwner`.
 - No-op (no event) when the owner already matches.
-- Does NOT change `task.assignedBy` — that field records the original
+- Does NOT change `task.creator` — that field records the original
   creator. Reassignment is auditable via the event stream alone.
 
 ### `gojaja task status <task-id> <Backlog|Ready|InProgress|Blocked|Review|Done> [--force-incomplete]`
@@ -358,17 +366,29 @@ The full schema is documented in
 - v2 does not enforce status transitions; any role with write access
   may move any task between any two statuses. A constrained state
   machine is on the roadmap if it proves necessary.
-- PR8j adds ONE invariant on the `Done` transition: every
-  `kind: "file"` deliverable on the task must point at an existing
-  file in the project tree. Missing files refuse the transition with
-  USAGE listing every absent ref. The agent's natural fix is to
-  produce the file and retry.
-- `--force-incomplete` (PR8j) bypasses the gate. The bypass is NOT
-  silent: a `TASK_DELIVERABLE_BYPASSED` event is emitted with the
-  missing refs and the actor BEFORE the `TASK_STATUS_CHANGED` event,
-  so the durable audit log shows "approval given, then status moved".
-  Reviewers escalating a task with a known-incomplete deliverable can
-  use this to keep momentum without losing accountability.
+- **PR8u: who is allowed to call this.** Authority is split between
+  Done (sign-off) and other statuses:
+    - Done: SYSTEM OR actor in `task.reviewers` OR (actor === owner
+      AND actor === creator) OR actor owns `state/task_board.yaml`.
+      Legacy tasks where `creator === null` (no `creator` field on
+      disk, pre-PR8u boards) keep owner-Done by design for back-compat.
+    - Other transitions: SYSTEM OR actor === owner (owner-exception)
+      OR actor in `task.reviewers` (reviewer-exception, so reviewers
+      can push back to InProgress without an extra report-then-revert
+      hop) OR actor owns `state/task_board.yaml`.
+    - A non-permitted actor for Done gets a clear `FORBIDDEN` error
+      listing the configured reviewers (or recommending escalation
+      if none are configured).
+- PR8j: on Done transitions, every `kind: "file"` deliverable on the
+  task must point at an existing file in the project tree. Missing
+  files refuse the transition with USAGE listing every absent ref.
+- `--force-incomplete` (PR8j) bypasses the deliverable gate. The
+  bypass is NOT silent: a `TASK_DELIVERABLE_BYPASSED` event is
+  emitted with the missing refs and the actor BEFORE the
+  `TASK_STATUS_CHANGED` event, so the durable audit log shows
+  "approval given, then status moved". Note `--force-incomplete`
+  does NOT bypass the new PR8u permission gate; it only bypasses the
+  deliverable check.
 
 ### `gojaja task list [--owner <role>] [--status <s>] [--tag <label> ...]` and `gojaja task show <id>`
 
@@ -377,10 +397,9 @@ The full schema is documented in
   are for ad-hoc inspection.
 - `--tag` (PR8j) filters with OR semantics; a task matches if any tag
   matches any value.
-- `task show` (PR8j) renders parent, immediate children, assets, and
-  deliverables with on-disk markers: `[x]` for existing file
-  deliverables, `[ ]` for missing, `[?]` for url/manual kinds that
-  cannot be auto-verified.
+- `task show` renders parent, immediate children, assets, deliverables
+  with on-disk markers (`[x]` / `[ ]` / `[?]`), plus PR8u's `creator`
+  and `reviewers` fields when present.
 
 ## RFCs
 

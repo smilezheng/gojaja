@@ -25,6 +25,72 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   `config.yaml`, so an HR/Admin role can be granted role-creation
   authority via the normal ownership model.
 
+## [2.0.0-alpha.26] — 2026-05-28
+
+### Reviewers + Done permission (PR8u)
+
+Three related changes turn the previously-temporary Review handoff
+protocol into a first-class part of the task model:
+
+**1. `task.reviewers: RoleId[]` field.** Set at create time
+(`task new --reviewer X --reviewer Y`). Each reviewer must be a
+registered role; duplicates are deduped. Reviewers can mark the task
+`Done` regardless of ownership AND become automatic stakeholders —
+\`TASK_STATUS_CHANGED\` events on the task surface in their manifest
+without the owner sending an explicit report. (The previous
+"task-board-owner protocol" stays as a fallback for tasks with no
+reviewers.)
+
+**2. `task.assignedBy` renamed to `task.creator`.** Same semantics
+(populated from \`actor\` at \`createTask\` time, NOT updated by
+\`assignTask\`). The new name reflects the field's purpose better —
+it's the original creator, not "the most recent assigner".
+\`readTaskBoard\` auto-promotes the legacy \`assignedBy\` value on
+read, so pre-PR8u boards round-trip cleanly.
+
+**3. Stricter Done permission.** Previously the owner-exception let
+any task's owner unilaterally mark their own task Done. Now Done is a
+sign-off act and requires one of:
+
+- SYSTEM (human user running the CLI without a session),
+- actor is in \`task.reviewers\`,
+- actor is owner AND actor is creator (self-managed task — you both
+  created it and own it; you can ship it yourself),
+- actor owns \`state/task_board.yaml\` (legacy / coordinator route),
+- (back-compat: legacy tasks with \`creator === null\` on disk keep
+  the pre-PR8u owner-Done behaviour so existing alpha boards work).
+
+Other transitions (InProgress / Blocked / Review / Backlog / Ready)
+keep the owner-exception. Reviewers also gain non-Done permission so
+they can push back to InProgress when rejecting, without a
+report-then-owner-reverts dance.
+
+A non-permitted owner trying to Done gets a clear \`FORBIDDEN\` (exit
+9) that names the configured reviewers (or recommends escalation if
+none).
+
+> **Behaviour change (alpha-only).** Owner can no longer Done their
+> own task unconditionally. New flow: add reviewers at create time,
+> or let an explicit reviewer / task-board owner do the final Done.
+
+Manifest changes:
+
+- \`TaskSummary\` gains optional \`reviewers\` so the agent sees who
+  else can Done their task without opening the full record.
+- PR8n visibility filter: reviewers are now stakeholders, so
+  \`TASK_STATUS_CHANGED\` (and \`TASK_DELIVERABLE_BYPASSED\`,
+  \`TASK_CREATED\`) on a task they review automatically land in their
+  manifest.
+
+CLI:
+
+- \`task new --reviewer <role>\` (repeatable).
+- \`task show\` renders \`creator\` and \`reviewers\` when present.
+
+Suite 321 -> 331 (10 new PR8u tests in \`task-board.test.ts\`;
+PR8j-era deliverable tests updated to use PM as the Done-er
+since Frontend can no longer self-Done).
+
 ## [2.0.0-alpha.25] — 2026-05-28
 
 ### RFC creator is automatically a voter (PR8t)

@@ -176,18 +176,27 @@ the **parent** to a lead role. The lead:
    sub-task id.
 6. When all sub-tasks Done, push parent to \`Review\` (see below).
 
-### Review handoff (temporary protocol)
+### Review handoff
 
-Pushing a task to Review:
+Tasks carry a \`reviewers\` field set at creation
+(\`task new --reviewer X --reviewer Y ...\`). Pushing a task to
+Review automatically surfaces \`TASK_STATUS_CHANGED\` in every
+reviewer's manifest — no explicit report needed (PR8u). Reviewers
+then either:
 
-1. Report to a role that owns \`state/task_board.yaml\` — typically
-   your \`reportsTo\`; use \`role list\` / \`role show\` to confirm.
-2. They either \`task status <id> Done\` (accept) or
-   \`task status <id> InProgress\` + report explaining what's missing.
-3. Do NOT move your own task to Done. The owner-exception lets you
-   self-update status, but Done is a sign-off act.
+- \`task status <id> Done\` to accept (deliverable gate still applies).
+- \`task status <id> InProgress\` (optionally + a report to the
+  owner) to push back.
 
-A first-class \`reviewers\` field on tasks is on the roadmap.
+Reviewers can also do non-Done transitions on the task they review,
+so they can shepherd it without a separate "ask owner to revert" hop.
+
+**You can mark your own task Done only if you are also its creator**
+(self-managed task — you created it AND own it). Otherwise the
+transition refuses with \`FORBIDDEN\`; ask one of the task's
+\`reviewers\` to accept, or escalate to a role that owns
+\`state/task_board.yaml\`. Legacy tasks on disk with no \`creator\`
+field keep their old owner-Done behaviour.
 
 ### Idle
 

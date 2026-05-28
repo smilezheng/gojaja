@@ -265,18 +265,34 @@ export interface Task {
    */
   parent: string | null;
   /**
-   * Role that originally created (and thereby assigned) this task. SYSTEM
-   * for tasks created by the CLI running outside a session. Reassignment
-   * via `assignTask` does NOT change this — see the `TASK_ASSIGNED`
-   * event stream for reassignment history.
+   * PR8u: role that originally created the task. SYSTEM for tasks
+   * created by the CLI with no active session. `null` for legacy
+   * task records (pre-PR8u, no `creator` and no legacy
+   * `assignedBy`). Immutable after creation — `assignTask` does NOT
+   * update it; reassignment history lives in the event stream.
+   * (Was `assignedBy` in PR8j; renamed for clarity.)
    */
-  assignedBy: RoleId | "SYSTEM" | null;
+  creator: RoleId | "SYSTEM" | null;
   /** Reference materials (design docs, Figma links, ...). */
   assets: TaskAsset[];
   /** Required outputs; file-kind entries are gated on Done. */
   deliverables: Deliverable[];
   /** Free-form labels for filtering / grouping. */
   tags: string[];
+
+  // ---- PR8u fields ------------------------------------------------------
+
+  /**
+   * PR8u: roles authorised to mark this task `Done` even when they
+   * are not the task's owner. Reviewers are also automatic
+   * stakeholders for the task's lifecycle — `TASK_STATUS_CHANGED`
+   * events surface to them in their manifest without the owner
+   * needing to send an explicit report.
+   *
+   * Empty array means "no review hop"; the legacy task-board-owner
+   * protocol still works as a fallback.
+   */
+  reviewers: RoleId[];
 }
 
 export interface TaskBoard {
@@ -322,6 +338,9 @@ export interface TaskSummary {
   unmetDeliverables?: number;
   /** Tags, when non-empty. */
   tags?: string[];
+  /** PR8u: reviewers list, when non-empty. Lets the agent see at a
+   *  glance who can mark the task Done besides themselves. */
+  reviewers?: RoleId[];
 }
 
 /** Payload shape for type=TASK_CREATED events. */
