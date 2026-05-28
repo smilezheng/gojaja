@@ -22,6 +22,45 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   `directReports`, role-level RFC `decisionScopes`. Goal: 3+ layer
   organisations are pleasant rather than noisy.
 
+## [2.0.0-alpha.19] — 2026-05-28
+
+### Brainstorm-mode RFC (empty options) (PR8l)
+
+`createRfc` no longer requires `--options`. An RFC opened without
+options enters **brainstorm mode** — voters comment / reply freely
+with no concrete choices on the table. The same primitive now covers
+both "wide-open discussion" and the existing decision flow; no new
+mechanism, no new on-disk shape, no schema break.
+
+The two modes are mutually exclusive at decide time:
+
+- Brainstorm-mode RFC (`options: []`): `rfc decide` accepts
+  **without** `--option`. The decision is recorded as `accepted`
+  with `chosenOption: null` and the rationale carries the takeaway.
+- Options-bearing RFC (`options.length >= 1`): `rfc decide` requires
+  `--option <id>`, same as before. Both paths are enforced
+  symmetrically — passing `--option` to a brainstorm RFC, or omitting
+  it on an options-bearing RFC, raises USAGE with the recovery hint.
+
+A brainstorm RFC upgrades into a decision flow the moment anyone
+runs `rfc add-option`. From that point on it behaves exactly like a
+PR8g-style RFC: pre-decide works, the ACK gate arms, decide requires
+`--option`.
+
+`pre-decide` refuses on a brainstorm RFC and points at `add-option`:
+nothing concrete to lock in until at least one option exists.
+
+Schema version unchanged; this is a pure constraint relaxation. CLI
+signature change is purely additive:
+
+- `agentctl rfc new <slug> ...` — `--options` is now OPTIONAL.
+- `agentctl rfc decide <id> --rationale ...` — `--option` is now
+  CONDITIONAL (required iff the RFC has options).
+
+`Store.decideRfc.chosenOption` widened to `string | null`.
+
+Suite 284 -> 294.
+
 ## [2.0.0-alpha.18] — 2026-05-28
 
 ### Task model expansion: parent / assets / deliverables / assignedBy / tags (PR8j)

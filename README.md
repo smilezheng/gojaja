@@ -208,6 +208,30 @@ agentctl release
 unset MA_SESSION
 ```
 
+### Brainstorm (RFC without `--options`)
+
+When three or more roles need to weigh in on a question with no
+concrete options yet, open an RFC without `--options`:
+
+```bash
+agentctl rfc new q3-priorities \
+  --title "Q3 priorities — what should we be optimising for?" \
+  --deciders TL --voters PM,Backend,Frontend,DevOps \
+  --description "Performance, growth, or reliability? Drop ideas, risks, and follow-ups."
+
+# Voters post freely — no option required
+agentctl rfc comment RFC-0001 --rationale "Idea: focus on perf; we lost two churned accounts to latency."
+agentctl rfc comment RFC-0001 --rationale "Risk: aborting feature X mid-flight upsets enterprise tier." --reply-to <prev-id>
+
+# Once a concrete choice emerges, anyone can lift it into the option list
+agentctl rfc add-option RFC-0001 --option perf:'Q3 = perf-only' --rationale "From discussion above."
+
+# Either close without picking (takeaway-only):
+agentctl rfc decide RFC-0001 --rationale "Discussion: revisit in Q4; no specific commitment now."
+# Or, after add-option, close with a pick (normal RFC flow):
+agentctl rfc decide RFC-0001 --option perf --rationale "Going with perf-only."
+```
+
 ---
 
 ## Common situations

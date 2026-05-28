@@ -295,6 +295,20 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     new fields with safe defaults on read.
   - Suite 270 -> 284.
 
+- **PR8l — brainstorm-mode RFC (empty options).**
+  - `createRfc` no longer rejects `options: []`. An RFC created without
+    options opens in brainstorm mode: voters comment freely; pre-decide
+    is refused (points at `add-option`); `decide` accepts without
+    `--option` and records `chosenOption: null` with the rationale
+    carrying the takeaway.
+  - The moment anyone runs `rfc add-option`, the RFC upgrades to a
+    decision flow: `decide` then requires `--option`, pre-decide /
+    ACK gate works normally.
+  - `Store.decideRfc.chosenOption` widened to `string | null`.
+  - `rfc decide --option` becomes conditional in the CLI.
+  - Non-breaking: no schema change; constraint relaxation only.
+  - Suite 284 -> 294.
+
 ### Planned, in priority order
 
 - **PR8k — org-hierarchy ergonomics (planned).**
@@ -386,11 +400,14 @@ collapses the `wait --mode block | exit` dichotomy into a single
 deadline-driven, chunked, resumable primitive. PR8j expands the task
 model with parent/assets/deliverables/assignedBy/tags so 3+ layer
 organisations can express decomposition + hard outputs natively.
+PR8l relaxes the RFC `--options` requirement so the same primitive
+covers wide-open brainstorm sessions (no concrete choices yet).
 The "breaking" alpha-stage surface changes are PR8f-C
 (`write-state` → `state edit`), PR8g (comments file shape),
 PR8g.1 (pre-decide field/status removed), PR8i (wait flags +
 `.wait` sentinel removed), and PR8j (task field additions, Done
-deliverable gate). PR8h, PR8k, and PR9–PR10 harden the layer for
-everyday use; PR8h is the only remaining RFC-affecting PR
+deliverable gate). PR8l is non-breaking (constraint relaxation only).
+PR8h, PR8k, and PR9–PR10 harden the layer for everyday use; PR8h
+is the only remaining RFC-affecting PR
 before `v2.0.0`. Anything past `v2.0.0` only ships after the chaos
 suite (PR10) is green.

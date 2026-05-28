@@ -446,7 +446,13 @@ export interface Store {
   decideRfc(input: {
     rfcId: string;
     decidedBy: RoleId;
-    chosenOption: string;
+    /**
+     * Option id to lock in. Required when the proposal has at least
+     * one option; must be empty / null for brainstorm-mode RFCs
+     * (proposal.options.length === 0), in which case the decision
+     * carries the takeaway via `rationale` alone.
+     */
+    chosenOption: string | null;
     rationale: string;
   }): Promise<RfcDecision>;
 

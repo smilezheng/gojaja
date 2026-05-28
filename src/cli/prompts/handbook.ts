@@ -336,6 +336,39 @@ Do NOT use \`--for task-assigned\` while you still have an open task
 broadcast is for genuinely-empty queues, not for "I don't feel like
 my current task".
 
+### Brainstorm via an options-less RFC (PR8l)
+
+When you need wide-open discussion (multiple ideas, risks, unknowns —
+no concrete choice to pick yet), open an RFC with **no** \`--options\`:
+
+\`\`\`bash
+agentctl rfc new q3-priorities \\
+  --title "Q3 priorities — open discussion" \\
+  --deciders <decider-role> --voters <r1,r2,r3> \\
+  --description "..."
+\`\`\`
+
+The RFC opens in brainstorm mode: voters post comments / replies, no
+ACK gate, no pre-decide required. Anyone can run
+\`agentctl rfc add-option <id> --option X:summary --rationale ...\`
+to lift a thread into a concrete choice, at which point the RFC
+upgrades into a normal decision flow (decide then requires
+\`--option\`).
+
+If the discussion concludes without a specific choice, the decider
+runs \`agentctl rfc decide <id> --rationale "<takeaway>"\` (no
+\`--option\`); the decision is recorded as accepted with
+\`chosenOption: null\` and the rationale carries the substance.
+
+Pick brainstorm-RFC over reports/worklogs when:
+
+- Three or more roles need to weigh in.
+- The set of options is not yet clear (or might never be — some
+  brainstorms terminate without a binary choice).
+- You want the discussion in the audit log.
+
+Pick reports/worklogs when the question has a clear single answerer.
+
 ### Deliverables are gates, not suggestions (PR8j)
 
 If your task carries \`deliverables: [{ kind: file, ref: ... }]\`, the

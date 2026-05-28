@@ -568,6 +568,45 @@ Within an RFC:
   inadequate.
 - Use **`--reply-to`** when reacting to a specific point.
 
+### Brainstorm mode (PR8l: RFC with no options)
+
+When the question is "what should we even do about X?" — no concrete
+choices on the table yet — open an RFC **without** `--options`:
+
+```bash
+agentctl rfc new q3-priorities \
+  --title "Q3 priorities — what should we be optimising for?" \
+  --deciders <leader-role> --voters <r1,r2,r3> \
+  --description "..."
+```
+
+The RFC opens in `open` status with `options: []`. Voters post
+comments (ideas, risks, follow-ups) freely; replies thread via
+`--reply-to`. The pre-decide / ACK gate is inert (pre-decide refuses
+on an options-empty RFC and points at `add-option`).
+
+Two ways the RFC can close:
+
+1. **Discussion converges on a concrete choice.** Anyone runs
+   `agentctl rfc add-option <id> --option X:summary --rationale "..."`
+   to add it. From that point on, the RFC behaves like a normal
+   decision RFC: `rfc decide` requires `--option <X>`, `rfc pre-decide`
+   works again, the ACK gate arms when pre-decide is called.
+
+2. **Discussion concludes without a specific choice.** The decider
+   runs `agentctl rfc decide <id> --rationale "<takeaway>"` (no
+   `--option`). The decision is `accepted` with `chosenOption: null`;
+   the rationale carries the substance of the conclusion (e.g.
+   "Q3 stays focused on perf; deferring the auth rewrite to Q4").
+
+A brainstorm RFC that needs to die without consensus runs
+`agentctl rfc reject <id> --rationale "<why>"`. Same as a decision
+RFC reject: `chosenOption: null`, `outcome: "rejected"`.
+
+The brainstorm flavour is the same primitive — same on-disk layout,
+same threading, same `unreadComments` accounting, same manifest
+plumbing — only the `options` array is empty until someone adds one.
+
 ---
 
 ## 11. Relationship to other mechanisms

@@ -53,12 +53,12 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
   if (deciders.length === 0) {
     throw new UsageError("Specify at least one decider with --deciders <role>[,role2,...].");
   }
+  // PR8l: --options is optional. Empty means "brainstorm mode" — the
+  // RFC opens with no concrete choices on the table. Voters post free
+  // comments; anyone can later run `rfc add-option` to introduce a
+  // pickable choice, which upgrades the RFC into a decision flow.
+  // `rfc decide` then refuses to be given --option until options exist.
   const options = parseOptions(optionalString(args.flags, "options"));
-  if (options.length === 0) {
-    throw new UsageError(
-      "Specify at least one option with --options <id>[:summary][,<id>[:summary]...].",
-    );
-  }
   const relatedTasks = splitList(optionalString(args.flags, "task"));
   const deadline = optionalString(args.flags, "deadline") ?? null;
   const json = boolFlag(args.flags, "json");
@@ -71,11 +71,15 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
   if (json) {
     process.stdout.write(JSON.stringify({ status: "created", proposal }) + "\n");
   } else {
+    const optionsLine =
+      proposal.options.length === 0
+        ? "(brainstorm — no options yet; run `rfc add-option` to add one)"
+        : proposal.options.map((o) => o.id).join(", ");
     process.stdout.write(
       `Created ${proposal.id} (${proposal.status}): ${proposal.title}\n` +
         `  voters:        ${proposal.voters.join(", ") || "(none)"}\n` +
         `  deciders:      ${proposal.deciders.join(", ")}\n` +
-        `  options:       ${proposal.options.map((o) => o.id).join(", ")}\n` +
+        `  options:       ${optionsLine}\n` +
         `  relatedTasks:  ${proposal.relatedTasks.join(", ") || "(none)"}\n`,
     );
     if (proposal.description.length === 0) {
@@ -243,9 +247,16 @@ async function runRfcObject(args: ParsedArgs): Promise<number> {
 async function runRfcDecide(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
-    throw new UsageError("Usage: agentctl rfc decide <rfc-id> --option <opt> --rationale <text>");
+    throw new UsageError(
+      "Usage: agentctl rfc decide <rfc-id> [--option <opt>] --rationale <text>\n" +
+        "  --option is required for RFCs that have options, and must NOT be\n" +
+        "  passed for brainstorm-mode RFCs (created without --options).",
+    );
   }
-  const chosenOption = requireString(args.flags, "option");
+  // PR8l: --option is conditional. The store enforces the matching
+  // invariant against the proposal; we just forward what the caller
+  // gave (or null) and let it return the right error message.
+  const chosenOption = optionalString(args.flags, "option") ?? null;
   const rationale = requireString(args.flags, "rationale");
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
@@ -255,7 +266,11 @@ async function runRfcDecide(args: ParsedArgs): Promise<number> {
   if (json) {
     process.stdout.write(JSON.stringify({ status: "decided", decision }) + "\n");
   } else {
-    process.stdout.write(`Accepted ${rfcId} (option ${chosenOption}) by ${role}.\n`);
+    if (chosenOption) {
+      process.stdout.write(`Accepted ${rfcId} (option ${chosenOption}) by ${role}.\n`);
+    } else {
+      process.stdout.write(`Accepted ${rfcId} (brainstorm — no option chosen) by ${role}.\n`);
+    }
   }
   return 0;
 }

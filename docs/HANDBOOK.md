@@ -75,6 +75,10 @@ In scope:
   transition until the path exists on disk. `--force-incomplete` is
   legitimate only when paired with an explicit waiver (worklog or
   report); otherwise produce the file.
+- Brainstorm-mode RFC: open `rfc new` without `--options` for
+  wide-open discussion; `rfc add-option` upgrades the RFC into a
+  decision flow when the team is ready to pick. `decide` allows
+  (and requires) `--option` only after the upgrade.
 
 Out of scope:
 

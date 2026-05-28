@@ -208,6 +208,30 @@ agentctl release
 unset MA_SESSION
 ```
 
+### 脑暴（不带 `--options` 的 RFC）
+
+三个以上角色要就一个还没有明确选项的问题表态时，开一个不带 `--options` 的 RFC：
+
+```bash
+agentctl rfc new q3-priorities \
+  --title "Q3 优先级 —— 我们应该往哪个方向使劲？" \
+  --deciders TL --voters PM,Backend,Frontend,DevOps \
+  --description "性能、增长还是稳定性？把想法、风险、follow-up 都丢进来。"
+
+# 投票人自由表态 —— 不需要选 option
+agentctl rfc comment RFC-0001 --rationale "想法：性能优先，最近俩企业客户因延迟跑了。"
+agentctl rfc comment RFC-0001 --rationale "风险：中途砍特性 X 会得罪企业版用户。" --reply-to <上一条 id>
+
+# 讨论中出现了具体方案，任何成员都能把它升级成 option
+agentctl rfc add-option RFC-0001 --option perf:'Q3 全力性能' --rationale "源自上面的讨论。"
+
+# 关 RFC 的两种姿势：
+# 1. 不选 option，rationale 表达结论
+agentctl rfc decide RFC-0001 --rationale "讨论结论：Q4 再议，本季不做具体承诺。"
+# 2. 加完 option 之后按常规决策流走
+agentctl rfc decide RFC-0001 --option perf --rationale "采纳性能优先方案。"
+```
+
 ---
 
 ## 常见情景

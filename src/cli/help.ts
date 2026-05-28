@@ -148,11 +148,15 @@ Task board (any role that owns state/task_board.yaml):
 RFCs (cross-role decisions; any role can open, designated decider closes):
   rfc new <slug> --title <text> --deciders <r1,...>
                  [--description <text>]
-                 --options <A:summary,B:summary>
+                 [--options <A:summary,B:summary>]
                  [--voters <r1,...>] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]
       --deciders is per-RFC; there is no role-level "default decider"
         flag. Pick roles whose owns overlap the decision, plus the
         role at the top of the relevant reportsTo chain.
+      --options is OPTIONAL (PR8l). Omitting it opens a brainstorm-mode
+        RFC: voters comment freely with no concrete choices on the
+        table. Anyone can later run 'rfc add-option' to introduce a
+        pickable choice, which upgrades the RFC into a decision flow.
       --description is the context anyone-not-in-the-conversation
         needs to weigh in. If empty the CLI prints a soft warning; in
         a future release this will be hard-required.
@@ -188,12 +192,16 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
       Object to the active pre-decision. Rationale required; optional
       --option names your preferred alternative.
 
-  rfc decide  <rfc-id> --option <opt> --rationale <text>
+  rfc decide  <rfc-id> [--option <opt>] --rationale <text>
       Final accept. Valid from open. Enforces the ACK gate: if there
       is an active pre-decision, every role in (voters union deciders)
       except the pre-decider must have ack'd or objected. Calling
       decide/reject from a role not in the deciders list fails with
       FORBIDDEN (exit 9), not USAGE.
+      PR8l: --option is REQUIRED only when the RFC has at least one
+      option. For brainstorm-mode RFCs (created without --options
+      and never upgraded via add-option), --option must NOT be passed
+      and the rationale carries the takeaway alone.
 
   rfc reject  <rfc-id> --rationale <text>
       Final reject. Valid from open or revising. Bypasses the ACK

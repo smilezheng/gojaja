@@ -316,12 +316,18 @@ superseded), worked example, and rationale live in
 [docs/RFC.md](./RFC.md). Full on-disk schema:
 [SCHEMA -> rfcs/](./SCHEMA.md#rfcsrfc-nnnn-slug).
 
-### `agentctl rfc new <slug> --title <text> --deciders <r1,...> --options <A:summary,B:summary> [--description <text>] [--voters <r1,...>] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]`
+### `agentctl rfc new <slug> --title <text> --deciders <r1,...> [--options <A:summary,B:summary>] [--description <text>] [--voters <r1,...>] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]`
 
 - Slug must match `^[a-z0-9][a-z0-9-]{0,63}$`; reuse across RFCs is refused.
 - The store assigns the next sequential `RFC-NNNN` id under a `rfcs` lock
   (`rfcCounter` lives in `config.yaml`, so deleting an RFC dir does not
   recycle its id).
+- `--options` is **optional** (PR8l). Omitting it opens the RFC in
+  **brainstorm mode** — voters comment freely, no concrete choices on
+  the table. Anyone (typically a voter or the decider) can later run
+  `rfc add-option` to introduce a pickable choice; that upgrades the
+  RFC into a decision flow. `rfc decide` refuses `--option` on a
+  brainstorm-mode RFC and requires it once options exist.
 - `--description` is soft-required in PR8g (warns if empty; PR8h
   hardens to required). It is the channel where the creator gives
   non-participants enough context to weigh in.
@@ -396,14 +402,22 @@ superseded), worked example, and rationale live in
   (advances the ACK gate too).
 - Emits `RFC_COMMENT` with `payload.kind = "object"`.
 
-### `agentctl rfc decide <rfc-id> --option <opt> --rationale <text>`
+### `agentctl rfc decide <rfc-id> [--option <opt>] --rationale <text>`
 
 - Deciders gate. Valid from `open`.
+- **PR8l: `--option` is conditional.** When `proposal.options.length > 0`,
+  `--option` is required and must reference an existing option id.
+  When `proposal.options.length === 0` (brainstorm-mode RFC),
+  `--option` must **not** be passed and the decision records
+  `chosenOption: null` — the rationale carries the takeaway.
 - **PR8g.1 ACK gate**: if there is an active pre-decision (latest
   `kind: "pre-decision"` comment, not invalidated by a later
   add-option), every role in `(voters ∪ deciders) − {pre-decider}`
   must have posted `ack` or `object`. Outstanding roles → USAGE with
   the full list and the recovery path (ack/object, or `rfc reject`).
+  (Brainstorm-mode RFCs cannot have a pre-decision, since pre-decide
+  refuses when options is empty; the ACK gate is therefore a no-op
+  for them.)
 - Refuses on unknown `--option`.
 - Status -> `accepted`; writes `decision.json`; emits `RFC_DECIDED`
   with `outcome="accepted"`.

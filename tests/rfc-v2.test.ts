@@ -652,3 +652,140 @@ describe("PR8g — back-compat detector (legacy per-role JSON layout)", () => {
     });
   });
 });
+
+// ---------- PR8l: brainstorm-mode RFCs (empty options) ----------
+
+const BRAINSTORM_RFC = {
+  slug: "q3-priorities",
+  title: "Q3 priorities — open discussion",
+  voters: ["DevOps", "PM"],
+  deciders: ["TL"],
+  options: [],
+  createdBy: "Backend" as const,
+  description: "Wide-open discussion before we even know what the options are.",
+};
+
+describe("PR8l — brainstorm-mode RFC (empty options)", () => {
+  let ctx: { root: string; store: LocalFsStore };
+  beforeEach(async () => { ctx = await freshStore(); });
+  afterEach(async () => { await fsp.rm(ctx.root, { recursive: true, force: true }); });
+
+  it("createRfc accepts options=[] and the proposal carries an empty options array", async () => {
+    const r = await ctx.store.createRfc(BRAINSTORM_RFC);
+    expect(r.options).toEqual([]);
+    expect(r.status).toBe("open");
+  });
+
+  it("voters can comment freely on a brainstorm RFC without picking an option", async () => {
+    const r = await ctx.store.createRfc(BRAINSTORM_RFC);
+    const c1 = await ctx.store.commentRfc({
+      rfcId: r.id, role: "DevOps", preferred: "", rationale: "Idea: move queue to NATS", replyTo: null,
+    });
+    const c2 = await ctx.store.commentRfc({
+      rfcId: r.id, role: "PM", preferred: "", rationale: "Risk: customers depend on current SLA", replyTo: c1.id,
+    });
+    const view = await ctx.store.readRfc(r.id);
+    expect(view.comments.length).toBe(2);
+    expect(view.comments.find((c) => c.id === c2.id)?.replyTo).toBe(c1.id);
+  });
+
+  it("add-option mid-brainstorm upgrades the RFC into decision mode", async () => {
+    const r = await ctx.store.createRfc(BRAINSTORM_RFC);
+    await ctx.store.commentRfc({
+      rfcId: r.id, role: "DevOps", preferred: "", rationale: "We could go with NATS or Kafka", replyTo: null,
+    });
+    await ctx.store.addRfcOption({
+      rfcId: r.id, optionId: "A", summary: "Move queue to NATS", rationale: "Lightweight", actor: "DevOps",
+    });
+    const after = await ctx.store.readRfc(r.id);
+    expect(after.proposal.options.map((o) => o.id)).toEqual(["A"]);
+  });
+
+  it("decideRfc on a brainstorm RFC accepts WITHOUT --option; chosenOption is null", async () => {
+    const r = await ctx.store.createRfc(BRAINSTORM_RFC);
+    const decision = await ctx.store.decideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: null,
+      rationale: "Discussion concluded: keep current architecture, revisit Q4",
+    });
+    expect(decision.outcome).toBe("accepted");
+    expect(decision.chosenOption).toBeNull();
+  });
+
+  it("decideRfc on a brainstorm RFC refuses --option (suggests add-option)", async () => {
+    const r = await ctx.store.createRfc(BRAINSTORM_RFC);
+    await expect(
+      ctx.store.decideRfc({
+        rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "ok",
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("decideRfc on an RFC WITH options still requires --option (regression)", async () => {
+    const r = await ctx.store.createRfc({
+      ...BRAINSTORM_RFC,
+      slug: "with-options",
+      options: [{ id: "A", summary: "Option A" }],
+    });
+    await expect(
+      ctx.store.decideRfc({
+        rfcId: r.id, decidedBy: "TL", chosenOption: null, rationale: "ok",
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("decide on a brainstorm RFC after add-option requires --option (post-upgrade)", async () => {
+    const r = await ctx.store.createRfc(BRAINSTORM_RFC);
+    await ctx.store.addRfcOption({
+      rfcId: r.id, optionId: "A", summary: "Concrete choice", rationale: "Locking in", actor: "TL",
+    });
+    // Now that the RFC has an option, decide without --option must refuse.
+    await expect(
+      ctx.store.decideRfc({
+        rfcId: r.id, decidedBy: "TL", chosenOption: null, rationale: "ok",
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+    // And decide WITH --option succeeds.
+    const decision = await ctx.store.decideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "Going with A",
+    });
+    expect(decision.chosenOption).toBe("A");
+  });
+
+  it("preDecideRfc refuses on a brainstorm RFC and points the decider at add-option", async () => {
+    const r = await ctx.store.createRfc(BRAINSTORM_RFC);
+    let caught: Error | null = null;
+    try {
+      await ctx.store.preDecideRfc({
+        rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "Let's lock A",
+      });
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught).not.toBeNull();
+    expect((caught as { code?: string }).code).toBe("USAGE");
+    expect(caught!.message).toMatch(/add-option/);
+  });
+
+  it("rejectRfc on a brainstorm RFC succeeds and produces a rejected decision", async () => {
+    const r = await ctx.store.createRfc(BRAINSTORM_RFC);
+    const decision = await ctx.store.rejectRfc({
+      rfcId: r.id, decidedBy: "TL", rationale: "Premature; revisit later",
+    });
+    expect(decision.outcome).toBe("rejected");
+    expect(decision.chosenOption).toBeNull();
+  });
+
+  it("createRfc still refuses when --options is given but malformed (regression on validation)", async () => {
+    await expect(
+      ctx.store.createRfc({
+        ...BRAINSTORM_RFC,
+        slug: "bad-opts",
+        // duplicate option ids must still be refused
+        options: [
+          { id: "A", summary: "first" },
+          { id: "A", summary: "duplicate" },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+});

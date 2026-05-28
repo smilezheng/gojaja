@@ -1779,8 +1779,14 @@ export class LocalFsStore implements Store {
     validateSlug(input.slug);
     const title = String(input.title ?? "").trim();
     if (title.length === 0) throw new UsageError("RFC title must be non-empty.");
-    if (!Array.isArray(input.options) || input.options.length < 1) {
-      throw new UsageError("RFC must have at least one option.");
+    // PR8l: empty options are now allowed. An RFC created without any
+    // option starts in brainstorm mode — voters post comments freely
+    // until someone calls `rfc add-option` to introduce concrete
+    // choices, at which point the RFC effectively upgrades into a
+    // decision flow. `finaliseRfc` enforces the matching invariant
+    // (decide may omit --option iff the proposal has none).
+    if (!Array.isArray(input.options)) {
+      throw new UsageError("RFC options must be an array (may be empty).");
     }
     const optionIds = new Set<string>();
     for (const o of input.options) {
@@ -1925,6 +1931,17 @@ export class LocalFsStore implements Store {
         );
       }
       if (preferred.length > 0 && !proposal.options.find((o) => o.id === preferred)) {
+        // PR8l: a brainstorm-mode RFC (options empty) gets a friendlier
+        // hint pointing at `rfc add-option`. The general "unknown
+        // option" error survives for the case where the RFC has
+        // options but the caller named a non-existent one.
+        if (proposal.options.length === 0) {
+          throw new UsageError(
+            `RFC ${input.rfcId} is in brainstorm mode (no options yet); ` +
+              `cannot reference option '${preferred}'. ` +
+              `Run \`agentctl rfc add-option ${input.rfcId} <id>:<summary> --rationale ...\` first.`,
+          );
+        }
         throw new UsageError(
           `RFC ${input.rfcId} has no option '${preferred}'. Options: ${proposal.options.map((o) => o.id).join(", ")}.`,
         );
@@ -1954,6 +1971,20 @@ export class LocalFsStore implements Store {
         if (preferred.length === 0) {
           throw new UsageError(
             "pre-decision requires a non-empty option id (--option).",
+          );
+        }
+        // PR8l: explicit, friendlier error when the RFC is in brainstorm
+        // mode (no options yet) — pre-decision has nothing concrete to
+        // lock in until at least one option exists.
+        if (proposal.options.length === 0) {
+          throw new UsageError(
+            `RFC ${input.rfcId} has no options yet; cannot pre-decide. ` +
+              `Run \`agentctl rfc add-option ${input.rfcId} <id>:<summary>\` first.`,
+          );
+        }
+        if (!proposal.options.find((o) => o.id === preferred)) {
+          throw new UsageError(
+            `Option '${preferred}' is not in RFC ${input.rfcId}. Options: ${proposal.options.map((o) => o.id).join(", ")}.`,
           );
         }
       } else if (kind === "ack" || kind === "object") {
@@ -2053,7 +2084,7 @@ export class LocalFsStore implements Store {
   async decideRfc(input: {
     rfcId: string;
     decidedBy: RoleId;
-    chosenOption: string;
+    chosenOption: string | null;
     rationale: string;
   }): Promise<RfcDecision> {
     return this.finaliseRfc({
@@ -2115,13 +2146,31 @@ export class LocalFsStore implements Store {
         );
       }
       if (args.outcome === "accepted") {
-        if (!args.chosenOption) {
-          throw new UsageError("`accept` requires a non-empty option id.");
-        }
-        if (!proposal.options.find((o) => o.id === args.chosenOption)) {
-          throw new UsageError(
-            `Option '${args.chosenOption}' is not in RFC ${args.rfcId}. Options: ${proposal.options.map((o) => o.id).join(", ")}.`,
-          );
+        // PR8l: brainstorm-mode RFCs (proposal.options is empty) accept
+        // without a chosen option — the rationale carries the takeaway.
+        // RFCs that DO have options still require a pick, exactly as
+        // before. The two modes are mutually exclusive: you cannot pass
+        // a chosenOption when the proposal carries no options, and you
+        // cannot omit it when it does.
+        if (proposal.options.length === 0) {
+          if (args.chosenOption) {
+            throw new UsageError(
+              `RFC ${args.rfcId} has no options; decide must not be given an --option. ` +
+                `If you want to lock in a concrete choice, run \`agentctl rfc add-option ${args.rfcId} ...\` first.`,
+            );
+          }
+        } else {
+          if (!args.chosenOption) {
+            throw new UsageError(
+              `RFC ${args.rfcId} has options (${proposal.options.map((o) => o.id).join(", ")}); ` +
+                `decide requires --option <id>.`,
+            );
+          }
+          if (!proposal.options.find((o) => o.id === args.chosenOption)) {
+            throw new UsageError(
+              `Option '${args.chosenOption}' is not in RFC ${args.rfcId}. Options: ${proposal.options.map((o) => o.id).join(", ")}.`,
+            );
+          }
         }
         // PR8g.1 ACK gate: if an active pre-decision exists, every
         // role in (voters ∪ deciders) − {pre-decider} must have

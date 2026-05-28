@@ -72,10 +72,11 @@ describe("Store.createRfc", () => {
     });
   });
 
-  it("rejects empty options or duplicate option ids", async () => {
-    await expect(
-      ctx.store.createRfc({ ...NEW_RFC, slug: "x", options: [] }),
-    ).rejects.toMatchObject({ code: "USAGE" });
+  it("rejects duplicate option ids (PR8l: empty options are now allowed)", async () => {
+    // PR8l: empty options are no longer rejected — brainstorm-mode
+    // RFCs start with options=[]. Duplicate option ids stay invalid.
+    const noOpts = await ctx.store.createRfc({ ...NEW_RFC, slug: "x", options: [] });
+    expect(noOpts.options).toEqual([]);
     await expect(
       ctx.store.createRfc({
         ...NEW_RFC, slug: "y",
