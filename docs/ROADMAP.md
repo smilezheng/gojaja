@@ -327,6 +327,39 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     pleasant rather than noisy. Built on the PR8j parent + tag
     primitives.
 
+- **PR8m — agent-delegated role creation (planned).**
+  - Today `agentctl role create` has no ownership gate at all: any
+    agent in any session can mint new roles with arbitrary `owns` /
+    `mustNotEdit`. That bypasses the ownership model `requireOwnership`
+    enforces elsewhere — `config.yaml` is unprotected on the create
+    path even though every other write to it is gated.
+  - Fix: thread an `actor: RoleId | "SYSTEM"` parameter through
+    `Store.createRole` and the CLI's `runRoleCreate` (via
+    `resolveActor`); refuse with `ForbiddenError` (exit 9) when the
+    actor is a non-SYSTEM role without `config.yaml` in its `owns`.
+  - Default behaviour unchanged: at init time no agent role owns
+    `config.yaml`, so a user running `role create` in a shell with
+    no `MA_SESSION` keeps minting roles via the SYSTEM bypass.
+  - Delegation: a project that wants an HR / Admin agent to create
+    roles grants that role `--owns 'config.yaml'`. The classic flow
+    becomes:
+      1. TL opens an RFC describing the gap + JD; deciders=[CTO].
+      2. CTO accepts; opens a task assigned to HR with the JD as an
+         asset and the new role id as a deliverable.
+      3. HR runs `agentctl role create <id> ...` (allowed because HR
+         owns `config.yaml`); reports the new role id back to TL.
+      4. TL `agentctl task assign T-NNNN --to <new-role>`.
+  - Asymmetric with `role delete` (which stays SYSTEM-only) by design:
+    create is additive and recoverable, delete is destructive and
+    one-way.
+  - Surface: `createRole` interface gains `actor`; CLI passes it via
+    `resolveActor`; ROADMAP / HANDBOOK / RFC.md gain the delegated-
+    creation walkthrough. Non-breaking — only adds a gate, doesn't
+    move any defaults.
+  - Estimate: ~25 LOC code + ~80 LOC tests + ~120 LOC docs. Tracked
+    separately from PR8k because it is a security model fix rather
+    than ergonomic polish.
+
 - **PR8h — schema-level deferments.**
   - Task `reviewers` field so a Review handoff can sign off without
     needing task-board ownership.
