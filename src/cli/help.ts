@@ -99,20 +99,28 @@ Messaging (agent, requires GOJAJA_SESSION):
       Broadcast progress note. Use for visible work that did not
       already emit a structured event (doc edited, migration ran).
 
-Task board (any role that owns state/task_board.yaml):
+Task board (creators of new tasks need state/task_board.yaml write
+access; status transitions follow per-task permissions below):
   task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3]
            [--depends-on T-NNNN,...] [--acceptance <text>]
            [--parent T-NNNN]
            [--tag <label> ...]
+           [--reviewer <role> ...]
            [--asset 'kind:ref::desc' ...]
            [--deliverable 'kind:ref::desc' ...]
       Tasks created WITH an owner default to status Ready (the owner's
       next plan surfaces them). Without an owner, default is Backlog
-      (PM-side product idea pending triage).
+      (PM-side product idea pending triage). The actor is recorded as
+      task.creator and is immutable after create.
       --parent links to an existing task; the chain is depth-capped
         and cycle-checked. Children INHERIT NOTHING from the parent;
         ownership, priority, status are independent.
       --tag is a free-form label. Repeat for multiple tags.
+      --reviewer (PR8u) names a role authorised to mark this task
+        Done regardless of ownership. Reviewers also auto-receive
+        TASK_STATUS_CHANGED events in their manifest, so pushing the
+        task to Review notifies them without an explicit report.
+        Repeat for multiple reviewers; each must be a registered role.
       --asset is a pointer the owner needs to read:
         kind=file -> repo-relative path (must stay inside the repo
                       and outside .gojaja/);
@@ -129,21 +137,31 @@ Task board (any role that owns state/task_board.yaml):
   task assign <task-id> --to <role>
       Reassign a task. Both creation and reassignment refuse owners
       that are not registered roles (catches typos before TASK_ASSIGNED
-      goes to a nobody). task.assignedBy records the ORIGINAL creator
+      goes to a nobody). task.creator records the ORIGINAL creator
       and is NOT updated on reassignment (audit log carries
       reassignment history).
   task status <task-id> <Backlog|Ready|InProgress|Blocked|Review|Done>
                        [--force-incomplete]
-      An owner can always change their own task's status. Anyone else
-      must own state/task_board.yaml.
-      Moving to Done with missing file-kind deliverables refuses
-      with USAGE. --force-incomplete bypasses the gate AND emits a
-      TASK_DELIVERABLE_BYPASSED event with the missing refs so the
-      bypass is permanently visible in the audit log.
+      Permission (PR8u):
+        - Done is allowed for: SYSTEM, a role in task.reviewers, the
+          owner IF they are also the creator (self-managed task),
+          or any role with state/task_board.yaml write access.
+        - Other transitions: owner-exception, reviewer-exception, or
+          state/task_board.yaml write access.
+        - An owner who is not the creator gets FORBIDDEN (exit 9) on
+          Done; the error message names the configured reviewers.
+        - Legacy alpha tasks with no creator on disk fall back to
+          the pre-PR8u owner-Done behaviour.
+      Moving to Done with missing file-kind deliverables additionally
+      refuses with USAGE. --force-incomplete bypasses the deliverable
+      gate AND emits a TASK_DELIVERABLE_BYPASSED event with the
+      missing refs so the bypass is permanently visible in the audit
+      log. --force-incomplete does NOT bypass the permission gate.
   task list [--owner <role>] [--status <s>] [--tag <label> ...] [--json]
   task show <task-id>
-      Renders parent, children, assets, deliverables (with on-disk
-      [x] / [ ] / [?] markers for file / url / manual kinds).
+      Renders parent, children, creator, reviewers, assets,
+      deliverables (with on-disk [x] / [ ] / [?] markers for
+      file / url / manual kinds).
 
 RFCs (cross-role decisions; any role can open, designated decider closes):
   rfc new <slug> --title <text> --deciders <r1,...>
