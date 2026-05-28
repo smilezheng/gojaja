@@ -208,6 +208,8 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     their own contract every turn (within the 300-byte budget).
 
 - **PR8g — RFC v2 (multi-round, threaded, mutable options, related tasks, revise).**
+  *(Amended by PR8g.1: pre-decide collapsed back to a comment kind
+  with mandatory ACK gate; see PR8g.1 entry below.)*
   - Status machine expands to `{open, pre-decide, revising, accepted,
     rejected, superseded}`. Pre-decide is optional (decider proposes,
     voters consent by silence or object by commenting, which auto-
@@ -232,6 +234,24 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     refused with a clear migration error.
   - Suite 216 -> 247.
 
+- **PR8g.1 — RFC pre-decide reshaped to comment + mandatory ACK gate.**
+  - Status `pre-decide` removed; collapses back to 5 states. The
+    PR8g auto-reopen mechanic and `RFC_PRE_DECISION` /
+    `RFC_PRE_DECISION_OBJECTED` event types are gone.
+  - Pre-decide is now a structured comment with `kind: "pre-decision"`.
+    Voters / non-pre-decider deciders use new `agentctl rfc ack` /
+    `agentctl rfc object` verbs to register positions.
+  - `decideRfc` enforces a hard ACK gate: every role in
+    `(voters ∪ deciders) − {pre-decider}` must explicitly ack or
+    object. Silence does NOT count as consent. No override; the only
+    escape from a stalled round is `rfc reject` + open a new RFC.
+  - Re-issuing `rfc pre-decide` invalidates all prior ACKs. `add-option`
+    while pending silently invalidates the pre-decision.
+  - Another alpha-only breaking on-disk shape change: PR8g
+    `proposal.yaml` with `status: pre-decide` or a `preDecision: {...}`
+    field is detected on read and refused with migration hint.
+  - Suite 247 -> 260.
+
 ### Planned, in priority order
 
 - **PR8h — schema-level deferments.**
@@ -241,6 +261,9 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - `dependsOn` cycle detection in task board.
   - Schema-version compatibility check on `agentctl plan`.
   - Harden `rfc new --description` from soft-warn (PR8g) to required.
+  - Candidate: read-only `agentctl rfc audit <id>` to surface
+    "who has ack'd / objected / not responded yet" without the
+    agent reading `rfc show`.
   - Candidate: role-level `decisionScopes` so a role becomes a default
     RFC decider for matching scopes (currently `--deciders` is
     per-RFC ad-hoc). Promote if PR8g's handbook nudge proves
@@ -296,10 +319,13 @@ After PR10 we tag `v2.0.0`.
 PR1–PR7 + PR8a establish the protocol surface (events, sessions,
 plan/ack, tasks, RFCs, ownership, handbook). PR7a / PR8b / PR8c / PR8d /
 PR8e / PR8f-A / PR8f-B / PR8f-C are correctness + UX hardening.
-PR8g reworks the RFC mechanism to support real multi-round decisions
-(threaded comments, add-option mid-flight, pre-decide, revise/edit).
-The only "breaking" alpha-stage surface changes are PR8f-C
-(`write-state` → `state edit`) and PR8g (comments file shape).
-PR8h–PR10 harden the layer for everyday use; PR8h is the only
-remaining schema-affecting PR before `v2.0.0`. Anything past `v2.0.0`
-only ships after the chaos suite (PR10) is green.
+PR8g + PR8g.1 rework the RFC mechanism to support real multi-round
+decisions: PR8g introduced threading + add-option + pre-decide +
+revise/edit; PR8g.1 walked back the pre-decide state-machine to a
+comment kind with a hard ACK gate (silence is not consent).
+The "breaking" alpha-stage surface changes are PR8f-C
+(`write-state` → `state edit`), PR8g (comments file shape) and
+PR8g.1 (pre-decide field/status removed). PR8h–PR10 harden the layer
+for everyday use; PR8h is the only remaining schema-affecting PR
+before `v2.0.0`. Anything past `v2.0.0` only ships after the chaos
+suite (PR10) is green.

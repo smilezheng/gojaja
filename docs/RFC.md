@@ -1,22 +1,33 @@
-# RFC mechanism — end-to-end guide (v2, PR8g)
+# RFC mechanism — end-to-end guide (v2.1, PR8g.1)
 
 Cross-references: [PROTOCOL](./PROTOCOL.md) for exact command semantics,
 [SCHEMA](./SCHEMA.md) for on-disk shapes, [HANDBOOK](./HANDBOOK.md) for
 when (not) to open an RFC.
 
-This document is the narrative companion to those references. It
-covers the model, the lifecycle (now multi-state in PR8g), the
-visibility rules, the on-disk layout, and a worked end-to-end
-simulation that exercises the full v2 surface: multi-round discussion,
-threaded comments, an option added mid-discussion, a pre-decision that
-gets objected, a revise → edit cycle, and finally a clean decide.
+This document is the narrative companion to those references. It covers
+the model, the lifecycle, the on-disk layout, the per-role visibility
+rules, and a worked end-to-end simulation that exercises the full PR8g.1
+surface: structured pre-decision comments, mandatory ACK gate,
+multi-round discussion with threading, mid-discussion add-option, and a
+revise → edit cycle.
 
-> **Schema break notice (PR8g, alpha-only).** Comments moved from
-> per-role JSON files (`comments/<role>.json`) to a single threaded
-> ledger (`comments.yaml`) per RFC. No automatic migrator — projects
-> created before alpha.15 must be re-initialised or hand-migrated.
-> The CLI detects the legacy layout on read and refuses with a clear
-> error.
+> **PR8g.1 walk-back.** PR8g modelled `pre-decide` as a status
+> transition with silence-as-consent. That turned out to be the wrong
+> abstraction: silence is unreliable in an async LLM agent fleet
+> (agent may be offline, may have not run plan, may have skipped). PR8g.1
+> walks pre-decide back to being a structured **comment kind** with a
+> hard **ACK gate** on `decide`: every required role must explicitly
+> `rfc ack` or `rfc object` before the decider can finalise. Silence
+> never counts as consent.
+
+> **Migration notice (alpha-only, no users).** Two PR8g shapes are
+> detected and refused on read:
+> - `proposal.yaml` with `status: pre-decide`
+> - `proposal.yaml` with a `preDecision` field
+>
+> Either re-init a fresh project or manually edit the proposal.yaml
+> (status → `open`, drop `preDecision`); the pre-decision data is lost
+> and agents should re-issue `rfc pre-decide`.
 
 ---
 
@@ -46,102 +57,125 @@ An RFC is **not**:
 
 ## 2. Three participation roles, per RFC
 
-Each RFC partitions the project's roles into three buckets, set at
-**creation time** (`--voters`, `--deciders`, plus the implicit creator):
+Each RFC partitions the project's roles at **creation time**:
 
-| Bucket          | Set by                                                                                  | What they can do                                                                       |
-|-----------------|------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------|
-| **creator**     | implicit (caller's `MA_SESSION`, or `SYSTEM`)                                            | call `rfc new`; rewrite via `rfc edit` while `revising`. May or may not also be voter / decider. |
-| **voters**      | `--voters X,Y` (optional, may be empty)                                                  | should comment; appear in their `plan.rfcs` until they have read the latest discussion. |
-| **deciders**    | `--deciders Z` (required, non-empty)                                                     | the **only** roles that can call `rfc pre-decide` / `rfc decide` / `rfc reject` / `rfc revise`. Non-deciders get `exit 9 FORBIDDEN`. |
+| Bucket          | Set by                                                  | What they can do                                                                                  |
+|-----------------|---------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| **creator**     | implicit (`MA_SESSION` role, or `SYSTEM`)               | call `rfc new`; rewrite via `rfc edit` while `revising`.                                          |
+| **voters**      | `--voters X,Y` (optional, may be empty)                 | should comment; **must `ack` or `object` whenever there is an active pre-decision** (see §3).     |
+| **deciders**    | `--deciders Z` (required, non-empty)                    | the **only** roles that can call `rfc pre-decide` / `rfc decide` / `rfc reject` / `rfc revise`. **Must also `ack` or `object` when another decider pre-decides** (see §3). |
 
-Roles in none of those three buckets do not see the RFC in their
-manifest. They can still inspect it with `agentctl rfc show <id>`
-(reads are unrestricted), but it does not draw their attention.
+Roles in none of these buckets do not see the RFC in their manifest.
+They can still inspect with `agentctl rfc show <id>` (reads are
+unrestricted) but it does not draw their attention.
 
-There is **no role-level "default decider" flag**. Decider scope is
-per-RFC. The handbook tells the agent opening an RFC how to pick
-`--deciders` (roles whose `owns` overlap the decision + the top of
-the relevant `reportsTo` chain).
+Decider scope is **per-RFC**, set at `rfc new` time. There is no
+role-level "default decider" flag.
 
 ---
 
-## 3. Lifecycle and state machine (v2)
+## 3. The ACK gate (heart of PR8g.1)
+
+Pre-decide is a structured **comment** with `kind: "pre-decision"`. It
+does NOT change RFC status; status stays `open`. What it does:
+
+**The Required-ACK set.** When a decider posts a pre-decision, every
+role in `(voters ∪ deciders) − {pre-decider}` becomes a required
+responder. Each must run one of:
+
+```bash
+agentctl rfc ack <rfc-id>                                  # I agree
+agentctl rfc object <rfc-id> --rationale "..." [--option Y] # I disagree
+```
+
+before `agentctl rfc decide` will succeed. The gate is enforced inside
+`decideRfc`:
+
+> RFC RFC-0001 has an active pre-decision (option 'C' by TL);
+> waiting for ACK from: DevOps, PM. Each role must run `agentctl rfc
+> ack RFC-0001` or `agentctl rfc object RFC-0001 --rationale ...`
+> before this RFC can be decided. There is no override; if a role is
+> unreachable, run `agentctl rfc reject RFC-0001 --rationale ...`
+> and open a new RFC without that role in voters/deciders.
+
+**No silence = consent.** Silence (or only regular `rfc comment`
+posts) does NOT advance the gate. The decider has machine-clear
+knowledge of every required role's position before they can decide.
+
+**No override.** There is no `--force` or `--override` flag. If a
+required role is unreachable (agent offline / role deleted), the only
+escape is `rfc reject` followed by a fresh RFC without that role in
+voters/deciders.
+
+**Re-posting `rfc pre-decide` invalidates all prior ack/object.**
+If the decider needs to change their proposal mid-round, they re-issue
+`rfc pre-decide` (same or different option). Prior ACKs/objections
+become moot — every required role must respond to the new pre-decision.
+Same goes if `chosenOption` is unchanged: re-posting always reopens
+the ACK round (because rationale may have changed, and we keep the
+rule simple).
+
+**`add-option` during pending pre-decide silently invalidates it.**
+A non-decider can `rfc add-option` while a pre-decision is pending.
+This silently invalidates the pre-decision because voters were ACKing
+a now-outdated option set. The decider can re-issue `rfc pre-decide`
+once ready. The existing `RFC_OPTION_ADDED` event provides the audit
+signal; no separate "invalidated" event.
+
+**The pre-decider can't ACK their own pre-decision.** Implicit; the
+pre-decider already stated their position by posting the pre-decision.
+
+**Other deciders are in the required set.** If there are multiple
+deciders, every decider except the pre-decider must ack/object too.
+This makes "multi-decider RFC" actually consensus-aware.
+
+---
+
+## 4. Lifecycle and state machine
 
 ```mermaid
 flowchart LR
-  open -->|"rfc comment / add-option"| open
-  open -->|"rfc pre-decide --option X"| preDecide["pre-decide"]
-  open -->|"rfc decide"| accepted
-  open -->|"rfc reject"| rejected
+  open -->|"rfc comment / ack / object / add-option / pre-decide (comment)"| open
+  open -->|"rfc decide (ACK gate)"| accepted
+  open -->|"rfc reject (bypasses gate)"| rejected
   open -->|"rfc revise"| revising
-  preDecide -->|"rfc comment (objection)"| open
-  preDecide -->|"rfc decide"| accepted
-  preDecide -->|"rfc reject"| rejected
-  preDecide -->|"rfc revise"| revising
-  revising -->|"rfc edit --description ..."| open
+  revising -->|"rfc edit"| open
   revising -->|"rfc reject"| rejected
 ```
 
-Key invariants:
+Five statuses (`pre-decide` removed):
 
-- **`open`** is the discussion state. Anyone can `comment`. Any session
-  can `add-option`. A decider can decide directly, pre-decide, or
-  revise.
-- **`pre-decide`** is the "I lean X, anyone object?" round. The
-  proposal carries a `preDecision` field naming the pre-decider, the
-  chosen option, ts, and rationale. Voters either stay silent (silent
-  consent) or comment. **Any comment from a role other than the
-  pre-decider auto-reopens the RFC to `open` and emits
-  `RFC_PRE_DECISION_OBJECTED`.** The pre-decider may comment to add
-  clarification without aborting their own round.
-- **pre-decide is optional.** A decider may go straight to `decide`
-  when the choice is unambiguous; pre-decide is for cases where you
-  can imagine an objection.
-- **`revising`** means "topic is real but the writeup is too thin —
-  please rewrite". Only `rfc edit` (by creator or decider) takes it
-  out, back to `open`. Voters do not appear in `manifest.rfcs` while
-  the RFC is in revising; the creator and deciders do.
-- **`accepted` / `rejected` / `superseded`** are terminal. `superseded`
-  is reserved (no command produces it in v2; document supersession in
-  a new RFC's rationale).
-- `add-option` is allowed only in `open` and `revising` — adding mid-
-  pre-decide would silently change what voters were asked to ACK.
-- `decide` is valid from `open` and `pre-decide`. `reject` additionally
-  works from `revising` (give up on the topic rather than waiting for
-  a rewrite).
-- The framework **does not auto-expire** open RFCs. `deadline` is a
-  decorative field.
-- There is **no auto-tally**. Even if every voter prefers option A,
-  nothing happens until a decider explicitly calls `rfc decide
-  --option A`.
+- `open` — discussion + pre-decide + ACK happen here.
+- `revising` — decider sent the proposal back for rewrite (`rfc revise`); creator or any decider can `rfc edit` to update and re-open.
+- `accepted` / `rejected` / `superseded` — terminal. `superseded` is reserved (no command produces it in v2).
+
+The framework does NOT auto-expire open RFCs. `deadline` is decorative.
 
 ---
 
-## 4. On-disk layout (v2)
+## 5. On-disk layout
 
 ```
 .multi-agent/
   config.yaml                                       # rfcCounter: N
   rfcs/RFC-NNNN-<slug>/
-    proposal.yaml                                   # carries status, description, relatedTasks, preDecision
-    comments.yaml                                   # threaded ledger; append-only across the RFC lifetime
+    proposal.yaml                                   # carries status, description, relatedTasks
+    comments.yaml                                   # append-only threaded ledger; structured kinds live here
     decision.json                                   # absent until a decider acts; terminal
-  comms/cursors/<role>/rfc-<id>.json                # per-role read marker for unreadComments
-  comms/events/<ulid>.json                          # RFC_* events (see table below)
+  comms/cursors/<role>/rfc-<rfc-id>.json            # per-role read marker for unreadComments
+  comms/events/<ulid>.json                          # RFC_* events
 ```
 
 `RFC-NNNN` is allocated atomically from `config.yaml:rfcCounter` under
-the shared `config-yaml` lock (PR8c). `slug` is checked for global
-uniqueness at creation time and refused if reused.
+the shared `config-yaml` lock. `slug` is checked for global uniqueness.
 
-A representative `proposal.yaml`:
+A representative `proposal.yaml` (PR8g.1 shape — note: no `preDecision` field):
 
 ```yaml
 id: RFC-0001
 slug: switch-to-postgres
 title: Move primary store from SQLite to Postgres
-status: open                                # open | pre-decide | revising | accepted | rejected | superseded
+status: open                                # open | revising | accepted | rejected | superseded
 voters: [DevOps, PM]
 deciders: [TL]
 options:
@@ -153,23 +187,18 @@ deadline: null
 createdAt: 2026-05-28T03:18:42.117Z
 createdBy: Backend
 description: |
-  Login latency tracked back to SQLite write contention under concurrent
-  user load. Both options below are tractable; this RFC picks one.
+  Login latency tracked back to SQLite write contention. Both options
+  below are tractable; this RFC picks one.
 
-  A: Migrate to Postgres on managed RDS. ~4 weeks of work; needs DevOps
-  to stand up staging + production clusters. Schema changes are minimal.
-  B: Tune SQLite WAL + busy-timeout. ~2 days of work; ceiling around
-  3-4x current write throughput. Pushes the same decision out 3 months.
+  A: Migrate to Postgres on managed RDS. ~4 weeks; needs DevOps to
+  stand up clusters.
+  B: Tune SQLite WAL + busy-timeout. ~2 days; ceiling 3-4x current
+  throughput.
 relatedTasks: [T-0042]
-# preDecision: absent when status != pre-decide; when present:
-# preDecision:
-#   decidedBy: TL
-#   chosenOption: A
-#   ts: 2026-05-28T06:00:00.000Z
-#   rationale: "lean A; want DevOps and PM to confirm migration window."
 ```
 
-A representative `comments.yaml`:
+A representative `comments.yaml` (PR8g.1: now carries `kind` on
+position-statement comments):
 
 ```yaml
 - id: 01HZA000000000000000COMM1
@@ -178,23 +207,35 @@ A representative `comments.yaml`:
   ts: 2026-05-28T05:02:00.000Z
   preferred: A
   replyTo: null
-  rationale: "Migration is straightforward; Postgres is already in staging."
+  rationale: "Migration is tractable; Postgres is already in staging."
+  # no kind = regular discussion comment
 
 - id: 01HZA000000000000000COMM2
   rfcId: RFC-0001
-  role: PM
-  ts: 2026-05-28T05:15:00.000Z
-  preferred: ""
-  replyTo: 01HZA000000000000000COMM1
-  rationale: "Can M2 slip 2 weeks if needed? If yes, fine with A."
+  role: TL
+  ts: 2026-05-28T05:30:00.000Z
+  preferred: A
+  replyTo: null
+  rationale: "Lean A; speak up if not."
+  kind: pre-decision
 
 - id: 01HZA000000000000000COMM3
   rfcId: RFC-0001
-  role: Backend
-  ts: 2026-05-28T05:30:00.000Z
+  role: DevOps
+  ts: 2026-05-28T05:35:00.000Z
   preferred: A
   replyTo: 01HZA000000000000000COMM2
-  rationale: "Yes — M2 slip 2 weeks is acceptable for the new data layer."
+  rationale: ""
+  kind: ack
+
+- id: 01HZA000000000000000COMM4
+  rfcId: RFC-0001
+  role: PM
+  ts: 2026-05-28T05:42:00.000Z
+  preferred: B
+  replyTo: 01HZA000000000000000COMM2
+  rationale: "Prefer B; M2 slip is hard to justify."
+  kind: object
 ```
 
 A representative `decision.json`:
@@ -206,103 +247,103 @@ A representative `decision.json`:
   "ts": "2026-05-28T07:42:11.443Z",
   "outcome": "accepted",
   "chosenOption": "A",
-  "rationale": "Approved option A. Backend leads migration; ..."
+  "rationale": "PM objection noted but milestone slack is real; proceeding with A."
 }
 ```
 
-The event stream gets these RFC-related event types (all broadcast,
-`to: "*"`):
+Event types (all broadcast `to: "*"`):
 
 | Event                          | Triggered by                                                                                          |
 |--------------------------------|-------------------------------------------------------------------------------------------------------|
 | `RFC_CREATED`                  | `agentctl rfc new`                                                                                    |
-| `RFC_COMMENT`                  | `agentctl rfc comment`                                                                                |
-| `RFC_OPTION_ADDED`             | `agentctl rfc add-option`                                                                             |
-| `RFC_PRE_DECISION`             | `agentctl rfc pre-decide`                                                                             |
-| `RFC_PRE_DECISION_OBJECTED`    | a non-pre-decider role posts an `rfc comment` while status is `pre-decide`; auto-reopens to `open` |
+| `RFC_COMMENT`                  | `agentctl rfc comment` / `ack` / `object` / `pre-decide` (payload carries `kind`)                     |
+| `RFC_OPTION_ADDED`             | `agentctl rfc add-option` — also implicitly invalidates any pending pre-decision                      |
 | `RFC_REVISION_REQUESTED`       | `agentctl rfc revise`                                                                                 |
 | `RFC_REVISED`                  | `agentctl rfc edit`                                                                                   |
-| `RFC_DECIDED`                  | `agentctl rfc decide` / `agentctl rfc reject`                                                         |
+| `RFC_DECIDED`                  | `agentctl rfc decide` / `rfc reject`                                                                  |
 | `RFC_TASK_LINKED` / `RFC_TASK_UNLINKED` | `agentctl rfc link-task` / `unlink-task`                                                     |
 | `RFC_REPAIRED`                 | self-heal when a half-written decide is detected on read (PR8c)                                       |
 
+PR8g had `RFC_PRE_DECISION` and `RFC_PRE_DECISION_OBJECTED`; PR8g.1
+collapsed both into `RFC_COMMENT` with `payload.kind`.
+
 ---
 
-## 5. Command reference
+## 6. Command reference
 
 All commands need `MA_SESSION` exported.
 
 | Command                                                                                                | Who                                | Notes                                                                                       |
 |--------------------------------------------------------------------------------------------------------|------------------------------------|---------------------------------------------------------------------------------------------|
-| `rfc new <slug> --title T --deciders D --options "A:s,B:s" [--description D] [--voters V] [--task T-NNNN] [--deadline ISO]` | any session | slug unique; `--deciders` non-empty; soft warn if `--description` empty                     |
-| `rfc comment <rfc-id> --rationale R [--option X] [--reply-to <comment-id>]`                            | any session                        | RFC `open` or `pre-decide`; ledger append; auto-reopen rule for pre-decide                  |
-| `rfc add-option <rfc-id> --option <id>:<summary> --rationale R`                                        | any session                        | RFC `open` or `revising`; option id unique within the RFC                                   |
-| `rfc pre-decide <rfc-id> --option X --rationale R`                                                     | decider only                       | RFC `open`; sets `preDecision` and status to `pre-decide`                                   |
-| `rfc decide <rfc-id> --option X --rationale R`                                                         | decider only                       | RFC `open` or `pre-decide`; final accept                                                    |
-| `rfc reject <rfc-id> --rationale R`                                                                    | decider only                       | RFC `open` / `pre-decide` / `revising`; final reject                                        |
-| `rfc revise <rfc-id> --rationale R`                                                                    | decider only                       | RFC `open` or `pre-decide`; rationale tells the creator what to fix                         |
-| `rfc edit <rfc-id> --rationale R [--title T] [--description D] [--options A:s,B:s] [--deadline ISO]`   | creator OR decider                 | RFC `revising`; at least one of title/description/options/deadline; status flips to `open`  |
+| `rfc new <slug> --title T --deciders D --options "A:s,B:s" [--description D] [--voters V] [--task T] [--deadline ISO]` | any session | slug unique; `--deciders` non-empty; soft warn if `--description` empty                     |
+| `rfc comment <rfc-id> --rationale R [--option X] [--reply-to <comment-id>]`                            | any session                        | regular discussion comment (no kind). Does NOT count toward ACK gate.                       |
+| `rfc add-option <rfc-id> --option <id>:<summary> --rationale R`                                        | any session                        | RFC `open` or `revising`; option id unique; **invalidates any pending pre-decision**        |
+| `rfc pre-decide <rfc-id> --option X --rationale R`                                                     | decider only                       | posts a `kind: "pre-decision"` comment; arms the ACK gate                                   |
+| `rfc ack <rfc-id> [--rationale R]`                                                                     | required-ACK role (not pre-decider) | structured agreement with the active pre-decision                                          |
+| `rfc object <rfc-id> --rationale R [--option Y]`                                                       | required-ACK role (not pre-decider) | structured objection; optional preferred alternative                                       |
+| `rfc decide <rfc-id> --option X --rationale R`                                                         | decider only                       | enforces ACK gate if there's an active pre-decision                                         |
+| `rfc reject <rfc-id> --rationale R`                                                                    | decider only                       | **bypasses ACK gate** — only escape from a stalled pre-decision                             |
+| `rfc revise <rfc-id> --rationale R`                                                                    | decider only                       | RFC `open` → `revising`                                                                     |
+| `rfc edit <rfc-id> --rationale R [--title T] [--description D] [--options A:s,B:s] [--deadline ISO]`   | creator OR decider                 | RFC `revising` → `open`; at least one field                                                 |
 | `rfc link-task <rfc-id> --task T-NNNN`                                                                 | any session                        | task must exist; idempotent; refused in terminal states                                     |
 | `rfc unlink-task <rfc-id> --task T-NNNN`                                                               | any session                        | idempotent; refused in terminal states                                                      |
-| `rfc list [--status open|pre-decide|revising|accepted|rejected|superseded]`                            | anyone                             | reads on-disk only                                                                          |
-| `rfc show <rfc-id> [--no-mark-seen]`                                                                   | anyone                             | side effect: advances this role's read cursor unless `--no-mark-seen`                       |
+| `rfc list [--status open|revising|accepted|rejected|superseded]`                                       | anyone                             | reads on-disk only                                                                          |
+| `rfc show <rfc-id> [--no-mark-seen]`                                                                   | anyone                             | side effect: advances caller's per-RFC read cursor unless `--no-mark-seen`                  |
 
-`FORBIDDEN` (exit 9): non-decider calling pre-decide / decide / reject /
-revise; non-creator-non-decider calling edit. `USAGE` (exit 2): every
-state-machine guard.
+Exit codes: `FORBIDDEN` (9) for non-decider calling pre-decide /
+decide / reject / revise; `USAGE` (2) for state-machine guards and
+ACK gate refusals.
 
 ---
 
-## 6. What appears in `agentctl plan`
+## 7. What appears in `agentctl plan`
 
-`plan` returns `manifest.rfcs: RfcSummary[]` per role. The rules (PR8g):
+`plan` returns `manifest.rfcs: RfcSummary[]` per role. The rules
+(PR8g.1):
 
-1. Consider RFCs whose `status ∈ {open, pre-decide, revising}`.
-2. Drop any RFC where the role is in neither `voters` nor `deciders`
-   nor is the creator.
-3. **`open`**: drop the voter (not also decider) only if they have
-   commented AND have zero unread comments by others (means they have
-   read everything since their last word).
-4. **`pre-decide`**: decider always stays. Voter (not also decider)
-   drops if they have commented AFTER the pre-decision ts (silent
-   consent + actual disagreement both work via this rule).
-5. **`revising`**: drop voters; keep creator + deciders.
+1. Consider RFCs whose `status ∈ {open, revising}`.
+2. Drop any RFC where the role is in none of `voters`, `deciders`, or
+   `createdBy`.
+3. Compute `pendingPreDecision` from the comments ledger (latest
+   `kind: "pre-decision"` comment, not invalidated by a later
+   `RFC_OPTION_ADDED`).
+4. Per-state visibility:
+   - **`open`** + pending pre-decision + `myAckOwed` for this role → keep (this role has a structured task).
+   - **`open`** + pending pre-decision + already responded → keep for deciders; drop for voters (their work is done until decide).
+   - **`open`** + no pending pre-decision → standard rule: drop voter (not also decider) who has commented AND has zero unread.
+   - **`revising`** → keep creator + deciders; drop other voters.
 
-Each entry shape:
+Each entry shape (PR8g.1):
 
 ```ts
 {
   id: "RFC-0001",
   title: "...",
-  status: "open" | "pre-decide" | "revising",
-  role: "voter" | "decider",       // decider wins when both apply
-  commented: boolean,                // this role has commented at least once
-  unreadComments: number,            // comments newer than this role's read cursor
-  relatedTasks: string[],            // linked task ids
-  pendingPreDecision?: {             // present iff status === "pre-decide"
+  status: "open" | "revising",
+  role: "voter" | "decider",
+  commented: boolean,
+  unreadComments: number,
+  relatedTasks: string[],
+  pendingPreDecision?: {
     decidedBy: RoleId;
     chosenOption: string;
     ts: string;
+    rationale: string;
+    awaitingAckFrom: RoleId[];   // outstanding roles
+    myAckOwed: boolean;          // for the role this manifest belongs to
   };
 }
 ```
 
-Two behaviour notes that matter at runtime:
-
-- `agentctl rfc comment ...` **automatically advances the commenter's
-  read cursor** for that RFC. So a role that just commented sees
-  `unreadComments: 0` in its very next plan.
-- `agentctl rfc show <id>` advances the read cursor for the caller
-  unless `--no-mark-seen`. This is how voters express "I'm caught up"
-  without commenting. After `rfc show`, a voter with no remaining
-  unread comments and at least one prior comment of their own drops
-  out of the manifest until new discussion arrives.
+`agentctl rfc comment` and `rfc ack` / `rfc object` automatically
+advance the commenter's read cursor. `agentctl rfc show` advances it
+explicitly (unless `--no-mark-seen`).
 
 ---
 
-## 7. End-to-end simulation (v2)
+## 8. End-to-end simulation
 
-Same four roles as before:
+Four roles:
 
 ```bash
 agentctl role create PM       "Product Manager"   --owns "state/project_state.md,state/task_board.yaml"
@@ -311,186 +352,143 @@ agentctl role create Backend  "Backend Engineer"  --owns "src/api/,src/db/"     
 agentctl role create DevOps   "DevOps"            --owns "infra/"                  --reports-to TL
 ```
 
-PM has assigned task `T-0042 Improve login latency` to Backend.
-Backend investigates and concludes the root cause is SQLite under
-write contention; the right fix is to migrate to Postgres.
+PM has assigned task `T-0042 Improve login latency` to Backend. Backend
+concludes the root cause is SQLite under write contention; the right
+fix is migrating to Postgres.
 
-### Turn 1 — Backend opens the RFC with full context and a task link
+### Turn 1 — Backend opens the RFC
 
 ```bash
 $ agentctl rfc new switch-to-postgres \
-    --title "Move primary store from SQLite to Postgres" \
-    --description "$(cat <<'EOF'
-Login latency tracked back to SQLite write contention under concurrent
-user load. Both options below are tractable; this RFC picks one.
-
-A: Migrate to Postgres on managed RDS. ~4 weeks of work; needs DevOps
-to stand up staging + production clusters. Schema changes are minimal.
-B: Tune SQLite WAL + busy-timeout. ~2 days of work; ceiling around
-3-4x current write throughput. Pushes the same decision out 3 months.
-EOF
-)" \
-    --options "A:Migrate now (4 weeks),B:WAL tuning first" \
-    --voters "DevOps,PM" \
-    --deciders "TL" \
-    --task T-0042
+    --title       "Move primary store from SQLite to Postgres" \
+    --description "Login latency root-caused to SQLite contention; A is the migration, B is a tuning band-aid." \
+    --options     "A:Migrate now (4 weeks),B:WAL tuning first" \
+    --voters      "DevOps,PM" \
+    --deciders    "TL" \
+    --task        T-0042
 
 Created RFC-0001 (open): Move primary store from SQLite to Postgres
   voters:        DevOps, PM
   deciders:      TL
   options:       A, B
   relatedTasks:  T-0042
-```
 
-Then Backend parks the blocked task:
-
-```bash
 $ agentctl task status T-0042 Blocked
 $ agentctl ack --token <plan-token>
 $ agentctl wait
 ```
 
-### Turn 2 — DevOps comments; PM replies to DevOps; Backend proposes a new option C
+### Turn 2 — Discussion (regular comments + add-option)
 
-DevOps reads the RFC, sees the relatedTasks pointer, pulls up T-0042
-for context, then comments:
+DevOps leaves an early discussion comment:
 
 ```bash
-$ agentctl rfc show RFC-0001        # advances DevOps's read cursor
-$ agentctl task show T-0042         # context
+$ agentctl rfc show RFC-0001        # advances read cursor
+$ agentctl task show T-0042
 $ agentctl rfc comment RFC-0001 --option A \
-    --rationale "Postgres in staging already exists. 4 weeks realistic if Backend leads the data layer."
-# Recorded comment 01HZA000000000000000COMM1 from DevOps on RFC-0001 (prefers A).
+    --rationale "Postgres already in staging; migration is straightforward."
 ```
 
-PM replies under DevOps's comment with a slip question:
+PM replies under DevOps's comment:
 
 ```bash
 $ agentctl rfc comment RFC-0001 \
     --reply-to 01HZA000000000000000COMM1 \
-    --rationale "Can M2 slip 2 weeks if needed? If yes, fine with A."
-# Recorded comment 01HZA000000000000000COMM2 from PM on RFC-0001 (reply to 01HZA000000000000000COMM1).
+    --rationale "Can M2 slip 2 weeks if needed?"
 ```
 
-Backend reads the discussion, decides neither A nor B fully captures
-the right answer (managed Postgres on RDS vs self-hosted), and
-proposes option C:
+Backend realises neither A nor B captures "managed Postgres" and adds
+option C:
 
 ```bash
 $ agentctl rfc add-option RFC-0001 \
     --option "C:Managed Postgres on RDS with phased cutover" \
-    --rationale "A is too binary; this carves out the operational angle DevOps raised in chat."
-# Added option 'C' to RFC-0001 by Backend.
-
-$ agentctl rfc comment RFC-0001 --option C \
-    --reply-to 01HZA000000000000000COMM2 \
-    --rationale "On the slip question, yes; T-0042 acceptance criteria allow it. I now prefer C over A."
+    --rationale "A is too binary; this carves out the operational angle."
 ```
 
-### Turn 3 — TL pre-decides; DevOps objects; pre-decide auto-reopens
+### Turn 3 — TL pre-decides; ACK gate enforces consensus
 
-TL reads the full picture (proposal + options A/B/C + comment tree
-+ T-0042) and posts a pre-decision:
+TL reads the full picture and posts a pre-decision:
 
 ```bash
 $ agentctl rfc show RFC-0001        # advances TL's read cursor
 $ agentctl rfc pre-decide RFC-0001 --option C \
-    --rationale "Lean C. Wait 1 turn for objections from DevOps/PM; will decide unless they speak up."
-# Pre-decided RFC-0001 as option 'C' by TL.
-# Voters/deciders see this in their next plan; any comment from a
-# non-pre-decider role will auto-reopen the RFC. Silence is consent.
+    --rationale "Lean C; this captures DevOps's operational concern."
+Posted pre-decision on RFC-0001 as option 'C' by TL (comment 01HZA...COMM5).
+
+Required ACK from: DevOps, PM.
+Each role must run `agentctl rfc ack RFC-0001` or `agentctl rfc object RFC-0001 --rationale ...`
+before `agentctl rfc decide RFC-0001 --option C --rationale ...` will succeed.
+Silence does NOT count as consent. The only escape from a stalled ACK round is
+`agentctl rfc reject RFC-0001`.
 ```
 
-DevOps's next plan shows the pre-decision:
-
-```json
-{
-  "rfcs": [
-    {
-      "id": "RFC-0001", "title": "...", "status": "pre-decide",
-      "role": "voter", "commented": true, "unreadComments": 0,
-      "relatedTasks": ["T-0042"],
-      "pendingPreDecision": {
-        "decidedBy": "TL", "chosenOption": "C",
-        "ts": "..."
-      }
-    }
-  ]
-}
-```
-
-DevOps realises managed RDS has a cost-budget concern PM has not
-weighed in on:
+TL tries to decide immediately and is refused:
 
 ```bash
-$ agentctl rfc comment RFC-0001 --option C \
-    --rationale "Hold up: managed RDS adds ~$400/mo. PM, is that budgeted?"
-# Recorded comment 01HZA000000000000000COMM4 from DevOps on RFC-0001 (prefers C).
+$ agentctl rfc decide RFC-0001 --option C --rationale "go"
+USAGE: RFC RFC-0001 has an active pre-decision (option 'C' by TL);
+waiting for ACK from: DevOps, PM. ...
 ```
 
-Because DevOps is not the pre-decider, the comment auto-reopens the
-RFC:
-
-```
-events: ... RFC_COMMENT (DevOps), RFC_PRE_DECISION_OBJECTED (DevOps, comment 01HZA0...COMM4)
-proposal.status: open (was pre-decide)
-proposal.preDecision: undefined
-```
-
-### Turn 4 — Discussion resolves; TL revises for description; Backend rewrites; TL decides
-
-PM clears the budget concern in a top-level comment:
+DevOps acks:
 
 ```bash
-$ agentctl rfc comment RFC-0001 --option C \
-    --rationale "$400/mo is fine; T-0042's product impact justifies it. Adding to next budget review."
+$ agentctl rfc ack RFC-0001
+Acked the active pre-decision on RFC-0001 as DevOps (comment 01HZA...COMM6).
 ```
 
-TL notices the description has not been updated to reflect option C
-+ the operating-cost dimension and sends it back for a rewrite:
+PM has a budget concern and objects:
 
 ```bash
-$ agentctl rfc revise RFC-0001 \
-    --rationale "Description still talks A/B only. Please add a paragraph on option C (managed Postgres) and the ~\$400/mo operating cost so anyone reading later has the full picture."
-# Sent RFC-0001 back for revision by TL.
+$ agentctl rfc object RFC-0001 \
+    --rationale "Managed RDS adds ~\$400/mo; not budgeted this quarter."
+Objected to the active pre-decision on RFC-0001 as PM (comment 01HZA...COMM7).
 ```
 
-Backend (the creator) rewrites:
+### Turn 4 — Discussion + TL re-pre-decides; ACK gate re-arms
+
+PM's objection is in the audit trail; TL reads it and chats with PM via
+report. PM clears the budget concern in a follow-up comment:
 
 ```bash
-$ agentctl rfc edit RFC-0001 \
-    --rationale "Added option C section and operating cost paragraph." \
-    --description "$(cat <<'EOF'
-Login latency tracked back to SQLite write contention under concurrent
-user load. Three options:
-
-A: Self-hosted Postgres migration. ~4 weeks; DevOps stands up clusters.
-B: SQLite WAL tuning. ~2 days; ceiling 3-4x current write throughput.
-C: Managed Postgres on RDS with phased cutover. ~5 weeks; +~$400/mo
-operating cost (PM has confirmed this fits the budget).
-
-T-0042's acceptance allows M2 to slip 2 weeks. Schema migration is
-minimal in any case.
-EOF
-)"
-# Edited RFC-0001 by Backend; status is now open.
+$ agentctl rfc comment RFC-0001 \
+    --option C \
+    --reply-to 01HZA...COMM7 \
+    --rationale "Confirmed: $400/mo fits next quarter's budget."
 ```
 
-TL re-reads (cursor advances), confirms nothing else changed
-substantively, and decides:
+This regular comment does NOT advance the gate (PM still has an
+outstanding `object` recorded). To clear PM's objection, TL re-pre-decides:
 
 ```bash
-$ agentctl rfc show RFC-0001
+$ agentctl rfc pre-decide RFC-0001 --option C \
+    --rationale "Re-issue: PM's budget concern resolved per comment 01HZA...COMM8."
+```
+
+This re-publish invalidates both DevOps's earlier ack AND PM's earlier
+object. Everyone re-ACKs:
+
+```bash
+# DevOps
+$ agentctl rfc ack RFC-0001
+# PM
+$ agentctl rfc ack RFC-0001
+```
+
+### Turn 5 — TL finalises
+
+```bash
 $ agentctl rfc decide RFC-0001 --option C \
-    --rationale "Approved option C. Backend leads migration; DevOps stands up RDS staging by EOW; PM accepts M2 slip 2 weeks. Backend: open follow-up tasks."
-# Accepted RFC-0001 (option C) by TL.
+    --rationale "All required roles ACKed second pre-decision."
+Accepted RFC-0001 (option C) by TL.
 ```
 
-### Turn 5 — Downstream task work
+### Turn 6 — Downstream tasks
 
-- **DevOps** opens RDS staging work.
-- **PM** updates `state/project_state.md` to push M2 back.
-- **Backend** spawns sub-tasks and unblocks T-0042:
+- **DevOps** stands up RDS staging.
+- **PM** updates `state/project_state.md`.
+- **Backend** spawns sub-tasks:
 
   ```bash
   $ agentctl task new --title "Provision Postgres RDS staging"      --owner DevOps  --depends-on T-0042
@@ -499,67 +497,58 @@ $ agentctl rfc decide RFC-0001 --option C \
   $ agentctl task status T-0042 InProgress
   ```
 
-Audit chain preserved end-to-end:
+Audit chain (events, oldest first):
 
-- `proposal.yaml`: original + the option C addition + post-revise text + terminal status.
-- `comments.yaml`: every comment from every role, including the
-  reply-to chain that explains how the group arrived at C.
-- `decision.json`: who, when, what, why.
-- Events: `RFC_CREATED → RFC_COMMENT ×N → RFC_OPTION_ADDED →
-  RFC_PRE_DECISION → RFC_COMMENT (DevOps) → RFC_PRE_DECISION_OBJECTED →
-  RFC_COMMENT (PM) → RFC_REVISION_REQUESTED → RFC_REVISED → RFC_DECIDED`.
-
----
-
-## 8. Edges that bite
-
-1. **`--description` is soft-required in PR8g.** Empty descriptions
-   pass with a warning, but expect deciders to `rfc revise` for a
-   rewrite. PR8h plans to harden this to required.
-2. **`add-option` is refused in `pre-decide`.** Adding mid-round
-   would silently change what voters were asked to ACK. Comment to
-   reopen first; then add the option.
-3. **Comment in `pre-decide` from the pre-decider does NOT auto-reopen.**
-   This lets the decider add clarification ("to be clear: A includes
-   phase-2 fallback") without aborting their own round. Comments from
-   anyone else auto-reopen.
-4. **`rfc show` advances your read cursor.** This is the silent-consent
-   path: voters who agree with a pre-decision just `rfc show` to clear
-   unread, then ignore the RFC. Use `--no-mark-seen` to inspect
-   read-only (e.g. from a script).
-5. **`edit` is only valid in `revising`.** A creator who wants to
-   "tweak the wording" of an `open` RFC has to wait for a decider to
-   `rfc revise` first. This is by design: edits during open discussion
-   would invalidate ongoing comments.
-6. **`relatedTasks` must point at real tasks.** Both `--task` at
-   create time and `rfc link-task` validate against `state/task_board.yaml`.
-   Catches typos at link time, not at read time.
-7. **Pre-decide is one-shot.** A second `pre-decide` while already in
-   `pre-decide` is refused (`status === "pre-decide"` already). To
-   change the proposed outcome, either comment to reopen (and then
-   pre-decide again with a different option) or directly `rfc decide`
-   with the new option.
-8. **Voter list is advisory.** Anyone with a session can comment.
-   Voters appear in the manifest; non-voters do not. There is no
-   "this comment is off-topic, reject" gate.
-9. **Pre-PR8g `comments/<role>.json` shape is refused.** Projects
-   created on alpha.14 or earlier will hit `code: USAGE` ("pre-PR8g
-   comments layout") on the first `rfc show` / `rfc list` after
-   upgrading. Hand-migrate or `agentctl init` a fresh project.
-10. **`superseded` has no command in v2.** Schema reserves the value
-    but no tool sets it. Document supersession in the new RFC's
-    rationale + a worklog announcement.
+```
+RFC_CREATED                                     (Backend)
+RFC_COMMENT (kind=undef)                        (DevOps, "Postgres in staging")
+RFC_COMMENT (kind=undef)                        (PM,     "M2 slip 2 weeks?")
+RFC_OPTION_ADDED                                (Backend, option C)
+RFC_COMMENT (kind=pre-decision)                 (TL, option C, "Lean C")
+RFC_COMMENT (kind=ack)                          (DevOps)
+RFC_COMMENT (kind=object)                       (PM, "$400/mo not budgeted")
+RFC_COMMENT (kind=undef)                        (PM, "Confirmed budget fits")
+RFC_COMMENT (kind=pre-decision)                 (TL, option C, "Re-issue")
+RFC_COMMENT (kind=ack)                          (DevOps)
+RFC_COMMENT (kind=ack)                          (PM)
+RFC_DECIDED                                     (TL, accepted, option C)
+```
 
 ---
 
-## 9. When to reach for an RFC (and when not)
+## 9. Edges that bite
 
-The handbook codifies this; the short version:
+1. **`--description` is soft-required in PR8g.1.** Empty descriptions
+   pass with a warning; PR8h will harden to required.
+2. **Regular comment from required-ACK role does NOT advance the gate.**
+   Discussion is welcome; you still owe a structured `ack` or `object`.
+3. **Re-publishing `rfc pre-decide` invalidates ALL prior ACKs**, even
+   if `chosenOption` is unchanged. Voters must respond again.
+4. **`add-option` while pending silently invalidates the pre-decision.**
+   The `RFC_OPTION_ADDED` event is the audit signal. Decider can
+   re-pre-decide on the new option set.
+5. **Pre-decider cannot ack their own pre-decision.** They already
+   stated their position by posting it.
+6. **Multi-decider RFCs are stricter.** Other deciders are in the
+   required-ACK set; they must explicitly ack/object before the
+   pre-decider can finalise.
+7. **No override.** If a required role is unreachable, the only escape
+   is `rfc reject` + open a new RFC without that role in voters/deciders.
+8. **`relatedTasks` must point at real tasks.** Validated at write time.
+9. **`superseded` has no command in v2.** Document supersession in a
+   new RFC's rationale.
+10. **Pre-PR8g and PR8g on-disk shapes are refused.** See the migration
+    block at the top.
+
+---
+
+## 10. When to reach for an RFC
+
+The handbook codifies this; short version:
 
 **Open an RFC when** the choice
 - touches multiple roles' `owns` simultaneously, OR
-- changes architecture, API contracts, data model, or the rollback
-  story, OR
+- changes architecture, API contracts, data model, or rollback story, OR
 - depends on opinions you cannot collect from a single role.
 
 **Send a report instead when** the question has a single role that
@@ -570,34 +559,25 @@ your own `owns` and only needs acknowledgement.
 
 Within an RFC:
 
-- Use **pre-decide** whenever you can imagine an objection. Skip
-  straight to **decide** for unambiguous choices.
+- Use **pre-decide** whenever the decision is non-trivial — it forces
+  every required role on the record.
 - Use **revise** when the topic is real but the writeup is too thin.
-  Use **reject** when the topic itself is wrong.
+  Use **reject** when the topic itself is wrong OR a required role is
+  unreachable.
 - Use **add-option** the moment you realise the existing options are
-  inadequate, instead of forcing the discussion into a false binary.
-- Use **`--reply-to`** when reacting to a specific point; use top-level
-  comments when raising a new angle.
+  inadequate.
+- Use **`--reply-to`** when reacting to a specific point.
 
 ---
 
-## 10. Relationship to other mechanisms
+## 11. Relationship to other mechanisms
 
-- **Tasks**: an RFC decides *what* to do; the task board tracks
-  *who is doing it now*. Link the task to the RFC at creation with
-  `--task T-NNNN` (or post-hoc with `rfc link-task`). After
-  `RFC_DECIDED`, the conventional pattern is to spawn `task new`
-  entries for the work, often `--depends-on` the parent task that
-  was waiting on the RFC.
-- **Reports**: a report can announce an RFC's existence to a
-  specific role (especially the decider), but it is not a
-  substitute. The structured decision belongs in the RFC; the
-  report points at it.
-- **Worklog**: use a worklog after a decision lands if there is
-  follow-up team-wide context that does not produce its own event.
-  Do not echo the decision back in worklog form — `RFC_DECIDED` is
-  already broadcast.
+- **Tasks**: link at creation with `--task T-NNNN` (or post-hoc with
+  `rfc link-task`). After `RFC_DECIDED`, spawn `task new` entries.
+- **Reports**: announce an RFC's existence to a specific role
+  (especially `pre-decide` to required-ACK roles who are slow).
+- **Worklog**: post-decision context that does not produce its own
+  event. Don't echo the decision back.
 - **State files**: a decision changes intent; updating
-  `state/architecture.md` / `state/project_state.md` etc. is the
-  separate act that the relevant role's `state edit` performs after
-  the RFC closes.
+  `state/architecture.md` / `state/project_state.md` is the separate
+  act the relevant role's `state edit` performs after the RFC closes.

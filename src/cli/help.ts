@@ -139,23 +139,40 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
 
   rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>
       Add a new option mid-discussion. Allowed in open or revising.
+      If there is an active pre-decision, add-option silently
+      invalidates it (voters were ACKing an outdated option set).
 
   rfc pre-decide <rfc-id> --option <opt> --rationale <text>
-      Decider proposes an outcome and waits for objections. Voters
-      either stay silent (consent path) or comment (auto-reopens RFC).
-      Decider may then finalise with 'rfc decide'.
+      Decider posts a structured pre-decision comment ("I lean X").
+      RFC status stays 'open'. Every role in (voters union deciders)
+      except the pre-decider must run 'agentctl rfc ack' or 'rfc
+      object' before 'rfc decide' will succeed. Silence does NOT
+      count as consent — there is no override; the only escape from
+      a stalled ACK round is 'rfc reject'.
+
+  rfc ack <rfc-id> [--rationale <text>]
+      Acknowledge the active pre-decision (agree with it). Required-
+      ACK roles only; pre-decider cannot ack their own pre-decision.
+
+  rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]
+      Object to the active pre-decision. Rationale required; optional
+      --option names your preferred alternative.
 
   rfc decide  <rfc-id> --option <opt> --rationale <text>
-      Final accept. Valid from open OR pre-decide. Calling decide/reject
-      from a role not in the deciders list fails with FORBIDDEN (exit 9),
-      not USAGE — the handbook tells agents to escalate FORBIDDEN.
+      Final accept. Valid from open. Enforces the ACK gate: if there
+      is an active pre-decision, every role in (voters union deciders)
+      except the pre-decider must have ack'd or objected. Calling
+      decide/reject from a role not in the deciders list fails with
+      FORBIDDEN (exit 9), not USAGE.
 
   rfc reject  <rfc-id> --rationale <text>
-      Final reject. Valid from open / pre-decide / revising.
+      Final reject. Valid from open or revising. Bypasses the ACK
+      gate by design — it is the only escape from a stalled
+      pre-decision (e.g. when a required-ACK role is unreachable).
 
   rfc revise  <rfc-id> --rationale <text>
-      Send back to creator for rewrite (decider-only). Status moves to
-      'revising'. Rationale tells the creator what to fix.
+      Send back to creator for rewrite (decider-only). Valid from
+      open. Rationale tells the creator what to fix.
 
   rfc edit    <rfc-id> --rationale <text> [--title T] [--description D]
                        [--options A:summary,B:summary] [--deadline ISO]
@@ -167,7 +184,7 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
   rfc unlink-task <rfc-id> --task T-NNNN
       Attach / detach a task id post-creation. Idempotent.
 
-  rfc list    [--status open|pre-decide|revising|accepted|rejected|superseded]
+  rfc list    [--status open|revising|accepted|rejected|superseded]
   rfc show    <rfc-id> [--no-mark-seen]
       'show' updates this role's read marker for the RFC, so 'plan'
       will report unreadComments=0 until new discussion arrives. Use

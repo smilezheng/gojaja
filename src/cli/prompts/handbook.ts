@@ -102,7 +102,7 @@ Omitting a clearly-relevant role from \`--deciders\` is detectable in
 the audit log and reads as scope-shopping. If unsure, add the role
 listed in your own \`roleReminder.reportsTo\`.
 
-### RFC multi-round discussion (PR8g)
+### RFC multi-round discussion (PR8g.1)
 
 Decisions don't always settle in one round. The mechanism supports it:
 
@@ -113,12 +113,27 @@ Decisions don't always settle in one round. The mechanism supports it:
 - \`agentctl rfc add-option <id>:<summary> --rationale ...\` introduces
   a new option mid-discussion. Use it the moment the existing options
   are clearly all wrong; do not pretend B is fine just because the
-  proposal already lists it.
+  proposal already lists it. add-option silently invalidates any
+  active pre-decision (voters were ACKing an outdated option set);
+  the decider can re-post \`rfc pre-decide\` once they're ready.
 - \`agentctl rfc pre-decide --option X --rationale ...\` (decider only)
-  posts "I lean X; any objections?". Voters either stay silent
-  (consent) or \`rfc comment\` (auto-reopens the RFC). Use pre-decide
-  whenever you can imagine an objection; skip it for clearly single-
-  answer RFCs and \`rfc decide\` directly.
+  posts a structured pre-decision. Every role in
+  (voters union deciders) except the pre-decider must run
+  \`agentctl rfc ack\` (agree) or \`agentctl rfc object --rationale ...\`
+  (disagree) before \`agentctl rfc decide\` will succeed. Silence does
+  NOT count as consent. There is no override. The only escape from a
+  stalled ACK round is \`rfc reject\` followed by a new RFC.
+- If your manifest shows \`rfcs[*].pendingPreDecision.myAckOwed: true\`,
+  you MUST respond — your turn cannot end clean while you owe an ACK.
+  Run \`rfc ack\` if you agree; \`rfc object --rationale "..."\` if you
+  disagree (optionally with \`--option Y\` to name your preferred
+  alternative).
+- Posting a plain \`rfc comment\` from a required-ACK role does NOT
+  advance the gate — the framework only counts structured
+  \`kind: ack\` / \`kind: object\` comments. Discussion is welcome, but
+  you still owe an explicit ack/object.
+- Re-posting \`rfc pre-decide\` (same or different option) invalidates
+  all prior ACKs/objections — every required role must respond again.
 - \`agentctl rfc revise --rationale "rewrite section X"\` (decider only)
   kicks the proposal back without rejecting the topic. Use revise
   when the topic is real but the writeup is too thin for you to act

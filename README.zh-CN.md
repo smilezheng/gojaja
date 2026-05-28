@@ -249,7 +249,7 @@ agentctl release <role>       # 在持有 session 的 shell 里跑，或
 
 ## agent 之间怎么拍板（RFC）
 
-如果一个决策影响多个角色的 `owns` 或者动到架构，agent 会开一个 RFC，而不是自己拍板。RFC 支持真正的多轮讨论：threaded comments、中途加 option、可选的 pre-decide 软 ACK 轮、decider 打回重写。完整讲解见 [docs/RFC.md](./docs/RFC.md)；快速过一遍：
+如果一个决策影响多个角色的 `owns` 或者动到架构，agent 会开一个 RFC，而不是自己拍板。RFC 支持真正的多轮讨论：threaded comments、中途加 option、强制 ACK 的 pre-decide 轮（每个相关角色必须显式 `ack` 或 `object`，沉默不算同意）、decider 打回重写。完整讲解见 [docs/RFC.md](./docs/RFC.md)；快速过一遍：
 
 ```bash
 # 任何 agent 都能开。--description 是不参与对话的人需要的上下文；
@@ -269,9 +269,12 @@ agentctl rfc comment RFC-0001 --reply-to 01HZA...COMM1 --rationale "M2 能不能
 # 讨论中发现既有 option 都不够好，任何 agent 都可以加一个新 option。
 agentctl rfc add-option RFC-0001 --option "C:Managed Postgres on RDS" --rationale "把成本维度纳进来。"
 
-# 可选的 pre-decide 轮：decider 先表态 "我倾向 X，有意见吗"；
-# 沉默 = 同意，留 comment 会自动 reopen 把 RFC 拉回 open 继续讨论。
-agentctl rfc pre-decide RFC-0001 --option C --rationale "倾向 C；有异议请说。"
+# pre-decide：decider 发一条结构化的"我倾向 X" comment。
+# 每个 voter + 其它非 pre-decider 的 decider 都必须显式 rfc ack 或 rfc object 表态
+# 才能 rfc decide。沉默不算同意。
+agentctl rfc pre-decide RFC-0001 --option C --rationale "倾向 C；请 ack 或 object。"
+agentctl rfc ack    RFC-0001                                       # 我同意
+agentctl rfc object RFC-0001 --rationale "成本超" --option B          # 我反对，倾向 B
 
 # decider 也可以把提案打回去重写，而不是直接 reject 这个话题。
 agentctl rfc revise RFC-0001 --rationale "把成本那段补全。"
@@ -304,7 +307,7 @@ agentctl rfc decide RFC-0001 --option C --rationale "Agreed. Proceed."
 | `claim`、`plan`、`ack`、`report`、`worklog`、`wait` | 已完成 |
 | `role` + `prompt` + `activate`（role-free runtime + 每窗口绑定） | 已完成 |
 | 任务板（`task new/assign/status/list/show`） | 已完成 |
-| RFC v2：threaded comments、`add-option`、`pre-decide`、`revise`/`edit`、`link-task` | 已完成 |
+| RFC v2.1：threaded comments、`add-option`、`pre-decide` + 强制 `ack`/`object` gate、`revise`/`edit`、`link-task` | 已完成 |
 | 注入到 runtime 的协作 handbook | 已完成 |
 | `role delete`（带 session + config 清理） | 已完成 |
 | `agentctl upgrade` 和 `reset` | 下一步 |

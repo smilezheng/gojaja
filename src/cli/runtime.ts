@@ -10,7 +10,12 @@ export const CLI_VERSION: string = PACKAGE_VERSION;
 // Bumped in PR8g (RFC v2 — comments shape moved from per-role JSONs
 // to a single threaded comments.yaml ledger; proposal.yaml gained
 // description / relatedTasks / preDecision; new RFC_* event types).
-export const SCHEMA_VERSION = "2.0.0-rfc-v2";
+// Bumped again in PR8g.1: pre-decide collapsed back to a comment kind
+// with a hard ACK gate. proposal.yaml `status: pre-decide` and
+// `preDecision` field are removed; comments carry a structured `kind`
+// (pre-decision / ack / object). Old shapes are detected on read and
+// refused with a migration hint.
+export const SCHEMA_VERSION = "2.0.0-rfc-v2.1";
 
 export const LAYER_DIRNAME = ".multi-agent";
 

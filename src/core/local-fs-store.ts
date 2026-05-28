@@ -47,6 +47,7 @@ import {
   type Manifest,
   type ProjectConfig,
   type RfcComment,
+  type RfcCommentKind,
   type RfcDecision,
   type RfcOption,
   type RfcProposal,
@@ -111,6 +112,52 @@ function countOccurrences(haystack: string, needle: string): number {
  */
 function splitJoin(haystack: string, oldText: string, newText: string): string {
   return haystack.split(oldText).join(newText);
+}
+
+/**
+ * PR8g.1 helper: given a comments ledger (already sorted by ts) and
+ * the timestamps of all RFC_OPTION_ADDED events for the same RFC,
+ * compute whether there is currently an "active pre-decision".
+ *
+ * Rule: the latest `kind === "pre-decision"` comment in the ledger
+ * is active IF AND ONLY IF there is no RFC_OPTION_ADDED event with
+ * `ts > pre-decision.ts`. add-option after a pre-decision silently
+ * invalidates that pre-decision because voters were ACKing an
+ * outdated option set; the decider must issue a fresh pre-decision
+ * if they want a new ACK round.
+ *
+ * Returns null if no pre-decision exists yet, or if the latest one
+ * has been invalidated by a subsequent add-option event.
+ */
+function computeActivePreDecisionInLedger(
+  comments: RfcComment[],
+  _rfcId: string,
+  addOptionAddedTimestamps: string[],
+): {
+  decidedBy: RoleId;
+  chosenOption: string;
+  ts: string;
+  rationale: string;
+} | null {
+  let latest: RfcComment | null = null;
+  for (const c of comments) {
+    if (c.kind === "pre-decision") {
+      // Comments are appended in ts order (ULIDs are monotonic per
+      // process + serialised by rfc-<id> lock), so later iterations
+      // overwrite earlier `latest`. The newest pre-decision wins —
+      // earlier ACKs would have been computed against an older
+      // proposal anyway.
+      latest = c;
+    }
+  }
+  if (latest === null) return null;
+  if (addOptionAddedTimestamps.some((ts) => ts > latest!.ts)) return null;
+  return {
+    decidedBy: latest.role,
+    chosenOption: latest.preferred,
+    ts: latest.ts,
+    rationale: latest.rationale,
+  };
 }
 
 /**
@@ -1491,11 +1538,17 @@ export class LocalFsStore implements Store {
     preferred: string;
     rationale: string;
     replyTo?: string | null;
+    kind?: RfcCommentKind;
   }): Promise<RfcComment> {
     validateRoleId(input.role);
-    const preferred = String(input.preferred ?? "").trim();
+    let preferred = String(input.preferred ?? "").trim();
     const rationale = String(input.rationale ?? "").trim();
-    if (rationale.length === 0) {
+    const kind = input.kind;
+    // For regular discussion comments, rationale is required (as in
+    // PR8g). For ack, rationale is optional ("yes" is meaningful on
+    // its own). For object / pre-decision, rationale is required
+    // (you must say why you object / propose).
+    if (kind !== "ack" && rationale.length === 0) {
       throw new UsageError("RFC comment rationale must be non-empty.");
     }
     const replyTo =
@@ -1505,10 +1558,12 @@ export class LocalFsStore implements Store {
 
     return this.withLock(`rfc-${input.rfcId}`, async () => {
       const { proposal, comments } = await this.readRfcUnchecked(input.rfcId);
-      // PR8g: comments are allowed in `open` AND `pre-decide`. In
-      // `pre-decide`, a comment from anyone other than the
-      // pre-decider auto-reopens the RFC (see end of this method).
-      if (proposal.status !== "open" && proposal.status !== "pre-decide") {
+      // PR8g.1: pre-decide is no longer a status. Only `open` and
+      // `revising` allow comments. Regular discussion is allowed in
+      // both; structured kinds (ack / object) are only meaningful when
+      // there is an active pre-decision, which can only exist in
+      // `open` (a pre-decide comment in `revising` is refused below).
+      if (proposal.status !== "open" && proposal.status !== "revising") {
         throw new UsageError(
           `RFC ${input.rfcId} is ${proposal.status}; cannot comment on a closed RFC.`,
         );
@@ -1525,6 +1580,65 @@ export class LocalFsStore implements Store {
           );
         }
       }
+
+      // PR8g.1 kind-specific validation.
+      if (kind === "pre-decision") {
+        if (!proposal.deciders.includes(input.role)) {
+          throw new ForbiddenError(
+            `Role '${input.role}' is not in deciders for ${input.rfcId} (deciders: ${proposal.deciders.join(", ") || "(none)"}). ` +
+              `Only deciders can post a pre-decision.`,
+          );
+        }
+        if (proposal.status !== "open") {
+          throw new UsageError(
+            `Cannot post a pre-decision on RFC ${input.rfcId} in state ${proposal.status}; ` +
+              `pre-decisions are only valid in 'open'.`,
+          );
+        }
+        if (preferred.length === 0) {
+          throw new UsageError(
+            "pre-decision requires a non-empty option id (--option).",
+          );
+        }
+      } else if (kind === "ack" || kind === "object") {
+        const active = computeActivePreDecisionInLedger(comments, proposal.id, await this.rfcOptionAddedEventTimestamps(proposal.id));
+        if (active === null) {
+          throw new UsageError(
+            `RFC ${input.rfcId} has no active pre-decision; ` +
+              `nothing to ${kind === "ack" ? "acknowledge" : "object to"}.`,
+          );
+        }
+        if (input.role === active.decidedBy) {
+          throw new UsageError(
+            `Role '${input.role}' posted the active pre-decision on ${input.rfcId}; ` +
+              `cannot ${kind === "ack" ? "ack" : "object to"} your own pre-decision. ` +
+              `Use 'rfc decide' to finalise, 'rfc revise' to send back for rewrite, or post a new 'rfc pre-decide' to change your proposal.`,
+          );
+        }
+        const required = new Set<RoleId>([
+          ...proposal.voters,
+          ...proposal.deciders,
+        ]);
+        required.delete(active.decidedBy);
+        if (!required.has(input.role)) {
+          throw new ForbiddenError(
+            `Role '${input.role}' is not in the required-ACK set for ${input.rfcId} ` +
+              `(voters: ${proposal.voters.join(", ") || "(none)"}; deciders: ${proposal.deciders.join(", ")}). ` +
+              `Only required roles can ack / object.`,
+          );
+        }
+        if (kind === "ack") {
+          // ACK comment locks preferred to the pre-decision's option
+          // (you cannot say "yes, but with a different option" — that
+          // is what `object --option Y` is for).
+          preferred = active.chosenOption;
+        } else {
+          // object: rationale already enforced non-empty above.
+          // preferred is optional ("just not C") or any existing option.
+          // (Already validated against proposal.options above.)
+        }
+      }
+
       const comment: RfcComment = {
         id: newId(),
         rfcId: proposal.id,
@@ -1533,6 +1647,7 @@ export class LocalFsStore implements Store {
         preferred,
         replyTo,
         rationale,
+        kind,
       };
       const nextLedger = [...comments, comment];
       await atomicWriteFile(
@@ -1551,6 +1666,7 @@ export class LocalFsStore implements Store {
           rationale,
           commentId: comment.id,
           replyTo,
+          kind,
         },
       });
       // PR8g: the commenter has by definition seen everything up to
@@ -1560,39 +1676,22 @@ export class LocalFsStore implements Store {
       const cursorTarget = this.abs(rfcReadCursorPath(input.role, proposal.id));
       await fsp.mkdir(path.dirname(cursorTarget), { recursive: true });
       await atomicWriteJson(cursorTarget, { lastSeenCommentId: comment.id });
-      // PR8g auto-reopen rule: any comment during pre-decide from a
-      // role OTHER than the pre-decider flips status back to open.
-      // The pre-decider themselves can keep adding reasoning to their
-      // own pending round without aborting it. Silent acknowledgement
-      // is the "consent" path.
-      if (
-        proposal.status === "pre-decide" &&
-        proposal.preDecision !== undefined &&
-        input.role !== proposal.preDecision.decidedBy
-      ) {
-        const reopened: RfcProposal = {
-          ...proposal,
-          status: "open",
-          preDecision: undefined,
-        };
-        await atomicWriteFile(
-          this.abs(rfcProposalPath(proposal.id, proposal.slug)),
-          yaml.dump(reopened, { lineWidth: 100, noRefs: true }),
-        );
-        await this.recordEventInternal({
-          type: "RFC_PRE_DECISION_OBJECTED",
-          from: input.role,
-          to: "*",
-          ref: proposal.id,
-          payload: {
-            rfcId: proposal.id,
-            triggeringCommentId: comment.id,
-            by: input.role,
-          },
-        });
-      }
       return comment;
     });
+  }
+
+  /**
+   * PR8g.1 helper: list timestamps of RFC_OPTION_ADDED events for a
+   * specific RFC. Used by computeActivePreDecisionInLedger to detect
+   * "add-option after a pre-decision invalidates that pre-decision".
+   * Kept private; reaches into the event stream once per call (RFCs
+   * are low-traffic so this is fine).
+   */
+  private async rfcOptionAddedEventTimestamps(rfcId: string): Promise<string[]> {
+    const all = await this.listEventsAfter("");
+    return all
+      .filter((e) => e.type === "RFC_OPTION_ADDED" && e.ref === rfcId)
+      .map((e) => e.ts);
   }
 
   async decideRfc(input: {
@@ -1638,15 +1737,13 @@ export class LocalFsStore implements Store {
     }
 
     return this.withLock(`rfc-${args.rfcId}`, async () => {
-      const { proposal } = await this.readRfcUnchecked(args.rfcId);
-      // PR8g: decide/reject are valid from open OR pre-decide.
-      // reject is additionally valid from revising (you can give up on
-      // the topic entirely instead of waiting for a rewrite). decide
-      // from revising is refused — the proposal text is in flux.
+      const { proposal, comments } = await this.readRfcUnchecked(args.rfcId);
+      // PR8g.1: decide is valid from `open`. reject is additionally
+      // valid from `revising` (decider may give up on the topic
+      // instead of waiting for a rewrite). reject is also the only
+      // escape from an ACK-stalled pre-decision.
       const okStarts: RfcStatus[] =
-        args.outcome === "accepted"
-          ? ["open", "pre-decide"]
-          : ["open", "pre-decide", "revising"];
+        args.outcome === "accepted" ? ["open"] : ["open", "revising"];
       if (!okStarts.includes(proposal.status)) {
         throw new UsageError(
           `RFC ${args.rfcId} is ${proposal.status}; cannot ${args.outcome === "accepted" ? "decide" : "reject"} from this state.`,
@@ -1670,7 +1767,43 @@ export class LocalFsStore implements Store {
             `Option '${args.chosenOption}' is not in RFC ${args.rfcId}. Options: ${proposal.options.map((o) => o.id).join(", ")}.`,
           );
         }
+        // PR8g.1 ACK gate: if an active pre-decision exists, every
+        // role in (voters ∪ deciders) − {pre-decider} must have
+        // posted a kind=ack or kind=object comment AFTER the
+        // pre-decision's ts before decide is allowed. Silence is NOT
+        // consent. There is no override — the only escape is `reject`.
+        const optionAddedTs = await this.rfcOptionAddedEventTimestamps(proposal.id);
+        const active = computeActivePreDecisionInLedger(comments, proposal.id, optionAddedTs);
+        if (active !== null) {
+          const required = new Set<RoleId>([
+            ...proposal.voters,
+            ...proposal.deciders,
+          ]);
+          required.delete(active.decidedBy);
+          const responded = new Set<RoleId>(
+            comments
+              .filter(
+                (c) =>
+                  c.ts > active.ts &&
+                  (c.kind === "ack" || c.kind === "object"),
+              )
+              .map((c) => c.role),
+          );
+          const outstanding = [...required].filter((r) => !responded.has(r));
+          if (outstanding.length > 0) {
+            throw new UsageError(
+              `RFC ${proposal.id} has an active pre-decision (option '${active.chosenOption}' by ${active.decidedBy}); ` +
+                `waiting for ACK from: ${outstanding.join(", ")}. ` +
+                `Each role must run \`agentctl rfc ack ${proposal.id}\` or \`agentctl rfc object ${proposal.id} --rationale ...\` ` +
+                `before this RFC can be decided. There is no override; if a role is unreachable, ` +
+                `run \`agentctl rfc reject ${proposal.id} --rationale ...\` and open a new RFC ` +
+                `without that role in voters/deciders.`,
+            );
+          }
+        }
       }
+      // PR8g.1: reject bypasses the ACK gate by design — it is the
+      // only escape from an ACK-stalled pre-decision.
       const decision: RfcDecision = {
         rfcId: proposal.id,
         decidedBy: args.decidedBy,
@@ -1686,9 +1819,6 @@ export class LocalFsStore implements Store {
       const updatedProposal: RfcProposal = {
         ...proposal,
         status: args.outcome === "accepted" ? "accepted" : "rejected",
-        // Clear pending pre-decision (if any) since terminal status
-        // overrides it.
-        preDecision: undefined,
       };
       await atomicWriteFile(
         this.abs(rfcProposalPath(proposal.id, proposal.slug)),
@@ -1738,10 +1868,12 @@ export class LocalFsStore implements Store {
 
     return this.withLock(`rfc-${input.rfcId}`, async () => {
       const { proposal } = await this.readRfcUnchecked(input.rfcId);
-      // PR8g: options may only be added while the proposal is mutable.
-      // Adding mid pre-decide would invalidate the round (silently
-      // changing what voters were asked to ACK); the path is "comment to
-      // reopen, then add". Adding after terminal is meaningless.
+      // PR8g.1: allowed in non-terminal states (`open` / `revising`).
+      // Pre-decide is no longer a status; if an active pre-decision
+      // exists, this add-option silently invalidates it (see
+      // `computeActivePreDecisionInLedger`). The decider can re-issue
+      // `rfc pre-decide` to start a fresh ACK round on the updated
+      // option set.
       if (proposal.status !== "open" && proposal.status !== "revising") {
         throw new UsageError(
           `Cannot add an option to ${input.rfcId} in state ${proposal.status}. ` +
@@ -1784,63 +1916,55 @@ export class LocalFsStore implements Store {
     decidedBy: RoleId;
     chosenOption: string;
     rationale: string;
-  }): Promise<RfcProposal> {
-    validateRoleId(input.decidedBy);
-    const chosenOption = String(input.chosenOption ?? "").trim();
-    const rationale = String(input.rationale ?? "").trim();
-    if (chosenOption.length === 0) {
-      throw new UsageError("pre-decide requires a non-empty --option.");
-    }
-    if (rationale.length === 0) {
-      throw new UsageError("pre-decide rationale must be non-empty.");
-    }
+  }): Promise<RfcComment> {
+    // PR8g.1: pre-decide is a structured comment with kind=pre-decision.
+    // commentRfc enforces decider gate + chosenOption-exists + rationale
+    // non-empty, so this is a thin wrapper. RFC status stays `open`;
+    // the ACK gate inside decideRfc is what makes pre-decide meaningful.
+    return this.commentRfc({
+      rfcId: input.rfcId,
+      role: input.decidedBy,
+      preferred: input.chosenOption,
+      rationale: input.rationale,
+      replyTo: null,
+      kind: "pre-decision",
+    });
+  }
 
-    return this.withLock(`rfc-${input.rfcId}`, async () => {
-      const { proposal } = await this.readRfcUnchecked(input.rfcId);
-      if (proposal.status !== "open") {
-        throw new UsageError(
-          `Cannot pre-decide ${input.rfcId} in state ${proposal.status}; ` +
-            `pre-decide is only valid from 'open'.`,
-        );
-      }
-      if (!proposal.deciders.includes(input.decidedBy)) {
-        throw new ForbiddenError(
-          `Role '${input.decidedBy}' is not in deciders for ${input.rfcId} (deciders: ${proposal.deciders.join(", ") || "(none)"}).`,
-        );
-      }
-      if (!proposal.options.find((o) => o.id === chosenOption)) {
-        throw new UsageError(
-          `Option '${chosenOption}' is not in RFC ${input.rfcId}. Options: ${proposal.options.map((o) => o.id).join(", ")}.`,
-        );
-      }
-      const now = new Date().toISOString();
-      const updated: RfcProposal = {
-        ...proposal,
-        status: "pre-decide",
-        preDecision: {
-          decidedBy: input.decidedBy,
-          chosenOption,
-          ts: now,
-          rationale,
-        },
-      };
-      await atomicWriteFile(
-        this.abs(rfcProposalPath(proposal.id, proposal.slug)),
-        yaml.dump(updated, { lineWidth: 100, noRefs: true }),
-      );
-      await this.recordEventInternal({
-        type: "RFC_PRE_DECISION",
-        from: input.decidedBy,
-        to: "*",
-        ref: proposal.id,
-        payload: {
-          rfcId: proposal.id,
-          decidedBy: input.decidedBy,
-          chosenOption,
-          rationale,
-        },
-      });
-      return updated;
+  async ackRfc(input: {
+    rfcId: string;
+    role: RoleId;
+    rationale?: string;
+  }): Promise<RfcComment> {
+    // PR8g.1: structured ACK. commentRfc enforces caller-is-required
+    // + active-pre-decision-exists + caller-is-not-pre-decider, plus
+    // forces `preferred` to the active pre-decision's chosenOption.
+    return this.commentRfc({
+      rfcId: input.rfcId,
+      role: input.role,
+      preferred: "",     // ignored; commentRfc overrides with the pre-decision's option
+      rationale: input.rationale ?? "",
+      replyTo: null,
+      kind: "ack",
+    });
+  }
+
+  async objectRfc(input: {
+    rfcId: string;
+    role: RoleId;
+    rationale: string;
+    preferredOption?: string;
+  }): Promise<RfcComment> {
+    // PR8g.1: structured objection. rationale required (enforced by
+    // commentRfc); preferredOption optional ("just not the proposed
+    // one") or any existing option id (validated by commentRfc).
+    return this.commentRfc({
+      rfcId: input.rfcId,
+      role: input.role,
+      preferred: input.preferredOption ?? "",
+      rationale: input.rationale,
+      replyTo: null,
+      kind: "object",
     });
   }
 
@@ -1859,10 +1983,10 @@ export class LocalFsStore implements Store {
 
     return this.withLock(`rfc-${input.rfcId}`, async () => {
       const { proposal } = await this.readRfcUnchecked(input.rfcId);
-      if (proposal.status !== "open" && proposal.status !== "pre-decide") {
+      if (proposal.status !== "open") {
         throw new UsageError(
           `Cannot revise ${input.rfcId} in state ${proposal.status}; ` +
-            `revise is only valid from 'open' or 'pre-decide'.`,
+            `revise is only valid from 'open'.`,
         );
       }
       if (!proposal.deciders.includes(input.decidedBy)) {
@@ -1873,7 +1997,6 @@ export class LocalFsStore implements Store {
       const updated: RfcProposal = {
         ...proposal,
         status: "revising",
-        preDecision: undefined,
       };
       await atomicWriteFile(
         this.abs(rfcProposalPath(proposal.id, proposal.slug)),
@@ -1981,7 +2104,6 @@ export class LocalFsStore implements Store {
 
       // Status flips back to open; comments preserved untouched.
       next.status = "open";
-      next.preDecision = undefined;
 
       await atomicWriteFile(
         this.abs(rfcProposalPath(proposal.id, proposal.slug)),
@@ -2223,6 +2345,35 @@ export class LocalFsStore implements Store {
         `proposal.yaml for ${rfcId} is not valid YAML: ${(err as Error).message}`,
       );
     }
+    // PR8g.1 back-compat: detect proposal.yaml shapes produced by
+    // PR8g that PR8g.1 walked back. Two markers:
+    //   - status: "pre-decide" (status enum no longer includes it)
+    //   - preDecision: {...} on the proposal (now lives in the
+    //     comments ledger as a kind=pre-decision comment)
+    // Refuse to proceed instead of silently treating these as
+    // arbitrary status / extra field; the agent needs to be told the
+    // schema moved on.
+    const proposalRecord = proposal as unknown as Record<string, unknown>;
+    if (proposalRecord.status === "pre-decide") {
+      throw new UsageError(
+        `RFC ${rfcId} has status "pre-decide" from PR8g; PR8g.1 collapsed ` +
+          `pre-decide back to a comment kind. Either re-init a fresh project ` +
+          `with \`agentctl init\` (in a clean directory) or manually edit ` +
+          `proposal.yaml to set status: "open" — the pre-decision data will ` +
+          `be lost and agents should re-issue \`agentctl rfc pre-decide\`. ` +
+          `See docs/RFC.md "Migration" section.`,
+      );
+    }
+    if (proposalRecord.preDecision !== undefined) {
+      throw new UsageError(
+        `RFC ${rfcId} carries a "preDecision" field on proposal.yaml from PR8g; ` +
+          `PR8g.1 stores pre-decisions in the comments ledger instead. ` +
+          `Either re-init a fresh project or manually edit proposal.yaml to ` +
+          `remove the "preDecision" field — the pre-decision data will be ` +
+          `lost and agents should re-issue \`agentctl rfc pre-decide\`. ` +
+          `See docs/RFC.md "Migration" section.`,
+      );
+    }
     // PR8g back-compat: detect the old per-role comments directory and
     // refuse to proceed silently. Alpha-stage hard cut; the user must
     // migrate by hand or `agentctl init` a fresh project. We deliberately
@@ -2322,12 +2473,11 @@ export class LocalFsStore implements Store {
   }
 
   private async rfcSummariesForRole(role: RoleId): Promise<RfcSummary[]> {
-    // PR8g visibility rules. Active = open / pre-decide / revising
-    // (was just "open" pre-PR8g). The per-state rules below reflect
-    // the docs/RFC.md "Manifest filter" section.
+    // PR8g.1 visibility rules. Active = open / revising (pre-decide
+    // is no longer a status; it's a comment kind that produces a
+    // computed `pendingPreDecision` summary).
     const active: RfcProposal[] = [
       ...(await this.listRfcs({ status: "open" })),
-      ...(await this.listRfcs({ status: "pre-decide" })),
       ...(await this.listRfcs({ status: "revising" })),
     ];
     const out: RfcSummary[] = [];
@@ -2336,8 +2486,7 @@ export class LocalFsStore implements Store {
       const isVoter = p.voters.includes(role);
       const isCreator = p.createdBy === role;
       if (!isDecider && !isVoter && !isCreator) continue;
-      // Read the comments ledger once per RFC; both `commented` and
-      // `unreadComments` derive from it.
+      // Read the comments ledger once per RFC; everything derives.
       const { comments } = await this.readRfcUnchecked(p.id);
       const myComments = comments.filter((c) => c.role === role);
       const commented = myComments.length > 0;
@@ -2348,31 +2497,57 @@ export class LocalFsStore implements Store {
           : comments.length - (comments.findIndex((c) => c.id === lastSeen) + 1)
         : comments.length;
 
-      // PR8g per-status filtering rules.
+      // PR8g.1 pre-decision computation. If there's an active
+      // pre-decision (latest kind=pre-decision comment, not
+      // invalidated by a later add-option), compute who still needs
+      // to ACK and whether THIS role owes one.
+      const optionAddedTs = await this.rfcOptionAddedEventTimestamps(p.id);
+      const active_pd = computeActivePreDecisionInLedger(comments, p.id, optionAddedTs);
+      let pendingPreDecision: RfcSummary["pendingPreDecision"];
+      if (active_pd !== null) {
+        const required = new Set<RoleId>([...p.voters, ...p.deciders]);
+        required.delete(active_pd.decidedBy);
+        const responded = new Set<RoleId>(
+          comments
+            .filter(
+              (c) =>
+                c.ts > active_pd.ts && (c.kind === "ack" || c.kind === "object"),
+            )
+            .map((c) => c.role),
+        );
+        const awaitingAckFrom = [...required].filter((r) => !responded.has(r));
+        pendingPreDecision = {
+          decidedBy: active_pd.decidedBy,
+          chosenOption: active_pd.chosenOption,
+          ts: active_pd.ts,
+          rationale: active_pd.rationale,
+          awaitingAckFrom,
+          myAckOwed: required.has(role) && !responded.has(role),
+        };
+      }
+
+      // PR8g.1 per-status filtering rules.
       switch (p.status) {
         case "open": {
-          // Voter who has already commented and is NOT a decider falls
-          // out of the action list — they have spoken. Voter who has
-          // new (unread) comments by others stays — there's new
-          // discussion to react to. Decider always stays.
+          // If a pre-decision is pending AND this role still owes an
+          // ACK, keep them in the manifest — they have a structured
+          // task. If a pre-decision is pending AND they have already
+          // responded, keep deciders (they may need to act on
+          // outcomes); drop voters who have responded.
+          if (pendingPreDecision !== undefined) {
+            if (pendingPreDecision.myAckOwed) break; // surface unconditionally
+            if (isVoter && !isDecider) continue;
+            break;
+          }
+          // No pending pre-decision: regular open-state rule. Voter
+          // (not decider) who has already commented AND has no unread
+          // comments by others falls out.
           if (isVoter && !isDecider && commented && unreadComments === 0) continue;
           break;
         }
-        case "pre-decide": {
-          // Decider always stays (waiting for objections / can finalise).
-          // Voter stays unless they have already commented AFTER the
-          // pre-decision was posted (silent consent path: commenting
-          // would have auto-reopened).
-          if (isVoter && !isDecider) {
-            const preDecisionTs = p.preDecision?.ts ?? "";
-            const commentedAfterPreDecide = myComments.some((c) => c.ts > preDecisionTs);
-            if (commentedAfterPreDecide) continue;
-          }
-          break;
-        }
         case "revising": {
-          // Only the creator (rewriter) and deciders need this on their
-          // dashboard. Other voters can wait until it re-opens.
+          // Only the creator (rewriter) and deciders need this on
+          // their dashboard. Other voters wait for re-open.
           if (!isCreator && !isDecider) continue;
           break;
         }
@@ -2384,19 +2559,13 @@ export class LocalFsStore implements Store {
         id: p.id,
         title: p.title,
         status: p.status,
-        // Prefer decider role label when both apply (decider work
-        // outranks voter work).
         role: isDecider ? "decider" : "voter",
         commented,
         unreadComments,
         relatedTasks: p.relatedTasks,
       };
-      if (p.status === "pre-decide" && p.preDecision !== undefined) {
-        summary.pendingPreDecision = {
-          decidedBy: p.preDecision.decidedBy,
-          chosenOption: p.preDecision.chosenOption,
-          ts: p.preDecision.ts,
-        };
+      if (pendingPreDecision !== undefined) {
+        summary.pendingPreDecision = pendingPreDecision;
       }
       out.push(summary);
     }

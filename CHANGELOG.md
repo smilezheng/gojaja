@@ -14,7 +14,130 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   `reviewers` field, `STATE_UPDATED` event, `dependsOn` cycle
   detection, schema-version compatibility check; role-level RFC
   `decisionScopes` is a candidate). `--description` becoming
-  hard-required on `rfc new` also lands here.
+  hard-required on `rfc new` also lands here. Maybe a read-only
+  `agentctl rfc audit <id>` to surface "who has acked / objected
+  / not responded yet" without the agent having to read
+  `rfc show`.
+
+## [2.0.0-alpha.16] — 2026-05-28
+
+### RFC v2.1: pre-decide as structured comment + mandatory ACK gate (PR8g.1)
+
+Walks back the PR8g `pre-decide` state-machine into a comment kind
+with a hard ACK gate. PR8g modelled silence-as-consent; that turned
+out to be unreliable in an async LLM-agent fleet (silence ≠ "saw it
+and agreed"; could be "agent offline"). PR8g.1 requires every
+required role to explicitly `rfc ack` or `rfc object` before
+`rfc decide` succeeds. There is no silence-is-consent.
+
+> **Breaking on-disk shape change (alpha-only, no users).** `readRfc`
+> refuses any `proposal.yaml` with `status: pre-decide` or a
+> `preDecision: {...}` field (both are PR8g shapes). Manual migration:
+> edit `status: open`, drop `preDecision`; the pre-decision data is
+> lost and agents should re-issue `rfc pre-decide`. Or `agentctl init`
+> a fresh project.
+
+Suite 247 -> 260.
+
+#### State machine collapses pre-decide back to open
+
+`RfcStatus` shrinks to 5 values: `{open, revising, accepted, rejected,
+superseded}`. The status `pre-decide` is removed; pre-decisions are
+now structured comments (`kind: "pre-decision"`) that live in the
+ledger and are surfaced via a read-time computation.
+
+#### Two new CLI verbs + reshape of one
+
+- `agentctl rfc ack <rfc-id> [--rationale ...]` (new): structured
+  agreement with the active pre-decision. Required-ACK roles only;
+  pre-decider cannot ack their own.
+- `agentctl rfc object <rfc-id> --rationale ... [--option Y]` (new):
+  structured disagreement. Rationale required; optional preferred
+  alternative.
+- `agentctl rfc pre-decide ...` (reshaped): now posts a `kind:
+  "pre-decision"` comment. RFC status stays `open`. The hard work
+  happens in `decideRfc`'s ACK gate.
+
+#### ACK gate inside `decideRfc`
+
+When an active pre-decision exists (latest `kind: pre-decision`
+comment, not invalidated by a later `RFC_OPTION_ADDED`), every role
+in `(voters ∪ deciders) − {pre-decider}` must have posted a
+`kind: ack` or `kind: object` comment with `ts > pre-decision.ts`.
+Outstanding roles → USAGE with the full list and the recovery path.
+**There is no override.** The only escape from a stalled ACK round
+is `rfc reject` followed by a new RFC without the unreachable role.
+
+#### Re-posting pre-decide invalidates all prior ACKs
+
+Whether the decider keeps `chosenOption` or changes it, re-issuing
+`rfc pre-decide` invalidates every prior `ack`/`object` because they
+were responding to a now-superseded pre-decision. Every required
+role must respond again. Same rule keeps things simple.
+
+#### `add-option` while pending invalidates the pre-decision
+
+Adding an option silently invalidates any active pre-decision because
+voters were ACKing an outdated option set. The decider can re-issue
+`rfc pre-decide` on the new option set. The existing
+`RFC_OPTION_ADDED` event is the audit signal.
+
+#### Regular `rfc comment` does NOT advance the ACK gate
+
+A required-ACK role posting a regular `rfc comment` (no kind) does
+not count toward the gate. Discussion is welcome; you still owe a
+structured `ack` or `object`. Handbook teaches this.
+
+#### Two PR8g event types collapsed
+
+`RFC_PRE_DECISION` and `RFC_PRE_DECISION_OBJECTED` are removed. All
+pre-decision / ack / object posts ride on `RFC_COMMENT` with
+`payload.kind`. grep-friendly: `payload.kind === "pre-decision" |
+"ack" | "object"`.
+
+#### Manifest changes
+
+`RfcSummary.pendingPreDecision` (PR8g field) now also carries
+`awaitingAckFrom: RoleId[]` (outstanding required roles) and
+`myAckOwed: boolean` (true iff this role still owes a structured
+response). Visibility rules:
+
+- Required-ACK role with `myAckOwed: true` → kept in manifest (they
+  have structured work to do).
+- Required-ACK voter who has already responded → dropped from their
+  own manifest until decide / new pre-decide.
+- Deciders → kept while RFC is open.
+
+#### Schema additions
+
+`RfcComment.kind?: "pre-decision" | "ack" | "object"`. Undefined =
+regular discussion. PR8g `RfcProposal.preDecision` is removed.
+`SCHEMA_VERSION` bumped to `"2.0.0-rfc-v2.1"`.
+
+#### Tests
+
+`tests/rfc-v2.test.ts`: rewrote 11 PR8g pre-decide-status tests as
+PR8g.1 ACK-gate tests (+18 new). `tests/handbook.test.ts`: updated
+trigger phrases for the new "silence does NOT count as consent" rules.
+Suite 247 -> 260.
+
+#### Docs
+
+- `docs/RFC.md`: rewritten end-to-end (state machine, ACK gate
+  semantics, 4-design-decision recap, walkthrough that exercises
+  pre-decide → object → re-pre-decide → unanimous ack → decide).
+- `docs/PROTOCOL.md`: RFC section adds `rfc ack` / `rfc object`
+  command specs; `rfc decide` documents the ACK gate; `rfc reject`
+  documents its "bypasses gate by design" role.
+- `docs/SCHEMA.md`: removed `pre-decide` status enum entry + the
+  PR8g `preDecision` field; added `kind` field on RfcComment with
+  worked example; updated event table.
+- `docs/HANDBOOK.md` and `src/cli/prompts/handbook.ts`: rewrite
+  "RFC multi-round discussion" section to teach the mandatory-ACK
+  semantics (no silence-as-consent; required roles must use
+  `rfc ack` or `rfc object`; regular comments do not advance the
+  gate; reject is the only escape).
+- `agentctl -h`: RFC section updated similarly.
 
 ## [2.0.0-alpha.15] — 2026-05-28
 

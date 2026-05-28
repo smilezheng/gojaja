@@ -4,6 +4,7 @@ import type {
   Manifest,
   ProjectConfig,
   RfcComment,
+  RfcCommentKind,
   RfcDecision,
   RfcOption,
   RfcProposal,
@@ -302,16 +303,28 @@ export interface Store {
   /**
    * Append a comment to the RFC's `comments.yaml` ledger.
    *
-   * PR8g semantics (changed from PR8f):
+   * PR8g.1 semantics (collapsed pre-decide back to a comment kind):
    * - Append-only; multiple comments per role are preserved in order.
-   * - `replyTo` ties the comment to either the RFC root (`null`) or
-   *   another comment by id.
-   * - If RFC status is `pre-decide` AND the commenter is NOT the role
-   *   that posted the pending pre-decision, the status auto-reopens
-   *   to `open` and an `RFC_PRE_DECISION_OBJECTED` event is emitted
-   *   alongside the regular `RFC_COMMENT` event. The pre-decider
-   *   themselves may comment without triggering the auto-reopen
-   *   (lets them add reasoning to their own pending round).
+   * - `replyTo` ties the comment to the RFC root (`null`) or another
+   *   comment by id.
+   * - `kind` selects between regular discussion (undefined),
+   *   `"pre-decision"` (decider posts a proposal awaiting ACK),
+   *   `"ack"` (caller agrees with the active pre-decision), or
+   *   `"object"` (caller disagrees; rationale required).
+   * - Posting `kind === "pre-decision"` requires the caller to be in
+   *   `deciders` (FORBIDDEN otherwise). It implicitly invalidates any
+   *   prior pre-decision's ACK round because the ACK gate only looks
+   *   at responses with `ts > latest-pre-decision.ts`.
+   * - Posting `kind === "ack"` or `"object"` requires the caller to
+   *   be in `(voters ∪ deciders) − {pre-decider}` and that an active
+   *   pre-decision exists.
+   * - There is no status transition cascade. RFC status stays `open`.
+   *   The `decideRfc` gate computes pending-pre-decide + outstanding
+   *   ACKs at decide time.
+   *
+   * Prefer `preDecideRfc` / `ackRfc` / `objectRfc` for the structured
+   * paths; this lower-level method exists for tests and a future
+   * generic `--kind` flag.
    */
   commentRfc(input: {
     rfcId: string;
@@ -319,14 +332,19 @@ export interface Store {
     preferred: string;
     rationale: string;
     replyTo?: string | null;
+    kind?: RfcCommentKind;
   }): Promise<RfcComment>;
 
   /**
    * PR8g: add a new option to an open or revising RFC. Any role with a
-   * session may add (the discussion is collaborative). Refused once the
-   * RFC has moved to `pre-decide`, `accepted`, `rejected`, or
-   * `superseded` — adding an option mid-pre-decision would invalidate
-   * the round; reopen first by commenting.
+   * session may add (the discussion is collaborative). Refused in
+   * terminal states (`accepted`, `rejected`, `superseded`).
+   *
+   * PR8g.1: if there is an active pre-decision, calling this
+   * silently invalidates that pre-decision (the ACK round becomes
+   * moot because voters were ACKing a now-outdated option set).
+   * The decider can re-issue `preDecideRfc` to start a fresh round.
+   * The existing `RFC_OPTION_ADDED` event provides the audit signal.
    */
   addRfcOption(input: {
     rfcId: string;
@@ -337,18 +355,47 @@ export interface Store {
   }): Promise<RfcOption>;
 
   /**
-   * PR8g: post a pre-decision. Decider gate (FORBIDDEN otherwise).
-   * Status flips to `pre-decide`; the proposal's `preDecision` field
-   * carries the proposal. Voters/deciders can then either stay silent
-   * (silent ACK) or comment to object — comments by anyone other than
-   * the pre-decider auto-reopen the RFC (see `commentRfc`).
+   * PR8g.1: post a pre-decision. Thin wrapper over `commentRfc` with
+   * `kind: "pre-decision"`. Decider gate (FORBIDDEN otherwise);
+   * validates `chosenOption` exists. Returns the just-written comment
+   * so callers can echo its id.
+   *
+   * RFC status remains `open` — pre-decision is metadata on a
+   * comment, not a state transition. The `decideRfc` ACK gate is
+   * what enforces "all required roles must respond before deciding".
    */
   preDecideRfc(input: {
     rfcId: string;
     decidedBy: RoleId;
     chosenOption: string;
     rationale: string;
-  }): Promise<RfcProposal>;
+  }): Promise<RfcComment>;
+
+  /**
+   * PR8g.1: record an explicit ACK to the active pre-decision.
+   * Caller must be in `(voters ∪ deciders) − {pre-decider}`. Rationale
+   * is optional (a bare "yes" is meaningful). Refuses if no active
+   * pre-decision exists or if the caller is the pre-decider.
+   */
+  ackRfc(input: {
+    rfcId: string;
+    role: RoleId;
+    rationale?: string;
+  }): Promise<RfcComment>;
+
+  /**
+   * PR8g.1: record an explicit objection to the active pre-decision.
+   * Same caller-set + active-required gates as `ackRfc`. Rationale
+   * required. `preferredOption` is the option the objector would
+   * rather the decider pick; may be empty if they have no preference
+   * (just "not C").
+   */
+  objectRfc(input: {
+    rfcId: string;
+    role: RoleId;
+    rationale: string;
+    preferredOption?: string;
+  }): Promise<RfcComment>;
 
   /**
    * Decide an RFC (accept with a chosen option). The caller's role must

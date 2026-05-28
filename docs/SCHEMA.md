@@ -204,12 +204,10 @@ Event types currently emitted:
 | `TASK_ASSIGNED`       | `agentctl task new` / `assign`   | `to` = new owner; `ref` = task id.             |
 | `TASK_STATUS_CHANGED` | `agentctl task status`           | Broadcast; `ref` = task id.                    |
 | `RFC_CREATED`         | `agentctl rfc new`               | Broadcast; `ref` = RFC id.                     |
-| `RFC_COMMENT`         | `agentctl rfc comment`           | Broadcast; `ref` = RFC id.                     |
+| `RFC_COMMENT`         | `agentctl rfc comment` / `ack` / `object` / `pre-decide` | Broadcast; `ref` = RFC id. PR8g.1: `payload.kind` distinguishes regular discussion (undefined) from structured `"pre-decision"` / `"ack"` / `"object"` posts. |
 | `RFC_DECIDED`         | `agentctl rfc decide` / `reject` | Broadcast; `ref` = RFC id; final.              |
 | `RFC_REPAIRED`        | `Store.readRfc` self-heal        | Broadcast; `ref` = RFC id. Emitted when a half-written `finaliseRfc` is observed (decision.json exists but proposal.yaml still `open`) and the proposal status is forward-completed from the decision. |
-| `RFC_OPTION_ADDED`    | `agentctl rfc add-option`        | Broadcast; `ref` = RFC id; payload carries new option id + summary + rationale (PR8g). |
-| `RFC_PRE_DECISION`    | `agentctl rfc pre-decide`        | Broadcast; `ref` = RFC id; payload carries proposed option + rationale (PR8g). |
-| `RFC_PRE_DECISION_OBJECTED` | comment from non-pre-decider during `pre-decide` | Broadcast; `ref` = RFC id. Auto-reopens RFC to `open` (PR8g). |
+| `RFC_OPTION_ADDED`    | `agentctl rfc add-option`        | Broadcast; `ref` = RFC id; payload carries new option id + summary + rationale (PR8g). Also implicitly invalidates any pending pre-decision via the read-time computation. |
 | `RFC_REVISION_REQUESTED` | `agentctl rfc revise`         | Broadcast; `ref` = RFC id. Status flips to `revising`; rationale tells the creator what to fix (PR8g). |
 | `RFC_REVISED`         | `agentctl rfc edit`              | Broadcast; `ref` = RFC id. Status flips back to `open`; payload lists which fields changed (PR8g). |
 | `RFC_TASK_LINKED` / `RFC_TASK_UNLINKED` | `agentctl rfc link-task` / `unlink-task` | Broadcast; `ref` = RFC id; payload carries task id (PR8g). |
@@ -402,13 +400,13 @@ rfcs/RFC-0001-switch-to-postgres/
   decision.json      ← absent until the leader decides or rejects
 ```
 
-`proposal.yaml` (PR8g shape):
+`proposal.yaml` (PR8g.1 shape):
 
 ```yaml
 id: RFC-0001
 slug: switch-to-postgres
 title: Switch primary store to Postgres
-status: open                              # open | pre-decide | revising | accepted | rejected | superseded
+status: open                              # open | revising | accepted | rejected | superseded
 voters: [PM, TL, Backend, DevOps]         # advisory: who SHOULD comment
 deciders: [TL]                            # enforced: who CAN pre-decide / decide / reject / revise
 options:
@@ -420,32 +418,29 @@ deadline: 2026-06-01T00:00:00.000Z        # informational (framework does NOT au
 createdAt: 2026-05-27T05:23:00.000Z
 createdBy: PM
 description: |
-  PR8g: free-form context. Soft-required in PR8g (warn-on-empty); will
-  be hard-required in PR8h. This is the text non-participants read to
+  Free-form context. Soft-required in PR8g.1 (warn-on-empty); will be
+  hard-required in PR8h. This is the text non-participants read to
   weigh in; deciders are expected to `rfc revise` if it is too thin.
-relatedTasks: [T-0042]                    # PR8g: linked task ids; validated against task_board.yaml
-# preDecision present only when status === "pre-decide"; cleared on
-# transitions out of pre-decide:
-# preDecision:
-#   decidedBy: TL
-#   chosenOption: A
-#   ts: 2026-05-27T06:00:00.000Z
-#   rationale: "lean A; want DevOps and PM to confirm migration window."
+relatedTasks: [T-0042]                    # linked task ids; validated against task_board.yaml
 ```
 
-Status state machine (PR8g, enforced):
+> PR8g had a `preDecision: {...}` field and `status: pre-decide`.
+> PR8g.1 removed both — pre-decisions are stored as
+> `kind: "pre-decision"` comments in `comments.yaml` and the ACK gate
+> on `decideRfc` enforces consensus computationally. `readRfc`
+> refuses any proposal.yaml that still carries the PR8g shapes.
+
+Status state machine (PR8g.1, enforced):
 
 ```
-                            ┌─ rfc revise ────────────────────────────┐
-                            │                                          ▼
-   open ──comment / add-option──┐                                  revising
-       │                        │                                          │
-       │                        ▼                                          │
-       │                  pre-decide ──comment (non-pre-decider)──▶ open   │
-       │                        │                                          │
-       │                        ▼                                          │
-       └─rfc decide──▶ accepted (terminal)                ◀── rfc edit ────┘
-       └─rfc reject──▶ rejected (terminal)
+                  ┌─ rfc revise ─────────────────────────────────────┐
+                  │                                                   ▼
+   open ──comment / ack / object / add-option / pre-decide (comment) ──▶ open
+       │                                                                  ▲
+       │                                                                  │
+       └─rfc decide (ACK gate)──▶ accepted (terminal)                 revising
+       └─rfc reject (bypass gate)──▶ rejected (terminal)                  │
+                                                       ◀── rfc edit ─────┘
 ```
 
 - `accepted` / `rejected` / `superseded` are terminal in v2.
@@ -459,8 +454,7 @@ Status state machine (PR8g, enforced):
   `deciders` list. A role-level decision-scope field is a PR8h
   candidate.
 
-`comments.yaml` (PR8g, append-only threaded ledger; replaces the
-pre-PR8g per-role JSONs):
+`comments.yaml` (PR8g.1, append-only threaded ledger with structured kinds):
 
 ```yaml
 - id: 01HZA000000000000000COMM1   # ULID, globally unique; reply-to target
@@ -470,23 +464,50 @@ pre-PR8g per-role JSONs):
   preferred: A                     # option id; may be empty for "no preference"
   replyTo: null                    # null = reply to the RFC root
   rationale: "Migration is tractable; sharding plan ready."
+  # no kind = regular discussion comment
 
 - id: 01HZA000000000000000COMM2
   rfcId: RFC-0001
   role: TL
   ts: 2026-05-28T05:30:00.000Z
   preferred: A
-  replyTo: 01HZA000000000000000COMM1   # threads under another comment
-  rationale: "Agree; but worried about migration window."
+  replyTo: null
+  rationale: "Lean A; speak up if not."
+  kind: pre-decision                # PR8g.1: structured pre-decision comment
+
+- id: 01HZA000000000000000COMM3
+  rfcId: RFC-0001
+  role: PM
+  ts: 2026-05-28T05:42:00.000Z
+  preferred: B
+  replyTo: 01HZA000000000000000COMM2
+  rationale: "Prefer B; M2 slip is hard to justify."
+  kind: object                      # PR8g.1: structured objection comment
+
+- id: 01HZA000000000000000COMM4
+  rfcId: RFC-0001
+  role: DevOps
+  ts: 2026-05-28T05:50:00.000Z
+  preferred: A                      # ack: locked to the pre-decision's chosenOption
+  replyTo: null
+  rationale: ""                     # ack rationale optional
+  kind: ack                         # PR8g.1: structured acknowledgement comment
 ```
 
 Multiple comments per role are preserved (ULIDs ensure order). Normal
-mutation goes through `agentctl rfc comment`, which appends to the
-ledger, emits `RFC_COMMENT`, and advances the commenter's read
-cursor. Comments on closed RFCs (`accepted` / `rejected` /
-`superseded`) are refused. Comments on `pre-decide` from any role
-other than the pre-decider auto-reopen the RFC and emit
-`RFC_PRE_DECISION_OBJECTED`.
+mutation goes through `agentctl rfc comment` (regular), `rfc
+pre-decide` (kind=pre-decision; decider only), `rfc ack` (kind=ack),
+`rfc object` (kind=object), all of which append to the ledger and
+emit `RFC_COMMENT` with `payload.kind`. Comments on closed RFCs
+(`accepted` / `rejected` / `superseded`) are refused.
+
+**PR8g.1 ACK gate (`decideRfc`)**: when an active pre-decision exists
+(latest `kind: "pre-decision"` comment with no later `RFC_OPTION_ADDED`
+event), every role in `(voters ∪ deciders) − {pre-decider}` must have
+a `kind: "ack"` or `kind: "object"` comment with `ts > pre-decision.ts`
+before `rfc decide` will succeed. Silence never counts as consent.
+There is no override; the only escape is `rfc reject` + open a fresh
+RFC without the unreachable role.
 
 > **Migration note (PR8g).** Projects that used the pre-PR8g
 > `comments/<role>.json` layout are detected on read and refused with a

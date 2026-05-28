@@ -46,8 +46,11 @@ const KEY_TRIGGER_PHRASES: ReadonlyArray<RegExp> = [
   // PR8g: multi-round / pre-decide / revise rules. Whitespace-tolerant
   // because the handbook text wraps lines for legibility.
   /RFC multi-round discussion/,
-  /pre-decide\s+whenever you can imagine an objection/,
   /Use revise\s+when the topic is real but the writeup is too thin/,
+  // PR8g.1: pre-decide is now a mandatory-ACK round, not silent-consent.
+  /Silence does\s+NOT count as consent/,
+  /myAckOwed: true/,
+  /Posting a plain `rfc comment`/,
 ];
 
 describe("COLLABORATION_HANDBOOK", () => {

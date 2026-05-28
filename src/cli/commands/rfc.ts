@@ -166,16 +166,75 @@ async function runRfcPreDecide(args: ParsedArgs): Promise<number> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
   const { role } = await resolveIdentity(store, { requireSession: true });
-  const proposal = await store.preDecideRfc({
+  const comment = await store.preDecideRfc({
     rfcId, decidedBy: role, chosenOption, rationale,
   });
   if (json) {
-    process.stdout.write(JSON.stringify({ status: "pre-decided", proposal }) + "\n");
+    process.stdout.write(JSON.stringify({ status: "pre-decided", comment }) + "\n");
+  } else {
+    // PR8g.1: print the required-ACK set so the decider knows exactly
+    // who they're waiting on. We re-read the RFC to compute it (cheap;
+    // happens once per pre-decide invocation).
+    const { proposal } = await store.readRfc(rfcId);
+    const required = new Set<RoleId>([
+      ...proposal.voters,
+      ...proposal.deciders,
+    ]);
+    required.delete(role);
+    process.stdout.write(
+      `Posted pre-decision on ${rfcId} as option '${chosenOption}' by ${role} (comment ${comment.id}).\n` +
+        `\nRequired ACK from: ${[...required].join(", ") || "(none — no other voters or deciders, you can decide directly)"}.\n` +
+        `Each role must run \`agentctl rfc ack ${rfcId}\` or \`agentctl rfc object ${rfcId} --rationale ...\`\n` +
+        `before \`agentctl rfc decide ${rfcId} --option ${chosenOption} --rationale ...\` will succeed.\n` +
+        `Silence does NOT count as consent. The only escape from a stalled ACK round is\n` +
+        `\`agentctl rfc reject ${rfcId}\`.\n`,
+    );
+  }
+  return 0;
+}
+
+async function runRfcAck(args: ParsedArgs): Promise<number> {
+  const rfcId = args.positional[1];
+  if (!rfcId) {
+    throw new UsageError(
+      "Usage: agentctl rfc ack <rfc-id> [--rationale <text>]",
+    );
+  }
+  const rationale = optionalString(args.flags, "rationale");
+  const json = boolFlag(args.flags, "json");
+  const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
+  const store = await openStoreOrThrow(root);
+  const { role } = await resolveIdentity(store, { requireSession: true });
+  const comment = await store.ackRfc({ rfcId, role, rationale });
+  if (json) {
+    process.stdout.write(JSON.stringify({ status: "acked", comment }) + "\n");
+  } else {
+    process.stdout.write(`Acked the active pre-decision on ${rfcId} as ${role} (comment ${comment.id}).\n`);
+  }
+  return 0;
+}
+
+async function runRfcObject(args: ParsedArgs): Promise<number> {
+  const rfcId = args.positional[1];
+  if (!rfcId) {
+    throw new UsageError(
+      "Usage: agentctl rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]",
+    );
+  }
+  const rationale = requireString(args.flags, "rationale");
+  const preferredOption = optionalString(args.flags, "option") ?? "";
+  const json = boolFlag(args.flags, "json");
+  const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
+  const store = await openStoreOrThrow(root);
+  const { role } = await resolveIdentity(store, { requireSession: true });
+  const comment = await store.objectRfc({ rfcId, role, rationale, preferredOption });
+  if (json) {
+    process.stdout.write(JSON.stringify({ status: "objected", comment }) + "\n");
   } else {
     process.stdout.write(
-      `Pre-decided ${rfcId} as option '${chosenOption}' by ${role}.\n` +
-        `Voters/deciders see this in their next plan; any comment from a\n` +
-        `non-pre-decider role will auto-reopen the RFC. Silence is consent.\n`,
+      `Objected to the active pre-decision on ${rfcId} as ${role} (comment ${comment.id})` +
+        (preferredOption ? `, preferring option '${preferredOption}'` : "") +
+        `.\n`,
     );
   }
   return 0;
@@ -331,7 +390,6 @@ async function runRfcList(args: ParsedArgs): Promise<number> {
   // PR8g: pre-decide and revising are new valid statuses.
   const allowed = new Set([
     "open",
-    "pre-decide",
     "revising",
     "accepted",
     "rejected",
@@ -342,7 +400,7 @@ async function runRfcList(args: ParsedArgs): Promise<number> {
   }
   const list = await store.listRfcs(
     statusFilter
-      ? { status: statusFilter as "open" | "pre-decide" | "revising" | "accepted" | "rejected" | "superseded" }
+      ? { status: statusFilter as "open" | "revising" | "accepted" | "rejected" | "superseded" }
       : undefined,
   );
   if (json) {
@@ -362,6 +420,8 @@ async function runRfcList(args: ParsedArgs): Promise<number> {
 /**
  * Render comments as a tree by `replyTo` chains. Depth-2 indents are
  * meaningful; deeper threads flatten to depth-2 to keep output legible.
+ * PR8g.1: kind=pre-decision / ack / object comments get a [kind] tag
+ * so the position-statement comments stand out from regular discussion.
  */
 function renderCommentTree(comments: RfcComment[]): string[] {
   const byParent = new Map<string | null, RfcComment[]>();
@@ -379,12 +439,27 @@ function renderCommentTree(comments: RfcComment[]): string[] {
       const indent = "  ".repeat(Math.min(depth, 3));
       const first = c.rationale.split("\n")[0] ?? "";
       const tag = c.preferred ? ` -> ${c.preferred}` : "";
-      lines.push(`${indent}- [${c.id}] ${c.role}${tag}: ${first}`);
+      const kindTag = c.kind ? ` [${c.kind}]` : "";
+      lines.push(`${indent}- [${c.id}]${kindTag} ${c.role}${tag}: ${first}`);
       visit(c.id, depth + 1);
     }
   };
   visit(null, 0);
   return lines;
+}
+
+/**
+ * PR8g.1: compute the currently-active pre-decision (latest
+ * kind=pre-decision comment not invalidated by a later add-option).
+ * Mirrors `computeActivePreDecisionInLedger` in the store; we
+ * duplicate the small filter here rather than expose store internals.
+ */
+function activePreDecisionFromComments(comments: RfcComment[]): RfcComment | null {
+  let latest: RfcComment | null = null;
+  for (const c of comments) {
+    if (c.kind === "pre-decision") latest = c;
+  }
+  return latest;
 }
 
 async function runRfcShow(args: ParsedArgs): Promise<number> {
@@ -429,12 +504,45 @@ async function runRfcShow(args: ParsedArgs): Promise<number> {
   } else {
     process.stdout.write(`\nDescription: (empty — consider 'rfc revise' if context is missing)\n`);
   }
-  if (proposal.status === "pre-decide" && proposal.preDecision !== undefined) {
+  // PR8g.1: pending pre-decision is now a computed view over the
+  // comments ledger; render it with the outstanding ACK list and
+  // already-responded roles so the agent can see at a glance what's
+  // blocking decide.
+  const activePd = activePreDecisionFromComments(comments);
+  if (activePd !== null) {
+    const required = new Set<RoleId>([
+      ...proposal.voters,
+      ...proposal.deciders,
+    ]);
+    required.delete(activePd.role);
+    const ackedRoles: RoleId[] = [];
+    const objectedRoles: { role: RoleId; preferred: string }[] = [];
+    for (const c of comments) {
+      if (c.ts <= activePd.ts) continue;
+      if (c.kind === "ack" && required.has(c.role)) ackedRoles.push(c.role);
+      if (c.kind === "object" && required.has(c.role)) {
+        objectedRoles.push({ role: c.role, preferred: c.preferred });
+      }
+    }
+    const respondedSet = new Set<RoleId>([
+      ...ackedRoles,
+      ...objectedRoles.map((o) => o.role),
+    ]);
+    const awaiting = [...required].filter((r) => !respondedSet.has(r));
     process.stdout.write(
-      `\nPending pre-decision by ${proposal.preDecision.decidedBy} at ${proposal.preDecision.ts}:\n` +
-        `  option:    ${proposal.preDecision.chosenOption}\n` +
-        `  rationale: ${proposal.preDecision.rationale}\n` +
-        `(Any comment from another role auto-reopens the RFC. Silence = consent.)\n`,
+      `\nPending pre-decision by ${activePd.role} at ${activePd.ts}:\n` +
+        `  option:        ${activePd.preferred}\n` +
+        `  rationale:     ${activePd.rationale}\n` +
+        `  awaiting ACK:  ${awaiting.join(", ") || "(none — ready to decide)"}\n` +
+        `  acked:         ${ackedRoles.join(", ") || "(none)"}\n` +
+        `  objected:      ${
+          objectedRoles
+            .map((o) => `${o.role}${o.preferred ? ` → ${o.preferred}` : ""}`)
+            .join(", ") || "(none)"
+        }\n` +
+        `(Silence does NOT count as consent. Every required role must run\n` +
+        ` 'agentctl rfc ack ${proposal.id}' or 'agentctl rfc object ${proposal.id} --rationale ...'\n` +
+        ` before 'agentctl rfc decide' will succeed.)\n`,
     );
   }
   process.stdout.write(`\nComments (${comments.length}):\n`);
@@ -462,6 +570,8 @@ export async function runRfc(args: ParsedArgs): Promise<number> {
     case "comment":       return runRfcComment(args);
     case "add-option":    return runRfcAddOption(args);
     case "pre-decide":    return runRfcPreDecide(args);
+    case "ack":           return runRfcAck(args);
+    case "object":        return runRfcObject(args);
     case "decide":        return runRfcDecide(args);
     case "reject":        return runRfcReject(args);
     case "revise":        return runRfcRevise(args);
@@ -472,18 +582,20 @@ export async function runRfc(args: ParsedArgs): Promise<number> {
     case "show":          return runRfcShow(args);
     default:
       throw new UsageError(
-        "Usage: agentctl rfc <new|comment|add-option|pre-decide|decide|reject|revise|edit|link-task|unlink-task|list|show> [args]\n" +
+        "Usage: agentctl rfc <new|comment|add-option|pre-decide|ack|object|decide|reject|revise|edit|link-task|unlink-task|list|show> [args]\n" +
           "  agentctl rfc new <slug> --title <text> --deciders <r1,r2> [--description <text>] [--voters <...>] [--options A:summary,B:summary] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]\n" +
           "  agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]\n" +
           "  agentctl rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>\n" +
           "  agentctl rfc pre-decide <rfc-id> --option <opt> --rationale <text>\n" +
+          "  agentctl rfc ack <rfc-id> [--rationale <text>]\n" +
+          "  agentctl rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]\n" +
           "  agentctl rfc decide <rfc-id> --option <opt> --rationale <text>\n" +
           "  agentctl rfc reject <rfc-id> --rationale <text>\n" +
           "  agentctl rfc revise <rfc-id> --rationale <text>\n" +
           "  agentctl rfc edit <rfc-id> --rationale <text> [--title <text>] [--description <text>] [--options A:summary,B:summary] [--deadline <iso>]\n" +
           "  agentctl rfc link-task <rfc-id> --task T-NNNN\n" +
           "  agentctl rfc unlink-task <rfc-id> --task T-NNNN\n" +
-          "  agentctl rfc list [--status open|pre-decide|revising|accepted|rejected|superseded]\n" +
+          "  agentctl rfc list [--status open|revising|accepted|rejected|superseded]\n" +
           "  agentctl rfc show <rfc-id> [--no-mark-seen]",
       );
   }

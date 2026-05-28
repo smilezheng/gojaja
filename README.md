@@ -249,7 +249,7 @@ agentctl release <role>       # from a shell that holds the session, or
 
 ## How decisions get made (RFCs)
 
-When a decision touches multiple roles' `owns` or the architecture, an agent opens an RFC instead of acting unilaterally. RFCs support real multi-round discussion: threaded comments, options added mid-flight, a "send back for rewrite" path, and an optional pre-decide round for "I lean X, any objections?". Full walkthrough in [docs/RFC.md](./docs/RFC.md); a quick tour:
+When a decision touches multiple roles' `owns` or the architecture, an agent opens an RFC instead of acting unilaterally. RFCs support real multi-round discussion: threaded comments, options added mid-flight, a "send back for rewrite" path, and a structured pre-decide round where every required role must explicitly `ack` or `object` before the decider can finalise (silence is never consent). Full walkthrough in [docs/RFC.md](./docs/RFC.md); a quick tour:
 
 ```bash
 # Any agent can open. --description is the context anyone-not-in-the-
@@ -271,9 +271,12 @@ agentctl rfc comment RFC-0001 --reply-to 01HZA...COMM1 --rationale "Can M2 slip 
 # existing ones are inadequate.
 agentctl rfc add-option RFC-0001 --option "C:Managed Postgres on RDS" --rationale "Captures the cost dimension."
 
-# Optional pre-decide round: decider proposes, voters either stay
-# silent (consent) or comment (auto-reopens to gather more discussion).
-agentctl rfc pre-decide RFC-0001 --option C --rationale "Lean C; speak up if not."
+# Pre-decide: decider posts a structured "I lean X" comment.
+# Every voter + non-pre-decider decider MUST run rfc ack or rfc object
+# before rfc decide will succeed. Silence is not consent.
+agentctl rfc pre-decide RFC-0001 --option C --rationale "Lean C; please ack or object."
+agentctl rfc ack    RFC-0001                                     # I agree
+agentctl rfc object RFC-0001 --rationale "Cost concern" --option B  # I disagree
 
 # Decider can also send a thin proposal back for rewrite without
 # rejecting the topic.
@@ -307,7 +310,7 @@ Open RFCs that need a role's attention appear in that role's next `agentctl plan
 | `claim`, `plan`, `ack`, `report`, `worklog`, `wait` | Done |
 | `role` + `prompt` + `activate` (role-free runtime, per-window activation) | Done |
 | Task board (`task new/assign/status/list/show`) | Done |
-| RFCs v2: threaded comments, `add-option`, `pre-decide`, `revise`/`edit`, `link-task` | Done |
+| RFCs v2.1: threaded comments, `add-option`, `pre-decide` + mandatory `ack`/`object` gate, `revise`/`edit`, `link-task` | Done |
 | Collaboration handbook injected into runtime | Done |
 | `role delete` with session and config cleanup | Done |
 | `agentctl upgrade` and `reset` | Next |

@@ -295,6 +295,7 @@ superseded), worked example, and rationale live in
 
 ### `agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]`
 
+- Posts a regular discussion comment (no `kind` field).
 - The role comes from `MA_SESSION`; the framework does not allow
   ghost-commenting on behalf of another role.
 - Non-voters may comment — they often add cross-cutting context that the
@@ -303,51 +304,85 @@ superseded), worked example, and rationale live in
   on unknown `--option`.
 - `--reply-to` must reference an existing comment id in the same RFC;
   threading is enforced.
-- PR8g: **append-only ledger**. Multiple comments per role are
-  preserved in `comments.yaml`. The commenter's read cursor for this
-  RFC is automatically advanced to the just-written comment.
-- During `pre-decide`: a comment from a role **other than** the
-  pre-decider auto-reopens the RFC to `open` and emits
-  `RFC_PRE_DECISION_OBJECTED`. A comment from the pre-decider
-  themselves does not.
-- Emits `RFC_COMMENT` (broadcast).
+- **Append-only ledger.** Multiple comments per role are preserved in
+  `comments.yaml`. The commenter's read cursor for this RFC is
+  automatically advanced to the just-written comment.
+- **PR8g.1**: a regular `rfc comment` from a required-ACK role does
+  NOT advance the `decideRfc` ACK gate. To register a position, use
+  `rfc ack` / `rfc object` (which post `kind: ack` / `kind: object`
+  comments). Discussion comments are welcome but do not count as
+  consensus signals.
+- Emits `RFC_COMMENT` (broadcast). Payload includes
+  `kind: undefined` for regular comments; `kind: "pre-decision" |
+  "ack" | "object"` for the structured commands documented below.
 
 ### `agentctl rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>` (PR8g)
 
 - Any session can add. Allowed in `open` or `revising`. Refused in
-  `pre-decide` (use comment to reopen first), `accepted`, `rejected`,
-  `superseded`.
+  terminal states (`accepted`, `rejected`, `superseded`).
 - Option id must be unique within the RFC.
+- **PR8g.1**: if there is an active pre-decision, add-option silently
+  invalidates it (voters were ACKing an outdated option set). The
+  decider can re-issue `rfc pre-decide` on the new option set. The
+  `RFC_OPTION_ADDED` event is the audit signal.
 - Emits `RFC_OPTION_ADDED`.
 
-### `agentctl rfc pre-decide <rfc-id> --option <opt> --rationale <text>` (PR8g)
+### `agentctl rfc pre-decide <rfc-id> --option <opt> --rationale <text>` (PR8g, reshaped in PR8g.1)
 
 - Decider gate (FORBIDDEN otherwise). Valid only from `open`.
-- Sets the proposal's `preDecision` field (`decidedBy`, `chosenOption`,
-  `ts`, `rationale`) and status to `pre-decide`. Surface in
-  `manifest.rfcs[*].pendingPreDecision`.
-- Emits `RFC_PRE_DECISION`.
+- **PR8g.1**: posts a structured comment with `kind: "pre-decision"`;
+  does NOT change RFC status. The `decideRfc` ACK gate is what makes
+  pre-decide load-bearing.
+- Required-ACK set: `(voters ∪ deciders) − {pre-decider}`.
+- Surface in `manifest.rfcs[*].pendingPreDecision` with
+  `awaitingAckFrom` and per-role `myAckOwed`.
+- Re-issuing pre-decide invalidates all prior `ack` / `object`
+  responses — every required role must respond again.
+- Emits `RFC_COMMENT` with `payload.kind = "pre-decision"`.
+
+### `agentctl rfc ack <rfc-id> [--rationale <text>]` (PR8g.1)
+
+- Caller must be in `(voters ∪ deciders) − {pre-decider}`. Pre-decider
+  cannot ack their own pre-decision.
+- Refused if there is no active pre-decision (USAGE).
+- Posts a `kind: "ack"` comment; advances the ACK gate.
+- Rationale optional ("yes" is meaningful).
+- Emits `RFC_COMMENT` with `payload.kind = "ack"`.
+
+### `agentctl rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]` (PR8g.1)
+
+- Same caller-set + active-required gates as `ack`.
+- Rationale required. `--option` optional; when set, must be an
+  existing option id.
+- Posts a `kind: "object"` comment; counts as a structured response
+  (advances the ACK gate too).
+- Emits `RFC_COMMENT` with `payload.kind = "object"`.
 
 ### `agentctl rfc decide <rfc-id> --option <opt> --rationale <text>`
 
-- Deciders gate. Valid from `open` or `pre-decide`.
+- Deciders gate. Valid from `open`.
+- **PR8g.1 ACK gate**: if there is an active pre-decision (latest
+  `kind: "pre-decision"` comment, not invalidated by a later
+  add-option), every role in `(voters ∪ deciders) − {pre-decider}`
+  must have posted `ack` or `object`. Outstanding roles → USAGE with
+  the full list and the recovery path (ack/object, or `rfc reject`).
 - Refuses on unknown `--option`.
-- Status -> `accepted`; writes `decision.json`; clears `preDecision`;
-  emits `RFC_DECIDED` with `outcome="accepted"`.
+- Status -> `accepted`; writes `decision.json`; emits `RFC_DECIDED`
+  with `outcome="accepted"`.
 
 ### `agentctl rfc reject <rfc-id> --rationale <text>`
 
-- Deciders gate. Valid from `open` / `pre-decide` / `revising`
-  (the last so a decider can give up on the topic mid-revision).
+- Deciders gate. Valid from `open` / `revising`.
+- **Bypasses the ACK gate by design** — this is the only escape from
+  a stalled pre-decision (required role unreachable).
 - Status -> `rejected`; writes `decision.json` with `outcome="rejected"`
-  and `chosenOption=null`; clears `preDecision`; emits `RFC_DECIDED`.
+  and `chosenOption=null`; emits `RFC_DECIDED`.
 
 ### `agentctl rfc revise <rfc-id> --rationale <text>` (PR8g)
 
-- Deciders gate. Valid from `open` or `pre-decide`.
-- Status -> `revising`; clears `preDecision`; emits
-  `RFC_REVISION_REQUESTED` carrying the rationale (which is the
-  "what to fix" message to the creator).
+- Deciders gate. Valid from `open`.
+- Status -> `revising`; emits `RFC_REVISION_REQUESTED` carrying the
+  rationale (which is the "what to fix" message to the creator).
 - Comments are preserved untouched.
 
 ### `agentctl rfc edit <rfc-id> --rationale <text> [--title <text>] [--description <text>] [--options A:summary,B:summary] [--deadline <iso>]` (PR8g)

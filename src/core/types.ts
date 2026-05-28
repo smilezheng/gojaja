@@ -20,8 +20,6 @@ export type EventType =
   | "RFC_REPAIRED"
   // PR8g (RFC v2)
   | "RFC_OPTION_ADDED"
-  | "RFC_PRE_DECISION"
-  | "RFC_PRE_DECISION_OBJECTED"
   | "RFC_REVISION_REQUESTED"
   | "RFC_REVISED"
   | "RFC_TASK_LINKED"
@@ -273,19 +271,23 @@ export interface TaskStatusChangedPayload {
  * `decide` and `reject` are explicit acts by a role in the deciders list.
  */
 /**
- * RFC lifecycle (PR8g expands from {open, accepted, rejected, superseded}):
+ * RFC lifecycle (PR8g.1 walked back the PR8g pre-decide status):
  *
- *   open ─── rfc comment / rfc add-option ──▶ open
- *   open ─── rfc pre-decide ──▶ pre-decide
- *   open / pre-decide ─── rfc decide / reject ──▶ accepted / rejected (terminal)
- *   open / pre-decide ─── rfc revise ──▶ revising
- *   pre-decide ─── rfc comment from anyone other than the pre-decider ──▶ open
- *                  (auto-reopens; emits RFC_PRE_DECISION_OBJECTED)
+ *   open ─── rfc comment / ack / object / add-option / pre-decide (comment) ──▶ open
+ *   open ─── rfc decide (ACK gate) ──▶ accepted (terminal)
+ *   open ─── rfc reject ──▶ rejected (terminal; the only escape from an
+ *                                    ACK-stalled pre-decision)
+ *   open ─── rfc revise ──▶ revising
  *   revising ─── rfc edit ──▶ open
+ *   revising ─── rfc reject ──▶ rejected (terminal)
+ *
+ * PR8g had a `pre-decide` status that auto-flipped on comment. PR8g.1
+ * collapses pre-decide back to a comment (`kind: "pre-decision"`) and
+ * enforces consensus via a strict ACK gate inside `decideRfc` instead
+ * of via state transitions. See docs/RFC.md.
  */
 export type RfcStatus =
   | "open"
-  | "pre-decide"
   | "revising"
   | "accepted"
   | "rejected"
@@ -332,18 +334,14 @@ export interface RfcProposal {
    * Validated against `state/task_board.yaml` at write time.
    */
   relatedTasks: string[];
-
-  /**
-   * Set while `status === "pre-decide"`. Cleared whenever status leaves
-   * `pre-decide` (via objection reopen, decide, reject, revise).
-   */
-  preDecision?: {
-    decidedBy: RoleId;
-    chosenOption: string;
-    ts: string;
-    rationale: string;
-  };
 }
+
+/**
+ * PR8g.1: a comment carries one of three structured "kinds" that drive
+ * the ACK gate, or no kind at all (regular discussion). Pre-PR8g.1
+ * comments (no kind field on disk) are treated as regular discussion.
+ */
+export type RfcCommentKind = "pre-decision" | "ack" | "object";
 
 export interface RfcComment {
   /**
@@ -354,7 +352,11 @@ export interface RfcComment {
   rfcId: string;
   role: RoleId;
   ts: string;
-  /** Preferred option id. May be empty if the commenter has no preference. */
+  /**
+   * Preferred option id. May be empty if the commenter has no
+   * preference. For `kind === "ack"`, this is forced to match the
+   * active pre-decision's `chosenOption`.
+   */
   preferred: string;
   /**
    * `null` = reply to the RFC root.
@@ -362,6 +364,14 @@ export interface RfcComment {
    */
   replyTo: string | null;
   rationale: string;
+  /**
+   * PR8g.1: structured kind. Undefined/absent on a regular discussion
+   * comment. Only `ack` and `object` comments count toward the
+   * `decideRfc` ACK gate; a regular comment from a required role does
+   * NOT advance the gate (you must explicitly state your position via
+   * `rfc ack` or `rfc object`).
+   */
+  kind?: RfcCommentKind;
 }
 
 export interface RfcDecision {
@@ -390,6 +400,10 @@ export interface RfcCommentPayload {
   role: RoleId;
   preferred: string;
   rationale: string;
+  /** PR8g.1: lets `grep payload.kind` find pre-decision / ack / object posts. */
+  kind?: RfcCommentKind;
+  commentId?: string;
+  replyTo?: string | null;
 }
 
 /** Payload shape for RFC_DECIDED events. */
@@ -409,21 +423,6 @@ export interface RfcOptionAddedPayload {
   summary: string;
   addedBy: RoleId;
   rationale: string;
-}
-
-export interface RfcPreDecisionPayload {
-  rfcId: string;
-  decidedBy: RoleId;
-  chosenOption: string;
-  rationale: string;
-}
-
-export interface RfcPreDecisionObjectedPayload {
-  rfcId: string;
-  /** Comment that triggered the reopen. */
-  triggeringCommentId: string;
-  /** Role that posted the comment. */
-  by: RoleId;
 }
 
 export interface RfcRevisionRequestedPayload {
@@ -462,14 +461,31 @@ export interface RfcSummary {
   /** Tasks linked to this RFC (resolved-against-task-board ids). */
   relatedTasks: string[];
   /**
-   * Present iff `status === "pre-decide"`. Tells voters/deciders what
-   * the pre-decider proposes; gives them the choice between commenting
-   * (which reopens the RFC) and staying silent (consent).
+   * PR8g.1: present iff a `kind: "pre-decision"` comment is the latest
+   * pre-decision AND has no subsequent `RFC_OPTION_ADDED` event
+   * invalidating it. Tells voters / non-pre-decider deciders what
+   * has been proposed AND who is still expected to ack / object.
+   *
+   * Silence does NOT count as consent in PR8g.1 — `decideRfc` is
+   * gated on `awaitingAckFrom` being empty.
    */
   pendingPreDecision?: {
     decidedBy: RoleId;
     chosenOption: string;
     ts: string;
+    rationale: string;
+    /**
+     * Roles in `(voters ∪ deciders) − {decidedBy}` who have NOT yet
+     * posted a `kind: ack` or `kind: object` comment after `ts`.
+     * `decideRfc` refuses until this is empty.
+     */
+    awaitingAckFrom: RoleId[];
+    /**
+     * True iff THIS role is in the required-ACK set and hasn't yet
+     * responded. Lets the agent decide whether the next move is
+     * `rfc ack` / `rfc object`.
+     */
+    myAckOwed: boolean;
   };
 }
 
