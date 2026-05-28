@@ -40,9 +40,11 @@ import { renderRoleMarkdown } from "./role-template";
 import type { Store } from "./store";
 import {
   ACTIVE_TASK_STATUSES,
+  MAX_TASK_DEPTH,
   PROTOCOL_ONE_LINER,
   TASK_STATUSES,
   type CursorState,
+  type Deliverable,
   type Event,
   type Manifest,
   type ProjectConfig,
@@ -58,6 +60,7 @@ import {
   type RoleReminder,
   type SessionInfo,
   type Task,
+  type TaskAsset,
   type TaskBoard,
   type TaskStatus,
   type TaskSummary,
@@ -70,6 +73,124 @@ function freshConfig(schemaVersion: string): ProjectConfig {
 
 function freshTaskBoard(schemaVersion: string): TaskBoard {
   return { schemaVersion, nextId: 0, tasks: {} };
+}
+
+/**
+ * PR8j: populate Task fields that were added after the original schema
+ * with safe defaults. Mutates in place. Callers should re-emit YAML
+ * with these fields present after the first read so legacy boards
+ * naturally migrate forward.
+ */
+function backfillTaskFields(t: Task): void {
+  if (!Array.isArray(t.dependsOn)) t.dependsOn = [];
+  if (typeof t.acceptance !== "string") t.acceptance = "";
+  if (t.parent === undefined) t.parent = null;
+  if (t.assignedBy === undefined) t.assignedBy = null;
+  if (!Array.isArray(t.assets)) t.assets = [];
+  if (!Array.isArray(t.deliverables)) t.deliverables = [];
+  if (!Array.isArray(t.tags)) t.tags = [];
+}
+
+/**
+ * PR8j: walk the parent graph of every task and refuse anything that
+ * forms a cycle or exceeds the depth limit. Runs once on read so a
+ * hand edit that introduces a cycle stops the world early instead of
+ * silently looping anywhere that walks the chain (manifest summaries,
+ * task show, etc).
+ */
+function detectParentCycles(board: TaskBoard): void {
+  for (const taskId of Object.keys(board.tasks)) {
+    const seen: string[] = [];
+    let cur: string | null = taskId;
+    while (cur) {
+      if (seen.includes(cur)) {
+        throw new StateCorruptionError(
+          `Parent cycle in task board: ${seen.concat(cur).join(" -> ")}. ` +
+            `Manually edit state/task_board.yaml to break the cycle.`,
+        );
+      }
+      seen.push(cur);
+      if (seen.length > MAX_TASK_DEPTH + 1) {
+        // +1 because seen[0] is the task itself; chain depth is the
+        // count of ancestors plus self.
+        throw new StateCorruptionError(
+          `Parent chain exceeds ${MAX_TASK_DEPTH}: ${seen.join(" -> ")}. ` +
+            `Manually edit state/task_board.yaml to flatten the tree.`,
+        );
+      }
+      const next: Task | undefined = board.tasks[cur];
+      cur = next?.parent ?? null;
+    }
+  }
+}
+
+/**
+ * PR8j: validate a `kind: "file"` ref is a repo-relative path that
+ * stays inside the project tree AND outside the `.multi-agent/` layer.
+ * Refs are kept as POSIX-style strings on disk; we normalise here only
+ * to detect escape attempts (`..`), not to mutate the stored value.
+ */
+function validateFileRef(ref: string, fieldName: string, projectRoot: string, layerRoot: string): void {
+  if (typeof ref !== "string" || ref.length === 0) {
+    throw new UsageError(`${fieldName} ref must be a non-empty string.`);
+  }
+  if (path.isAbsolute(ref)) {
+    throw new UsageError(`${fieldName} ref '${ref}' must be repo-relative, not absolute.`);
+  }
+  const normalised = path.posix.normalize(ref);
+  if (normalised.startsWith("..") || normalised.split("/").includes("..")) {
+    throw new UsageError(`${fieldName} ref '${ref}' escapes the project tree.`);
+  }
+  // Confirm by resolving (mostly redundant with the textual check, but
+  // catches edge cases like `./foo/../../bar`).
+  const abs = path.resolve(projectRoot, ref);
+  const relFromProject = path.relative(projectRoot, abs);
+  if (relFromProject.startsWith("..") || path.isAbsolute(relFromProject)) {
+    throw new UsageError(`${fieldName} ref '${ref}' escapes the project tree.`);
+  }
+  const relFromLayer = path.relative(layerRoot, abs);
+  if (!relFromLayer.startsWith("..") && relFromLayer !== "..") {
+    throw new UsageError(
+      `${fieldName} ref '${ref}' points inside .multi-agent/. Deliverables and ` +
+        `assets are project-tree artifacts; do not target framework state.`,
+    );
+  }
+}
+
+function validateAsset(asset: TaskAsset, projectRoot: string, layerRoot: string): void {
+  if (!asset || typeof asset !== "object") {
+    throw new UsageError("Asset must be an object.");
+  }
+  if (asset.kind !== "file" && asset.kind !== "url") {
+    throw new UsageError(`Asset kind must be 'file' or 'url' (got '${asset.kind}').`);
+  }
+  if (asset.kind === "file") {
+    validateFileRef(asset.ref, "asset", projectRoot, layerRoot);
+  } else if (typeof asset.ref !== "string" || asset.ref.length === 0) {
+    throw new UsageError("Asset ref must be a non-empty string.");
+  }
+  if (typeof asset.description !== "string") {
+    throw new UsageError("Asset description must be a string (use '' if none).");
+  }
+}
+
+function validateDeliverable(d: Deliverable, projectRoot: string, layerRoot: string): void {
+  if (!d || typeof d !== "object") {
+    throw new UsageError("Deliverable must be an object.");
+  }
+  if (d.kind !== "file" && d.kind !== "url" && d.kind !== "manual") {
+    throw new UsageError(`Deliverable kind must be 'file', 'url', or 'manual' (got '${d.kind}').`);
+  }
+  if (d.kind === "file") {
+    validateFileRef(d.ref, "deliverable", projectRoot, layerRoot);
+  } else if (typeof d.ref !== "string") {
+    // url + manual: allow empty ref (e.g. "manual:Design link in worklog"
+    // where the description carries the requirement). But still must be string.
+    throw new UsageError("Deliverable ref must be a string.");
+  }
+  if (typeof d.description !== "string") {
+    throw new UsageError("Deliverable description must be a string.");
+  }
 }
 
 /**
@@ -258,6 +379,18 @@ export class LocalFsStore implements Store {
     this.root = path.resolve(rootDir);
     this.rootDescription = this.root;
     this.safetyMarginMs = opts.safetyMarginMs ?? DEFAULT_SAFETY_MARGIN_MS;
+  }
+
+  /**
+   * PR8j: the project tree (the directory CONTAINING `.multi-agent/`).
+   * Used to resolve `kind: "file"` deliverable refs for the existence
+   * gate on `setTaskStatus(... Done)`. We rely on the convention that
+   * the layer directory lives at the project root; if that ever
+   * changes we will need to thread project root through the
+   * constructor instead.
+   */
+  private projectRoot(): string {
+    return path.dirname(this.root);
   }
 
   // ---- bootstrap ----------------------------------------------------------
@@ -656,7 +789,7 @@ export class LocalFsStore implements Store {
           : cursor.ackedThrough;
       const ackToken = newId();
       const board = await this.readTaskBoard();
-      const tasks = this.taskSummariesForRole(board, role);
+      const tasks = await this.taskSummariesForRole(board, role);
       const rfcs = await this.rfcSummariesForRole(role);
       const manifest: Manifest = {
         ackToken,
@@ -1224,6 +1357,14 @@ export class LocalFsStore implements Store {
     const board = parsed as TaskBoard;
     if (!board.tasks || typeof board.tasks !== "object") board.tasks = {};
     if (typeof board.nextId !== "number" || !Number.isFinite(board.nextId)) board.nextId = 0;
+    // PR8j: backfill new fields with safe defaults so legacy yaml
+    // (pre-2.0.0-task-v2) round-trips cleanly. Then run a cycle check
+    // across the parent graph — hand-edited boards could otherwise
+    // poison every subsequent operation that walks the chain.
+    for (const t of Object.values(board.tasks)) {
+      backfillTaskFields(t as Task);
+    }
+    detectParentCycles(board);
     return board;
   }
 
@@ -1241,6 +1382,10 @@ export class LocalFsStore implements Store {
     dependsOn?: string[];
     acceptance?: string;
     actor: RoleId | "SYSTEM";
+    parent?: string | null;
+    assets?: TaskAsset[];
+    deliverables?: Deliverable[];
+    tags?: string[];
   }): Promise<Task> {
     const title = String(input.title ?? "").trim();
     if (title.length === 0) {
@@ -1264,11 +1409,59 @@ export class LocalFsStore implements Store {
     }
     const dependsOn = (input.dependsOn ?? []).map((d) => String(d));
     const acceptance = input.acceptance ?? "";
+    const parent = input.parent === undefined ? null : input.parent;
+    const assets = input.assets ?? [];
+    const deliverables = input.deliverables ?? [];
+    const tags = (input.tags ?? []).map((t) => String(t));
+
+    // PR8j: validate asset / deliverable refs up front so the user
+    // gets a single error per invocation rather than discovering
+    // problems at status Done time.
+    const projectRoot = this.projectRoot();
+    for (const a of assets) validateAsset(a, projectRoot, this.root);
+    for (const d of deliverables) validateDeliverable(d, projectRoot, this.root);
 
     await this.requireOwnership(input.actor, Paths.taskBoardFile);
 
     return this.withLock("task-board", async () => {
       const board = await this.readTaskBoard();
+
+      // PR8j: parent must exist, must not create a cycle (impossible
+      // for a brand-new task since it has no children yet, but check
+      // depth + existence), must not exceed the depth limit.
+      if (parent !== null) {
+        if (!board.tasks[parent]) {
+          throw new UsageError(
+            `Parent task '${parent}' does not exist. Create it first or ` +
+              `omit --parent.`,
+          );
+        }
+        // Walk the parent chain; we're inserting AT depth = chain + 1.
+        let depth = 1; // the new task counts as depth 1
+        let cur: string | null = parent;
+        const visited: string[] = [];
+        while (cur) {
+          if (visited.includes(cur)) {
+            // Should not be reachable thanks to detectParentCycles in
+            // readTaskBoard, but defence in depth.
+            throw new StateCorruptionError(
+              `Cycle detected walking parent chain at '${cur}'.`,
+            );
+          }
+          visited.push(cur);
+          depth++;
+          const node: Task | undefined = board.tasks[cur];
+          cur = node?.parent ?? null;
+        }
+        if (depth > MAX_TASK_DEPTH) {
+          throw new UsageError(
+            `Parent chain would exceed maximum depth of ${MAX_TASK_DEPTH}: ` +
+              `${visited.join(" -> ")} -> <new>. ` +
+              `Tasks this deep usually mean you should split into siblings.`,
+          );
+        }
+      }
+
       const idNumber = board.nextId + 1;
       const id = formatTaskId(idNumber);
       const now = new Date().toISOString();
@@ -1288,6 +1481,11 @@ export class LocalFsStore implements Store {
         acceptance,
         createdAt: now,
         updatedAt: now,
+        parent,
+        assignedBy: input.actor,
+        assets,
+        deliverables,
+        tags,
       };
       board.nextId = idNumber;
       board.tasks[id] = task;
@@ -1354,6 +1552,7 @@ export class LocalFsStore implements Store {
     taskId: string;
     newStatus: TaskStatus;
     actor: RoleId | "SYSTEM";
+    forceIncomplete?: boolean;
   }): Promise<Task> {
     if (!TASK_STATUSES.includes(input.newStatus)) {
       throw new UsageError(
@@ -1375,9 +1574,48 @@ export class LocalFsStore implements Store {
       }
       const previousStatus = task.status;
       if (previousStatus === input.newStatus) return task;
+
+      // PR8j: deliverable gate on Done. Every `kind: "file"` deliverable
+      // must point at an existing file in the project tree, otherwise
+      // we refuse the transition with a clear list. `forceIncomplete`
+      // bypasses with an audit event so the trail explains "this was
+      // a knowing approval, not silent loss".
+      let bypassMissing: string[] = [];
+      if (input.newStatus === "Done") {
+        const missing = await this.findMissingFileDeliverables(task);
+        if (missing.length > 0) {
+          if (!input.forceIncomplete) {
+            const list = missing.map((m) => `  - ${m}`).join("\n");
+            throw new UsageError(
+              `Cannot mark ${task.id} Done: deliverable files missing on disk:\n` +
+                `${list}\n` +
+                `Either produce these files or pass --force-incomplete ` +
+                `(emits an audit event).`,
+            );
+          }
+          bypassMissing = missing;
+        }
+      }
+
       task.status = input.newStatus;
       task.updatedAt = new Date().toISOString();
       await this.writeTaskBoardUnlocked(board);
+
+      // Emit the bypass event BEFORE the status change so the audit
+      // ordering is "approval given -> status moved", in that order.
+      if (bypassMissing.length > 0) {
+        await this.recordEventInternal({
+          type: "TASK_DELIVERABLE_BYPASSED",
+          from: input.actor,
+          to: "*",
+          ref: input.taskId,
+          payload: {
+            taskId: input.taskId,
+            missing: bypassMissing,
+            by: input.actor,
+          },
+        });
+      }
       await this.recordEventInternal({
         type: "TASK_STATUS_CHANGED",
         from: input.actor,
@@ -1393,6 +1631,32 @@ export class LocalFsStore implements Store {
     });
   }
 
+  /**
+   * PR8j: list `kind: "file"` deliverables on `task` whose `ref` does
+   * not exist in the project tree. Honours the same path-escape rules
+   * as `validateFileRef`; an asset that should have been rejected at
+   * create time is logged as "missing" here (defence in depth).
+   */
+  private async findMissingFileDeliverables(task: Task): Promise<string[]> {
+    const projectRoot = this.projectRoot();
+    const missing: string[] = [];
+    for (const d of task.deliverables) {
+      if (d.kind !== "file") continue;
+      const abs = path.resolve(projectRoot, d.ref);
+      const rel = path.relative(projectRoot, abs);
+      if (rel.startsWith("..") || path.isAbsolute(rel)) {
+        missing.push(d.ref);
+        continue;
+      }
+      try {
+        await fsp.access(abs);
+      } catch {
+        missing.push(d.ref);
+      }
+    }
+    return missing;
+  }
+
   async readTask(taskId: string): Promise<Task> {
     const board = await this.readTaskBoard();
     const t = board.tasks[taskId];
@@ -1400,23 +1664,103 @@ export class LocalFsStore implements Store {
     return t;
   }
 
-  private taskSummariesForRole(board: TaskBoard, role: RoleId): TaskSummary[] {
+  private async taskSummariesForRole(
+    board: TaskBoard,
+    role: RoleId,
+  ): Promise<TaskSummary[]> {
     const matching: Task[] = [];
     for (const t of Object.values(board.tasks)) {
       if (t.owner !== role) continue;
       if (!ACTIVE_TASK_STATUSES.has(t.status)) continue;
       matching.push(t);
     }
-    return matching.map((t) => ({
-      id: t.id,
-      title: t.title,
-      status: t.status,
-      priority: t.priority,
-      blockedBy: t.dependsOn.filter((dep) => {
-        const d = board.tasks[dep];
-        return !d || d.status !== "Done";
-      }),
-    }));
+
+    // PR8j: compute children grouped by parent id once so we can attach
+    // childCounts to every matching task that has children, without
+    // re-scanning per task.
+    const childrenByParent = new Map<string, Task[]>();
+    for (const t of Object.values(board.tasks)) {
+      if (t.parent === null) continue;
+      const arr = childrenByParent.get(t.parent) ?? [];
+      arr.push(t);
+      childrenByParent.set(t.parent, arr);
+    }
+
+    // PR8j: cache fs.access results for the duration of this manifest
+    // generation. A long-tail epic with shared deliverable paths across
+    // children would otherwise re-stat the same file repeatedly.
+    const existenceCache = new Map<string, boolean>();
+    const projectRoot = this.projectRoot();
+    const fileExists = async (ref: string): Promise<boolean> => {
+      const cached = existenceCache.get(ref);
+      if (cached !== undefined) return cached;
+      const abs = path.resolve(projectRoot, ref);
+      const rel = path.relative(projectRoot, abs);
+      let exists = false;
+      if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+        try {
+          await fsp.access(abs);
+          exists = true;
+        } catch {
+          exists = false;
+        }
+      }
+      existenceCache.set(ref, exists);
+      return exists;
+    };
+
+    const summaries: TaskSummary[] = [];
+    for (const t of matching) {
+      const summary: TaskSummary = {
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        priority: t.priority,
+        blockedBy: t.dependsOn.filter((dep) => {
+          const d = board.tasks[dep];
+          return !d || d.status !== "Done";
+        }),
+      };
+      if (t.parent) summary.parent = t.parent;
+      if (t.tags.length > 0) summary.tags = t.tags.slice();
+
+      const children = childrenByParent.get(t.id);
+      if (children && children.length > 0) {
+        const counts = { ready: 0, inProgress: 0, blocked: 0, review: 0, done: 0 };
+        for (const c of children) {
+          switch (c.status) {
+            case "Ready":
+              counts.ready++;
+              break;
+            case "InProgress":
+              counts.inProgress++;
+              break;
+            case "Blocked":
+              counts.blocked++;
+              break;
+            case "Review":
+              counts.review++;
+              break;
+            case "Done":
+              counts.done++;
+              break;
+            // Backlog children intentionally do not contribute — they
+            // are PM-triage items, not yet "in flight".
+          }
+        }
+        summary.childCounts = counts;
+      }
+
+      let unmet = 0;
+      for (const d of t.deliverables) {
+        if (d.kind !== "file") continue;
+        if (!(await fileExists(d.ref))) unmet++;
+      }
+      if (unmet > 0) summary.unmetDeliverables = unmet;
+
+      summaries.push(summary);
+    }
+    return summaries;
   }
 
   // ---- RFCs ---------------------------------------------------------------

@@ -4,6 +4,18 @@ export interface ParsedArgs {
   command: string;
   positional: string[];
   flags: Record<string, string | boolean>;
+  /**
+   * PR8j: original argv slice (minus the leading command). Kept so
+   * commands like `task new` can recover multi-valued flags
+   * (`--asset` repeated, `--tag` repeated, ...) via `multiFlag`.
+   * `flags` only stores the last occurrence, which is fine for the
+   * 95% case but loses information for accumulating flags.
+   *
+   * Optional so existing test fixtures that hand-build ParsedArgs
+   * without this field keep compiling; consumers must tolerate an
+   * absent / empty slice.
+   */
+  rawArgs?: string[];
 }
 
 /**
@@ -29,6 +41,7 @@ const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "no-copy",
   "batch",
   "no-mark-seen",
+  "force-incomplete",
 ]);
 
 /**
@@ -48,11 +61,12 @@ const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
  */
 export function parseArgv(argv: string[]): ParsedArgs {
   if (argv.length === 0) {
-    return { command: "help", positional: [], flags: {} };
+    return { command: "help", positional: [], flags: {}, rawArgs: [] };
   }
   const [command, ...rest] = argv;
   const flags: Record<string, string | boolean> = {};
   const positional: string[] = [];
+  const rawArgs = rest.slice();
 
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
@@ -86,7 +100,33 @@ export function parseArgv(argv: string[]): ParsedArgs {
     positional.push(arg);
   }
 
-  return { command, positional, flags };
+  return { command, positional, flags, rawArgs };
+}
+
+/**
+ * PR8j: collect all occurrences of `--<name> <value>` (or
+ * `--<name>=<value>`) from the original argv slice. Returns values in
+ * declaration order. Boolean-form `--name` with no value is silently
+ * skipped (we only care about value-bearing repeats for accumulating
+ * flags like `--asset`, `--deliverable`, `--tag`).
+ */
+export function multiFlag(rawArgs: string[] | undefined, name: string): string[] {
+  if (!rawArgs) return [];
+  const out: string[] = [];
+  const eqPrefix = `--${name}=`;
+  for (let i = 0; i < rawArgs.length; i++) {
+    const tok = rawArgs[i];
+    if (tok === `--${name}`) {
+      const next = rawArgs[i + 1];
+      if (next !== undefined && !next.startsWith("--")) {
+        out.push(next);
+        i++;
+      }
+    } else if (tok.startsWith(eqPrefix)) {
+      out.push(tok.slice(eqPrefix.length));
+    }
+  }
+  return out;
 }
 
 export function requireString(

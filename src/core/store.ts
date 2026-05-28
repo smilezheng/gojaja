@@ -1,5 +1,6 @@
 import type {
   CursorState,
+  Deliverable,
   Event,
   Manifest,
   ProjectConfig,
@@ -13,6 +14,7 @@ import type {
   RoleId,
   SessionInfo,
   Task,
+  TaskAsset,
   TaskBoard,
   TaskStatus,
   WaitState,
@@ -252,7 +254,14 @@ export interface Store {
   /**
    * Create a new task. The store assigns `id` (next `T-NNNN`) and
    * timestamps; emits `TASK_CREATED`. Owner may be null; if non-null and
-   * the role is configured, also emits `TASK_ASSIGNED`.
+   * the role is configured, also emits `TASK_ASSIGNED`. Records the
+   * `actor` as the task's `assignedBy` (audit; not changed by later
+   * `assignTask` calls).
+   *
+   * PR8j: extra optional inputs land directly on the task record.
+   * `parent` is validated for existence + non-cyclicity + depth limit.
+   * `assets` / `deliverables` are validated for path shape (file refs
+   * must stay inside the project tree and outside `.multi-agent/`).
    */
   createTask(input: {
     title: string;
@@ -261,11 +270,18 @@ export interface Store {
     dependsOn?: string[];
     acceptance?: string;
     actor: RoleId | "SYSTEM";
+    // PR8j
+    parent?: string | null;
+    assets?: TaskAsset[];
+    deliverables?: Deliverable[];
+    tags?: string[];
   }): Promise<Task>;
 
   /**
    * Reassign a task to a different owner. Emits `TASK_ASSIGNED`.
    * `actor` is the role performing the change (for the event's `from`).
+   * Does NOT change `task.assignedBy` — that field records the original
+   * assigner; reassignment history lives in the event stream.
    */
   assignTask(input: {
     taskId: string;
@@ -276,11 +292,20 @@ export interface Store {
   /**
    * Set a task's status. Emits `TASK_STATUS_CHANGED`. Refuses if the
    * status string is not a known `TaskStatus`.
+   *
+   * PR8j: when `newStatus === "Done"`, every `kind: "file"` deliverable
+   * is checked against the project tree. Any missing file refuses the
+   * transition with `UsageError` listing the offenders, UNLESS
+   * `forceIncomplete` is true, in which case the transition succeeds
+   * and a `TASK_DELIVERABLE_BYPASSED` event is emitted *before* the
+   * status change so the audit trail is unambiguous.
    */
   setTaskStatus(input: {
     taskId: string;
     newStatus: TaskStatus;
     actor: RoleId | "SYSTEM";
+    /** PR8j: bypass file-deliverable gate; emits an audit event. */
+    forceIncomplete?: boolean;
   }): Promise<Task>;
 
   /** Read a single task; throws UsageError if id unknown. */

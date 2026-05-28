@@ -336,6 +336,27 @@ Do NOT use \`--for task-assigned\` while you still have an open task
 broadcast is for genuinely-empty queues, not for "I don't feel like
 my current task".
 
+### Deliverables are gates, not suggestions (PR8j)
+
+If your task carries \`deliverables: [{ kind: file, ref: ... }]\`, the
+file must exist on disk before \`agentctl task status <id> Done\`
+succeeds. The framework refuses the transition with USAGE listing
+every missing ref. Produce the file, then retry.
+
+\`--force-incomplete\` bypasses the gate AND emits a
+\`TASK_DELIVERABLE_BYPASSED\` event with your role as \`by\`. Use it
+only when:
+
+- A reviewer / decider explicitly waived the file deliverable in a
+  worklog or report — link that in your own worklog when you bypass.
+- The deliverable was added after the work started and the team has
+  agreed a substitute is acceptable.
+
+Default behaviour for everyone else: produce the missing file. The
+audit log is shared; "I forced it because I forgot" reads identically
+to "I forced it because the reviewer said yes" — only your worklog
+can distinguish the two.
+
 ### Build / test breakage
 
 - If the repo is broken when you arrive: report to the technical

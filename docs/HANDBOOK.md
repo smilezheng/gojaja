@@ -52,9 +52,9 @@ When extending the handbook, keep these constraints:
   something, link to `PROTOCOL.md` rather than restating it.
 - **Stay under the size budget.** The handbook ships in every agent
   window's persistent prompt area; the test suite enforces
-  `< 16 KB` of UTF-8 (bumped over time as content grew; PR8i set the
-  current ceiling after adding the wait verdict table and the idle
-  `--for task-assigned` guidance).
+  `< 18 KB` of UTF-8 (bumped over time as content grew; PR8j set the
+  current ceiling after adding the deliverable-gate policy paragraph
+  on top of PR8i's wait verdict table).
 
 ## Scope: what is in vs out
 
@@ -71,6 +71,10 @@ In scope:
 - Wait verdicts (ATTENTION / CONDITION_MET / RESUME / TIMEOUT) and
   when to use `wait --for task-assigned` (the auto-broadcast that
   tells task-board owners "I am free, give me work").
+- Deliverables as gates: file-kind deliverables refuse the `Done`
+  transition until the path exists on disk. `--force-incomplete` is
+  legitimate only when paired with an explicit waiver (worklog or
+  report); otherwise produce the file.
 
 Out of scope:
 

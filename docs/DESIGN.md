@@ -236,6 +236,45 @@ chunked wait early, they end the chat / kill the shell themselves;
 the agent will not auto-resume because the next user message
 implicitly redirects the runtime loop.
 
+## Task model: hierarchy without auto-state-propagation (PR8j)
+
+A natural multi-layer org wants a task tree: CTO -> PM/TL epic -> per-worker
+subtasks. PR8j adds `parent` to the Task record so that tree is expressible
+on the existing single board. Three design choices are worth flagging
+because the obvious alternatives were rejected:
+
+1. **No auto status propagation.** A parent task's `status` is NOT
+   derived from its children. We considered "parent goes Done when all
+   children are Done" and rejected it. Reasons: (a) it removes the
+   epic owner's decision about whether the epic needs an additional
+   polish pass; (b) state-machine coupling between rows tends to
+   surface as production-incident debugging fodder later; (c) starting
+   independent and later adding propagation is cheaper than starting
+   coupled and walking it back. Aggregation lives in `TaskSummary.childCounts`
+   instead, which the epic owner reads to decide manually.
+
+2. **No reparenting in v1.** `createTask --parent` accepts the field,
+   but there is no `task reparent` command. Reparenting introduces
+   concurrency on the parent's `childCounts` aggregation that we do
+   not need yet. The chain is cycle-checked at read time as a defence
+   against hand edits.
+
+3. **Deliverables are gates, not lifecycle states.** We considered
+   introducing a `PendingDeliverable` status between `Review` and
+   `Done`. Rejected: keeps the status enum tight, lets the gate fire
+   from ANY transition into Done (not just Review->Done), and the
+   audit log carries the bypass explanation via the
+   `TASK_DELIVERABLE_BYPASSED` event without polluting state. The
+   one design cost is that the gate is invisible until the user runs
+   `task status ... Done` and sees the USAGE refusal; `task show`
+   mitigates this by always rendering `[x]` / `[ ]` markers next to
+   each file deliverable.
+
+User-cancel of a forced bypass — i.e. "I changed my mind after firing
+`--force-incomplete`" — is intentionally not a feature. The audit event
+is immutable; rolling back means moving the status back to Review and
+producing the file.
+
 ## RFC: opinions in, leader decision out
 
 Real engineering teams gather opinions, then a tech lead or PM picks.

@@ -18,7 +18,12 @@ export const CLI_VERSION: string = PACKAGE_VERSION;
 // Bumped again in PR8i: the `.wait` sentinel is gone; `wait` writes a
 // session record at `comms/pending/<role>/wait.json` and survives host
 // shell timeouts via chunked polling with explicit deadlines.
-export const SCHEMA_VERSION = "2.0.0-wait-v2";
+// Bumped again in PR8j: Task records gained `parent` (hierarchy),
+// `assignedBy` (audit), `assets` / `deliverables` (reference materials
+// + gated hard outputs), `tags` (filter labels). `setTaskStatus(Done)`
+// refuses when file-kind deliverables are missing on disk; bypass via
+// `--force-incomplete` emits `TASK_DELIVERABLE_BYPASSED`.
+export const SCHEMA_VERSION = "2.0.0-task-v2";
 
 export const LAYER_DIRNAME = ".multi-agent";
 

@@ -12,12 +12,74 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 - PR8h: schema-level features previously slated for PR8g (task
   `reviewers` field, `STATE_UPDATED` event, `dependsOn` cycle
-  detection, schema-version compatibility check; role-level RFC
-  `decisionScopes` is a candidate). `--description` becoming
-  hard-required on `rfc new` also lands here. Maybe a read-only
-  `agentctl rfc audit <id>` to surface "who has acked / objected
-  / not responded yet" without the agent having to read
-  `rfc show`.
+  detection, schema-version compatibility check). `--description`
+  becoming hard-required on `rfc new` also lands here. Maybe a
+  read-only `agentctl rfc audit <id>` to surface
+  "who has acked / objected / not responded yet" without the agent
+  having to read `rfc show`.
+- PR8k: org-hierarchy ergonomics. `directReports` reverse field,
+  multi-target `report --to`, idle-broadcast retargeting from `*` to
+  `directReports`, role-level RFC `decisionScopes`. Goal: 3+ layer
+  organisations are pleasant rather than noisy.
+
+## [2.0.0-alpha.18] — 2026-05-28
+
+### Task model expansion: parent / assets / deliverables / assignedBy / tags (PR8j)
+
+Adds the task fields a multi-layer organisation needs to decompose
+work, point at reference materials, and gate hard outputs.
+`setTaskStatus(... Done)` now enforces a `kind: "file"` deliverable
+existence check; missing files refuse the transition with USAGE
+listing every absent ref. `--force-incomplete` bypasses with a
+`TASK_DELIVERABLE_BYPASSED` event emitted BEFORE the corresponding
+`TASK_STATUS_CHANGED`, so "approval given, then status moved" is the
+permanent audit ordering.
+
+> **Schema break (alpha-only, no users).** `Task` records gain
+> `parent`, `assignedBy`, `assets`, `deliverables`, `tags`.
+> `readTaskBoard` backfills missing fields with safe defaults so
+> legacy `state/task_board.yaml` files round-trip cleanly. Schema
+> version bumped to `2.0.0-task-v2`.
+
+Added:
+
+- Task fields: `parent` (string | null), `assignedBy` (RoleId |
+  "SYSTEM" | null), `assets` (TaskAsset[]), `deliverables`
+  (Deliverable[]), `tags` (string[]).
+- New types: `TaskAsset { kind: "file" | "url", ref, description }`,
+  `Deliverable { kind: "file" | "url" | "manual", ref, description }`.
+- `MAX_TASK_DEPTH = 5`. Parent chains deeper than this are refused at
+  creation; `readTaskBoard` runs a cycle detector and refuses
+  hand-edited yaml that contains a parent cycle.
+- New event `TASK_DELIVERABLE_BYPASSED { taskId, missing: string[],
+  by: RoleId | "SYSTEM" }`. Emitted ONLY when `--force-incomplete`
+  was needed to mark Done.
+- `TaskSummary` (manifest) gains optional `parent`, `childCounts:
+  { ready, inProgress, blocked, review, done }`, `unmetDeliverables:
+  number`, `tags: string[]`.
+- CLI:
+  - `task new ... [--parent T-NNNN] [--tag <label> ...]
+    [--asset 'kind:ref::desc' ...] [--deliverable 'kind:ref::desc' ...]`
+  - `task status <id> Done [--force-incomplete]`
+  - `task list [--tag <label> ...]` (OR-match)
+  - `task show <id>` renders parent / children / assets / deliverables
+    with on-disk `[x] / [ ] / [?]` markers.
+- `argv.ts` gains `multiFlag(rawArgs, name)` helper and `rawArgs?` on
+  `ParsedArgs` so accumulating flags can be parsed cleanly.
+
+Constraints / refusals:
+
+- Asset / deliverable file refs that escape the project tree (`..`)
+  are refused at create time. Refs pointing inside `.multi-agent/`
+  are refused too — those are framework state, not project artifacts.
+- `--force-incomplete` does not run the bypass event when all
+  file deliverables are present (no bookkeeping noise for the clean
+  path).
+- `assignTask` does NOT change `task.assignedBy`. The field is the
+  original-creator audit record; reassignment history lives in the
+  event stream.
+
+Suite 270 -> 284.
 
 ## [2.0.0-alpha.17] — 2026-05-28
 

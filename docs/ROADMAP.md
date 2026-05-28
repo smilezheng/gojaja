@@ -273,7 +273,45 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Schema version bumped to `2.0.0-wait-v2`.
   - Suite 260 -> 270.
 
+- **PR8j — task model expansion: parent / assets / deliverables / assignedBy / tags.**
+  - `Task` gains `parent` (decomposition, depth-capped at 5, cycle-checked),
+    `assignedBy` (the actor who created the task; audit; not updated by
+    `assignTask`), `assets` (info-only pointers; `kind=file | url`),
+    `deliverables` (hard outputs; `kind=file | url | manual`), `tags`
+    (free-form labels).
+  - `setTaskStatus(... Done)` enforces a deliverable gate: any
+    `kind: "file"` deliverable whose `ref` is missing on disk refuses
+    the transition with `UsageError`. `--force-incomplete` bypasses
+    with a `TASK_DELIVERABLE_BYPASSED` audit event emitted BEFORE the
+    `TASK_STATUS_CHANGED`.
+  - `TaskSummary` (manifest) gains `parent`, `childCounts`,
+    `unmetDeliverables`, `tags` so epic owners can see aggregated
+    child state and unmet hard outputs at a glance.
+  - `task list --tag <label>` (repeatable, OR-match) and `task show`
+    rendering with on-disk `[x] / [ ] / [?]` checkboxes.
+  - `argv.ts` gains a `multiFlag` helper + `rawArgs` on `ParsedArgs`
+    so `--asset` / `--deliverable` / `--tag` can repeat cleanly.
+  - Schema version bumped to `2.0.0-task-v2`. Legacy boards backfill
+    new fields with safe defaults on read.
+  - Suite 270 -> 284.
+
 ### Planned, in priority order
+
+- **PR8k — org-hierarchy ergonomics (planned).**
+  - Reverse `directReports` computed field on `roleReminder` so a
+    manager role knows "who reports to me" without scanning
+    `role list`.
+  - `agentctl wait --for task-assigned` retargets the idle worklog
+    to `directReports` instead of `*` so the broadcast lands only on
+    likely-task-assigners.
+  - `agentctl report --to <a>,<b>` multi-target so a manager can
+    address a team subset without N separate calls.
+  - Role-level `decisionScopes` so RFC `--deciders` can be inferred
+    from scope rather than spelled out each time (defended against
+    scope-shopping via the audit log).
+  - Goal: make 3+ layer organisations (CTO -> PM/TL -> workers)
+    pleasant rather than noisy. Built on the PR8j parent + tag
+    primitives.
 
 - **PR8h — schema-level deferments.**
   - Task `reviewers` field so a Review handoff can sign off without
@@ -345,11 +383,14 @@ decisions: PR8g introduced threading + add-option + pre-decide +
 revise/edit; PR8g.1 walked back the pre-decide state-machine to a
 comment kind with a hard ACK gate (silence is not consent). PR8i
 collapses the `wait --mode block | exit` dichotomy into a single
-deadline-driven, chunked, resumable primitive.
+deadline-driven, chunked, resumable primitive. PR8j expands the task
+model with parent/assets/deliverables/assignedBy/tags so 3+ layer
+organisations can express decomposition + hard outputs natively.
 The "breaking" alpha-stage surface changes are PR8f-C
 (`write-state` → `state edit`), PR8g (comments file shape),
-PR8g.1 (pre-decide field/status removed), and PR8i (wait flags +
-`.wait` sentinel removed). PR8h–PR10 harden the layer
-for everyday use; PR8h is the only remaining schema-affecting PR
+PR8g.1 (pre-decide field/status removed), PR8i (wait flags +
+`.wait` sentinel removed), and PR8j (task field additions, Done
+deliverable gate). PR8h, PR8k, and PR9–PR10 harden the layer for
+everyday use; PR8h is the only remaining RFC-affecting PR
 before `v2.0.0`. Anything past `v2.0.0` only ships after the chaos
 suite (PR10) is green.

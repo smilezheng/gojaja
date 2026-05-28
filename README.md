@@ -165,9 +165,25 @@ You can drive the whole flow from a terminal to understand it. None of these com
 ```bash
 eval "$(agentctl claim PM --eval)"            # claims and exports MA_SESSION in one step
 
+# Simple case
 agentctl task new --title "Build /login endpoint" --owner Backend --priority P1
+
+# With a parent epic, reference doc, and a hard deliverable:
+agentctl task new --title "Build /login endpoint" --owner Backend --priority P1 \
+  --parent T-0010 \
+  --tag auth \
+  --asset 'file:docs/specs/auth.md::Auth spec' \
+  --asset 'url:https://figma.com/file/xxx::Login UI design' \
+  --deliverable 'file:apps/api/auth/login.ts::Implementation' \
+  --deliverable 'file:docs/api/login.md::API doc'
+
 agentctl report --to TL --message "Auth scope confirmed. Backend is unblocked."
 ```
+
+The deliverable lines mean: Backend cannot mark T-0011 Done until
+both files exist on disk. If a reviewer waives a deliverable, Backend
+runs `agentctl task status T-0011 Done --force-incomplete` and the
+bypass lands in the event stream for audit.
 
 **Window B — acting as Backend:**
 

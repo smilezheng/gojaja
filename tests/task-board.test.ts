@@ -1,6 +1,7 @@
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as yaml from "js-yaml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalFsStore } from "../src/core/local-fs-store";
 
@@ -229,5 +230,262 @@ describe("Manifest.tasks", () => {
     const types = m.events.map((e) => e.type);
     expect(types).toContain("TASK_ASSIGNED");
     expect(types).toContain("TASK_CREATED"); // broadcast also visible
+  });
+});
+
+// ---------- PR8j: parent / assets / deliverables / assignedBy / tags ----------
+
+/**
+ * PR8j fixture: tempdir is the PROJECT root; `.multi-agent/` lives at
+ * `<project>/.multi-agent/`. This lets deliverable file refs (relative
+ * paths like `docs/x.md`) be controlled by the test.
+ */
+async function freshProjectStore() {
+  const projectRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-pj-"));
+  const layerRoot = path.join(projectRoot, ".multi-agent");
+  const store = new LocalFsStore(layerRoot, { safetyMarginMs: 0 });
+  await store.initialise("2.0.0-test");
+  await store.createRole({
+    id: "PM", title: "Product Manager",
+    owns: ["state/task_board.yaml"],
+  });
+  await store.createRole({ id: "Frontend", title: "Frontend Engineer" });
+  return { projectRoot, layerRoot, store };
+}
+
+async function touch(filePath: string): Promise<void> {
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  await fsp.writeFile(filePath, "");
+}
+
+describe("PR8j: task model expansion", () => {
+  let ctx: { projectRoot: string; layerRoot: string; store: LocalFsStore };
+  beforeEach(async () => { ctx = await freshProjectStore(); });
+  afterEach(async () => {
+    await fsp.rm(ctx.projectRoot, { recursive: true, force: true });
+  });
+
+  it("createTask records assignedBy from actor", async () => {
+    const t = await ctx.store.createTask({
+      title: "thing", owner: "Frontend", actor: "PM",
+    });
+    expect(t.assignedBy).toBe("PM");
+    expect(t.parent).toBeNull();
+    expect(t.assets).toEqual([]);
+    expect(t.deliverables).toEqual([]);
+    expect(t.tags).toEqual([]);
+  });
+
+  it("assignTask does NOT change assignedBy (it records the original creator)", async () => {
+    const t = await ctx.store.createTask({ title: "x", owner: "Frontend", actor: "PM" });
+    expect(t.assignedBy).toBe("PM");
+    // Add another role so we can reassign.
+    await ctx.store.createRole({ id: "Backend", title: "Backend" });
+    await ctx.store.assignTask({ taskId: t.id, newOwner: "Backend", actor: "PM" });
+    const after = await ctx.store.readTask(t.id);
+    expect(after.assignedBy).toBe("PM");
+    expect(after.owner).toBe("Backend");
+  });
+
+  it("createTask --parent succeeds when parent exists", async () => {
+    const epic = await ctx.store.createTask({ title: "Epic", owner: "PM", actor: "PM" });
+    const sub = await ctx.store.createTask({
+      title: "Sub", owner: "Frontend", parent: epic.id, actor: "PM",
+    });
+    expect(sub.parent).toBe(epic.id);
+  });
+
+  it("createTask --parent refuses unknown parent", async () => {
+    await expect(
+      ctx.store.createTask({ title: "x", parent: "T-9999", actor: "PM" }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("createTask refuses chain longer than MAX_TASK_DEPTH=5", async () => {
+    // Build chain: t1 -> t2 -> t3 -> t4 -> t5 (depth 5). t6 must refuse.
+    let prev: string | null = null;
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const t = await ctx.store.createTask({
+        title: `level ${i}`, owner: "PM", parent: prev, actor: "PM",
+      });
+      ids.push(t.id);
+      prev = t.id;
+    }
+    await expect(
+      ctx.store.createTask({ title: "too deep", parent: ids[4], actor: "PM" }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("readTaskBoard detects a hand-edited parent cycle and refuses", async () => {
+    const a = await ctx.store.createTask({ title: "A", owner: "PM", actor: "PM" });
+    const b = await ctx.store.createTask({ title: "B", owner: "PM", parent: a.id, actor: "PM" });
+    // Hand-edit yaml: set a.parent = b.id (creates cycle a -> b -> a).
+    const boardPath = path.join(ctx.layerRoot, "state", "task_board.yaml");
+    const text = await fsp.readFile(boardPath, "utf8");
+    const board = yaml.load(text) as { tasks: Record<string, { parent: string | null }> };
+    board.tasks[a.id].parent = b.id;
+    await fsp.writeFile(boardPath, yaml.dump(board));
+    await expect(ctx.store.readTaskBoard()).rejects.toMatchObject({
+      code: "STATE_CORRUPT",
+    });
+  });
+
+  it("createTask validates assets and refuses .. escape", async () => {
+    await expect(
+      ctx.store.createTask({
+        title: "x", actor: "PM",
+        assets: [{ kind: "file", ref: "../../../etc/passwd", description: "" }],
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("createTask refuses deliverable file ref that points inside .multi-agent/", async () => {
+    await expect(
+      ctx.store.createTask({
+        title: "x", actor: "PM",
+        deliverables: [
+          { kind: "file", ref: ".multi-agent/state/secret.md", description: "" },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("setTaskStatus Done refuses when a file deliverable is missing", async () => {
+    const t = await ctx.store.createTask({
+      title: "x", owner: "Frontend", actor: "PM",
+      deliverables: [{ kind: "file", ref: "docs/spec.md", description: "Final spec" }],
+    });
+    // Move through the lifecycle but keep the file absent.
+    await ctx.store.setTaskStatus({ taskId: t.id, newStatus: "InProgress", actor: "Frontend" });
+    await expect(
+      ctx.store.setTaskStatus({ taskId: t.id, newStatus: "Done", actor: "Frontend" }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+    // Touch the file; now Done succeeds.
+    await touch(path.join(ctx.projectRoot, "docs", "spec.md"));
+    const done = await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "Done", actor: "Frontend",
+    });
+    expect(done.status).toBe("Done");
+  });
+
+  it("setTaskStatus Done with --force-incomplete emits TASK_DELIVERABLE_BYPASSED before status change", async () => {
+    const t = await ctx.store.createTask({
+      title: "x", owner: "Frontend", actor: "PM",
+      deliverables: [
+        { kind: "file", ref: "docs/spec.md", description: "" },
+        { kind: "file", ref: "docs/api.md", description: "" },
+      ],
+    });
+    const before = (await ctx.store.listEventsAfter("")).length;
+    await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "Done", actor: "Frontend", forceIncomplete: true,
+    });
+    const newEvents = (await ctx.store.listEventsAfter("")).slice(before);
+    const bypass = newEvents.find((e) => e.type === "TASK_DELIVERABLE_BYPASSED");
+    const change = newEvents.find((e) => e.type === "TASK_STATUS_CHANGED");
+    expect(bypass).toBeDefined();
+    expect(change).toBeDefined();
+    // bypass must come BEFORE the status change in the event stream.
+    expect(newEvents.indexOf(bypass!)).toBeLessThan(newEvents.indexOf(change!));
+    expect(bypass!.payload.taskId).toBe(t.id);
+    expect((bypass!.payload as { missing: string[] }).missing.sort()).toEqual(
+      ["docs/api.md", "docs/spec.md"],
+    );
+    expect(bypass!.payload.by).toBe("Frontend");
+  });
+
+  it("forceIncomplete on a Done with NO missing deliverables does NOT emit the bypass event", async () => {
+    const t = await ctx.store.createTask({
+      title: "x", owner: "Frontend", actor: "PM",
+      deliverables: [{ kind: "file", ref: "docs/ok.md", description: "" }],
+    });
+    await touch(path.join(ctx.projectRoot, "docs", "ok.md"));
+    const before = (await ctx.store.listEventsAfter("")).length;
+    await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "Done", actor: "Frontend", forceIncomplete: true,
+    });
+    const newEvents = (await ctx.store.listEventsAfter("")).slice(before);
+    expect(newEvents.some((e) => e.type === "TASK_DELIVERABLE_BYPASSED")).toBe(false);
+    expect(newEvents.some((e) => e.type === "TASK_STATUS_CHANGED")).toBe(true);
+  });
+
+  it("only kind=file deliverables block Done; url/manual are ignored", async () => {
+    const t = await ctx.store.createTask({
+      title: "x", owner: "Frontend", actor: "PM",
+      deliverables: [
+        { kind: "url", ref: "https://example.com/spec", description: "" },
+        { kind: "manual", ref: "", description: "Demo recorded in shared drive" },
+      ],
+    });
+    const done = await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "Done", actor: "Frontend",
+    });
+    expect(done.status).toBe("Done");
+  });
+
+  it("manifest TaskSummary carries parent / childCounts / unmetDeliverables / tags", async () => {
+    // Build epic + two children. PM owns the epic; Frontend owns a child;
+    // the epic also has a missing-file deliverable.
+    const epic = await ctx.store.createTask({
+      title: "Epic",
+      owner: "PM",
+      actor: "PM",
+      tags: ["q3", "auth"],
+      deliverables: [
+        { kind: "file", ref: "docs/epic.md", description: "Final spec" },
+      ],
+    });
+    const c1 = await ctx.store.createTask({
+      title: "Child 1", owner: "Frontend", parent: epic.id, actor: "PM",
+    });
+    const c2 = await ctx.store.createTask({
+      title: "Child 2", owner: "Frontend", parent: epic.id, actor: "PM",
+    });
+    await ctx.store.setTaskStatus({ taskId: c2.id, newStatus: "InProgress", actor: "Frontend" });
+
+    // PM's manifest carries the epic summary.
+    const pm = await ctx.store.openOrCreatePlan("PM");
+    const epicSummary = pm.tasks.find((t) => t.id === epic.id);
+    expect(epicSummary).toBeDefined();
+    expect(epicSummary!.tags).toEqual(["q3", "auth"]);
+    expect(epicSummary!.childCounts).toEqual({
+      ready: 1, inProgress: 1, blocked: 0, review: 0, done: 0,
+    });
+    expect(epicSummary!.unmetDeliverables).toBe(1);
+    expect(epicSummary!.parent).toBeUndefined();
+
+    // Frontend's manifest carries c1.parent pointing at the epic.
+    const fe = await ctx.store.openOrCreatePlan("Frontend");
+    const c1Summary = fe.tasks.find((t) => t.id === c1.id);
+    expect(c1Summary?.parent).toBe(epic.id);
+    expect(c1Summary?.childCounts).toBeUndefined();
+  });
+
+  it("readTaskBoard backfills legacy yaml (without new fields) with safe defaults", async () => {
+    // Hand-write a board that mirrors the pre-PR8j layout.
+    const boardPath = path.join(ctx.layerRoot, "state", "task_board.yaml");
+    const legacy = `schemaVersion: "1.0.0-legacy"
+nextId: 1
+tasks:
+  T-0001:
+    id: T-0001
+    title: Old task
+    status: Ready
+    owner: Frontend
+    priority: P2
+    dependsOn: []
+    acceptance: ''
+    createdAt: '2024-01-01T00:00:00.000Z'
+    updatedAt: '2024-01-01T00:00:00.000Z'
+`;
+    await fsp.writeFile(boardPath, legacy);
+    const board = await ctx.store.readTaskBoard();
+    const t = board.tasks["T-0001"];
+    expect(t.parent).toBeNull();
+    expect(t.assignedBy).toBeNull();
+    expect(t.assets).toEqual([]);
+    expect(t.deliverables).toEqual([]);
+    expect(t.tags).toEqual([]);
   });
 });

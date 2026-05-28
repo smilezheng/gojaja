@@ -125,7 +125,7 @@ allocation uses the top-level `nextId` counter (the file's
 its id to be reused).
 
 ```yaml
-schemaVersion: 2.0.0
+schemaVersion: 2.0.0-task-v2
 nextId: 2
 tasks:
   T-0001:
@@ -140,6 +140,24 @@ tasks:
       - rate-limited to 10/min
     createdAt: 2026-05-27T05:23:00.000Z
     updatedAt: 2026-05-27T05:23:00.000Z
+    # PR8j fields (defaults when omitted; readTaskBoard backfills them)
+    parent: null                    # parent task id, or null
+    assignedBy: PM                  # who created/assigned originally
+    assets:                         # info-only references; not gated
+      - kind: url
+        ref: https://figma.com/file/xxx
+        description: Final design
+    deliverables:                   # hard outputs; file-kind gated on Done
+      - kind: file
+        ref: apps/backend/auth/login.ts
+        description: Implementation
+      - kind: file
+        ref: docs/api/login.md
+        description: API spec
+      - kind: manual
+        ref: ""
+        description: Demo recorded in shared drive
+    tags: [q3, auth]
   T-0002:
     id: T-0002
     title: Implement signup
@@ -148,6 +166,11 @@ tasks:
     priority: P2
     dependsOn: [T-0001]
     acceptance: ""
+    parent: T-0001                  # subtask of T-0001
+    assignedBy: PM
+    assets: []
+    deliverables: []
+    tags: []
     createdAt: ...
     updatedAt: ...
 ```
@@ -157,14 +180,35 @@ Field rules:
 - `id` is `T-NNNN` (zero-padded, minimum 4 digits). Assigned by the
   store; do not hand-pick.
 - `status` is the union above; v2 does not enforce transitions (any
-  status may move to any status).
+  status may move to any status). PR8j adds ONE invariant: moving to
+  `Done` with a missing file-kind deliverable is refused unless
+  `--force-incomplete` is passed; see PROTOCOL.md.
 - `owner` is a role id or `null`. The role does not have to exist in
   `config.yaml` yet, but it must pass role-id validation.
 - `dependsOn` is an array of other task ids. Cycle detection is not
   done in v2.
+- `parent` (PR8j) is another task id or `null`. The task graph is
+  cycle-checked at read time; chains deeper than 5 are refused. Parent
+  status is NOT automatically derived from children.
+- `assignedBy` (PR8j) is the role that originally created the task.
+  `assignTask` does NOT update this field — the event stream carries
+  reassignment history.
+- `assets` (PR8j) are reference pointers the owner needs to read. Each
+  entry is `{ kind: "file" | "url", ref, description }`. File refs are
+  validated for path-traversal at create time but the file is not
+  required to exist (it may be produced by a peer task).
+- `deliverables` (PR8j) are required outputs. `kind: "file"` refs are
+  existence-checked on the `Done` transition. `kind: "url"` and
+  `kind: "manual"` are displayed but not auto-verified.
+- `tags` (PR8j) is a free-form list of labels; `agentctl task list
+  --tag <label>` filters with OR semantics.
 - Hand-edits are allowed for trivial fixes, but normal mutation goes
   through `agentctl task new/assign/status`, which also emits the
   corresponding event.
+
+A `--force-incomplete` Done emits a `TASK_DELIVERABLE_BYPASSED` event
+*immediately before* the `TASK_STATUS_CHANGED` event, so the audit
+ordering "approval given -> status moved" is unambiguous.
 
 ## `comms/events/<ulid>.json`
 
@@ -203,6 +247,7 @@ Event types currently emitted:
 | `TASK_CREATED`        | `agentctl task new`              | Broadcast; `ref` = task id.                    |
 | `TASK_ASSIGNED`       | `agentctl task new` / `assign`   | `to` = new owner; `ref` = task id.             |
 | `TASK_STATUS_CHANGED` | `agentctl task status`           | Broadcast; `ref` = task id.                    |
+| `TASK_DELIVERABLE_BYPASSED` | `agentctl task status ... Done --force-incomplete` | Broadcast; `ref` = task id; `payload.missing` lists the file refs that were not on disk; `payload.by` records the actor who approved the bypass. Always emitted before the corresponding `TASK_STATUS_CHANGED`. |
 | `RFC_CREATED`         | `agentctl rfc new`               | Broadcast; `ref` = RFC id.                     |
 | `RFC_COMMENT`         | `agentctl rfc comment` / `ack` / `object` / `pre-decide` | Broadcast; `ref` = RFC id. PR8g.1: `payload.kind` distinguishes regular discussion (undefined) from structured `"pre-decision"` / `"ack"` / `"object"` posts. |
 | `RFC_DECIDED`         | `agentctl rfc decide` / `reject` | Broadcast; `ref` = RFC id; final.              |

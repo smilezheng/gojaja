@@ -24,6 +24,8 @@ export type EventType =
   | "RFC_REVISED"
   | "RFC_TASK_LINKED"
   | "RFC_TASK_UNLINKED"
+  // PR8j (task model expansion)
+  | "TASK_DELIVERABLE_BYPASSED"
   | "SESSION_CLAIMED"
   | "SESSION_RELEASED"
   | "SESSION_TAKEOVER"
@@ -201,6 +203,44 @@ export const ACTIVE_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
   "Review",
 ]);
 
+/**
+ * PR8j: maximum depth of the `parent` chain. `createTask` refuses
+ * anything that would create a chain longer than this. Five layers
+ * cover CTO -> PM -> epic -> story -> subtask; deeper trees usually
+ * mean a task that should be split into siblings, not nested.
+ */
+export const MAX_TASK_DEPTH = 5;
+
+/**
+ * PR8j: pointer to a reference material the task owner needs to read
+ * to do the work. Pure information; framework never auto-resolves URLs
+ * or requires files to exist.
+ *   - kind="file" : repo-relative path; refused if the path tries to
+ *     escape the repo via `..`. NOT refused for not-yet-existing files.
+ *   - kind="url"  : opaque external link; framework treats as a string.
+ */
+export interface TaskAsset {
+  kind: "file" | "url";
+  ref: string;
+  description: string;
+}
+
+/**
+ * PR8j: hard output the task MUST produce before it can be marked Done.
+ *   - kind="file"   : repo-relative path. `setTaskStatus(... Done)`
+ *     refuses unless the path exists on disk; `--force-incomplete`
+ *     bypasses with a logged `TASK_DELIVERABLE_BYPASSED` event.
+ *   - kind="url"    : URL that must be produced (Figma link, etc.).
+ *     Framework cannot verify; renderer marks it as unverifiable.
+ *   - kind="manual" : free-text requirement (e.g. "post a design link
+ *     in worklog"). Framework only displays; no verification.
+ */
+export interface Deliverable {
+  kind: "file" | "url" | "manual";
+  ref: string;
+  description: string;
+}
+
 export interface Task {
   /** `T-NNNN` (zero-padded, 4 digits minimum). Auto-assigned by the store. */
   id: string;
@@ -215,6 +255,28 @@ export interface Task {
   acceptance: string;
   createdAt: string;
   updatedAt: string;
+
+  // ---- PR8j fields ------------------------------------------------------
+
+  /**
+   * Parent task id, or null for top-level tasks. Forms a tree; cycles
+   * and chains longer than `MAX_TASK_DEPTH` are refused at write time.
+   * Status is INTENTIONALLY not auto-propagated to/from parent.
+   */
+  parent: string | null;
+  /**
+   * Role that originally created (and thereby assigned) this task. SYSTEM
+   * for tasks created by the CLI running outside a session. Reassignment
+   * via `assignTask` does NOT change this — see the `TASK_ASSIGNED`
+   * event stream for reassignment history.
+   */
+  assignedBy: RoleId | "SYSTEM" | null;
+  /** Reference materials (design docs, Figma links, ...). */
+  assets: TaskAsset[];
+  /** Required outputs; file-kind entries are gated on Done. */
+  deliverables: Deliverable[];
+  /** Free-form labels for filtering / grouping. */
+  tags: string[];
 }
 
 export interface TaskBoard {
@@ -235,6 +297,31 @@ export interface TaskSummary {
   priority: string;
   /** Subset of dependsOn that are not yet `Done`. */
   blockedBy: string[];
+
+  // ---- PR8j additions (omitted in JSON when empty / N/A) ----
+
+  /** Parent task id, when this task is a subtask. */
+  parent?: string;
+  /**
+   * Per-status counts of this task's immediate children. Only attached
+   * to summaries of tasks that have at least one child, so leaf tasks
+   * stay tight.
+   */
+  childCounts?: {
+    ready: number;
+    inProgress: number;
+    blocked: number;
+    review: number;
+    done: number;
+  };
+  /**
+   * Number of `kind: "file"` deliverables whose `ref` does not exist on
+   * disk at manifest-generation time. Zero = omitted. Lets epic owners
+   * see "still missing 2 hard outputs" without opening every task.
+   */
+  unmetDeliverables?: number;
+  /** Tags, when non-empty. */
+  tags?: string[];
 }
 
 /** Payload shape for type=TASK_CREATED events. */
@@ -257,6 +344,22 @@ export interface TaskStatusChangedPayload {
   taskId: string;
   previousStatus: TaskStatus;
   newStatus: TaskStatus;
+}
+
+/**
+ * PR8j: payload for `TASK_DELIVERABLE_BYPASSED` events. Emitted by
+ * `setTaskStatus` immediately BEFORE the `TASK_STATUS_CHANGED` event
+ * when `--force-incomplete` is used to mark a task Done while one or
+ * more `kind: "file"` deliverables are still missing on disk. The
+ * event is the durable audit record of "this approval was knowingly
+ * given".
+ */
+export interface TaskDeliverableBypassedPayload {
+  taskId: string;
+  /** Repo-relative paths that were checked and not found. */
+  missing: string[];
+  /** Role that ran the bypass. SYSTEM for CLI-only operators. */
+  by: RoleId | "SYSTEM";
 }
 
 /**

@@ -102,18 +102,48 @@ Messaging (agent, requires MA_SESSION):
 Task board (any role that owns state/task_board.yaml):
   task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3]
            [--depends-on T-NNNN,...] [--acceptance <text>]
+           [--parent T-NNNN]
+           [--tag <label> ...]
+           [--asset 'kind:ref::desc' ...]
+           [--deliverable 'kind:ref::desc' ...]
       Tasks created WITH an owner default to status Ready (the owner's
       next plan surfaces them). Without an owner, default is Backlog
       (PM-side product idea pending triage).
+      --parent links to an existing task; the chain is depth-capped
+        and cycle-checked. Children INHERIT NOTHING from the parent;
+        ownership, priority, status are independent.
+      --tag is a free-form label. Repeat for multiple tags.
+      --asset is a pointer the owner needs to read:
+        kind=file -> repo-relative path (must stay inside the repo
+                      and outside .multi-agent/);
+        kind=url  -> external link (Figma, Notion, ...).
+      --deliverable is a HARD output that must exist on Done:
+        kind=file   -> repo path, existence-checked on Done;
+        kind=url    -> URL output (not auto-verified);
+        kind=manual -> free-text requirement, not auto-verified.
+        File-kind deliverables refuse the Done transition when the
+        path is missing on disk. Pass --force-incomplete on
+        'task status ... Done' to override (emits an audit event).
+      Format is 'kind:ref' or 'kind:ref::description' (the '::' lets
+      URLs survive intact). Repeat the flag for multiple entries.
   task assign <task-id> --to <role>
       Reassign a task. Both creation and reassignment refuse owners
       that are not registered roles (catches typos before TASK_ASSIGNED
-      goes to a nobody).
+      goes to a nobody). task.assignedBy records the ORIGINAL creator
+      and is NOT updated on reassignment (audit log carries
+      reassignment history).
   task status <task-id> <Backlog|Ready|InProgress|Blocked|Review|Done>
+                       [--force-incomplete]
       An owner can always change their own task's status. Anyone else
       must own state/task_board.yaml.
-  task list [--owner <role>] [--status <s>] [--json]
+      Moving to Done with missing file-kind deliverables refuses
+      with USAGE. --force-incomplete bypasses the gate AND emits a
+      TASK_DELIVERABLE_BYPASSED event with the missing refs so the
+      bypass is permanently visible in the audit log.
+  task list [--owner <role>] [--status <s>] [--tag <label> ...] [--json]
   task show <task-id>
+      Renders parent, children, assets, deliverables (with on-disk
+      [x] / [ ] / [?] markers for file / url / manual kinds).
 
 RFCs (cross-role decisions; any role can open, designated decider closes):
   rfc new <slug> --title <text> --deciders <r1,...>
