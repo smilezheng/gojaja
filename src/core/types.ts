@@ -18,6 +18,14 @@ export type EventType =
   | "RFC_COMMENT"
   | "RFC_DECIDED"
   | "RFC_REPAIRED"
+  // PR8g (RFC v2)
+  | "RFC_OPTION_ADDED"
+  | "RFC_PRE_DECISION"
+  | "RFC_PRE_DECISION_OBJECTED"
+  | "RFC_REVISION_REQUESTED"
+  | "RFC_REVISED"
+  | "RFC_TASK_LINKED"
+  | "RFC_TASK_UNLINKED"
   | "SESSION_CLAIMED"
   | "SESSION_RELEASED"
   | "SESSION_TAKEOVER"
@@ -264,7 +272,24 @@ export interface TaskStatusChangedPayload {
  * refused. We deliberately do NOT auto-compute acceptance from comments:
  * `decide` and `reject` are explicit acts by a role in the deciders list.
  */
-export type RfcStatus = "open" | "accepted" | "rejected" | "superseded";
+/**
+ * RFC lifecycle (PR8g expands from {open, accepted, rejected, superseded}):
+ *
+ *   open ─── rfc comment / rfc add-option ──▶ open
+ *   open ─── rfc pre-decide ──▶ pre-decide
+ *   open / pre-decide ─── rfc decide / reject ──▶ accepted / rejected (terminal)
+ *   open / pre-decide ─── rfc revise ──▶ revising
+ *   pre-decide ─── rfc comment from anyone other than the pre-decider ──▶ open
+ *                  (auto-reopens; emits RFC_PRE_DECISION_OBJECTED)
+ *   revising ─── rfc edit ──▶ open
+ */
+export type RfcStatus =
+  | "open"
+  | "pre-decide"
+  | "revising"
+  | "accepted"
+  | "rejected"
+  | "superseded";
 
 export interface RfcOption {
   /** Short id like "A" / "B" / "stay-on-sqlite". */
@@ -287,14 +312,55 @@ export interface RfcProposal {
   createdAt: string;
   /** Role or "SYSTEM" — recorded as the event's `from`. */
   createdBy: RoleId | "SYSTEM";
+
+  // ---- PR8g fields ------------------------------------------------------
+
+  /**
+   * Free-form context. The creator is responsible for making the RFC
+   * legible to anyone who has not been in the conversation: problem
+   * statement, constraints, what the options actually entail. Decider
+   * is expected to `rfc revise` if this is too thin to act on.
+   *
+   * Optional in PR8g (a soft warning is printed if empty) so existing
+   * v1 RFCs round-trip; PR8h promotes it to required.
+   */
+  description: string;
+
+  /**
+   * Tasks this RFC is decided in the context of. Lets voters/deciders
+   * pull up the affected work via `agentctl task show <id>`.
+   * Validated against `state/task_board.yaml` at write time.
+   */
+  relatedTasks: string[];
+
+  /**
+   * Set while `status === "pre-decide"`. Cleared whenever status leaves
+   * `pre-decide` (via objection reopen, decide, reject, revise).
+   */
+  preDecision?: {
+    decidedBy: RoleId;
+    chosenOption: string;
+    ts: string;
+    rationale: string;
+  };
 }
 
 export interface RfcComment {
+  /**
+   * Globally-unique ULID, used as the target of `replyTo` and as the
+   * read-cursor anchor in `comms/cursors/<role>/rfc-<id>.json`.
+   */
+  id: string;
   rfcId: string;
   role: RoleId;
   ts: string;
   /** Preferred option id. May be empty if the commenter has no preference. */
   preferred: string;
+  /**
+   * `null` = reply to the RFC root.
+   * Otherwise = id of another comment in the same RFC's `comments.yaml`.
+   */
+  replyTo: string | null;
   rationale: string;
 }
 
@@ -335,14 +401,76 @@ export interface RfcDecidedPayload {
   rationale: string;
 }
 
+// ---- PR8g RFC v2 event payloads ----------------------------------------
+
+export interface RfcOptionAddedPayload {
+  rfcId: string;
+  optionId: string;
+  summary: string;
+  addedBy: RoleId;
+  rationale: string;
+}
+
+export interface RfcPreDecisionPayload {
+  rfcId: string;
+  decidedBy: RoleId;
+  chosenOption: string;
+  rationale: string;
+}
+
+export interface RfcPreDecisionObjectedPayload {
+  rfcId: string;
+  /** Comment that triggered the reopen. */
+  triggeringCommentId: string;
+  /** Role that posted the comment. */
+  by: RoleId;
+}
+
+export interface RfcRevisionRequestedPayload {
+  rfcId: string;
+  requestedBy: RoleId;
+  rationale: string;
+}
+
+export interface RfcRevisedPayload {
+  rfcId: string;
+  revisedBy: RoleId;
+  rationale: string;
+  changed: Array<"title" | "description" | "options" | "deadline">;
+}
+
+export interface RfcTaskLinkChangePayload {
+  rfcId: string;
+  taskId: string;
+  by: RoleId;
+}
+
 export interface RfcSummary {
   id: string;
   title: string;
   status: RfcStatus;
   /** This role's expected involvement; precomputed to avoid client logic. */
   role: "voter" | "decider";
-  /** Whether the role has already left a comment. */
+  /** Whether the role has already left at least one comment. */
   commented: boolean;
+  /**
+   * Number of comments newer than this role's last `rfc show` of this
+   * RFC (per-role read marker in `comms/cursors/<role>/rfc-<id>.json`).
+   * Lets the agent prioritise RFCs with new discussion.
+   */
+  unreadComments: number;
+  /** Tasks linked to this RFC (resolved-against-task-board ids). */
+  relatedTasks: string[];
+  /**
+   * Present iff `status === "pre-decide"`. Tells voters/deciders what
+   * the pre-decider proposes; gives them the choice between commenting
+   * (which reopens the RFC) and staying silent (consent).
+   */
+  pendingPreDecision?: {
+    decidedBy: RoleId;
+    chosenOption: string;
+    ts: string;
+  };
 }
 
 /** Role lease metadata. */

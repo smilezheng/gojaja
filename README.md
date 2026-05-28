@@ -307,6 +307,7 @@ Full details: [docs/ROADMAP.md](./docs/ROADMAP.md)
 | [docs/PROTOCOL.md](./docs/PROTOCOL.md) | Wire-level contract — every command, manifest shape, ack semantics |
 | [docs/HANDBOOK.md](./docs/HANDBOOK.md) | Judgement rules: when to worklog vs report vs RFC; escalation; what NOT to bounce to the user |
 | [docs/SCHEMA.md](./docs/SCHEMA.md) | What every file under `.multi-agent/` contains and who creates it |
+| [docs/RFC.md](./docs/RFC.md) | RFC mechanism end-to-end: model, state machine, on-disk layout, worked example |
 | [docs/DESIGN.md](./docs/DESIGN.md) | Why things are designed the way they are |
 | [docs/RELEASE.md](./docs/RELEASE.md) | How to cut a new version (maintainer) |
 | [CHANGELOG.md](./CHANGELOG.md) | Release history |

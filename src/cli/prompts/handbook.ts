@@ -102,10 +102,54 @@ Omitting a clearly-relevant role from \`--deciders\` is detectable in
 the audit log and reads as scope-shopping. If unsure, add the role
 listed in your own \`roleReminder.reportsTo\`.
 
+### RFC multi-round discussion (PR8g)
+
+Decisions don't always settle in one round. The mechanism supports it:
+
+- \`agentctl rfc comment ... --reply-to <comment-id>\` threads a reply
+  under another comment. Use it when you are reacting to a specific
+  point; use top-level (no \`--reply-to\`) when you are raising a new
+  angle.
+- \`agentctl rfc add-option <id>:<summary> --rationale ...\` introduces
+  a new option mid-discussion. Use it the moment the existing options
+  are clearly all wrong; do not pretend B is fine just because the
+  proposal already lists it.
+- \`agentctl rfc pre-decide --option X --rationale ...\` (decider only)
+  posts "I lean X; any objections?". Voters either stay silent
+  (consent) or \`rfc comment\` (auto-reopens the RFC). Use pre-decide
+  whenever you can imagine an objection; skip it for clearly single-
+  answer RFCs and \`rfc decide\` directly.
+- \`agentctl rfc revise --rationale "rewrite section X"\` (decider only)
+  kicks the proposal back without rejecting the topic. Use revise
+  when the topic is real but the writeup is too thin for you to act
+  on. Use \`rfc reject\` when the topic itself is wrong.
+- The original creator (or any decider) can re-submit via
+  \`agentctl rfc edit --description "..." --rationale "..."\` while the
+  RFC is in \`revising\`. Comments are preserved across the cycle.
+
+Three smaller rules:
+
+- When you open an RFC, the \`--description\` is what people not in
+  the conversation read to weigh in. Write it as if the reader has
+  only the title and your project state — concrete enough that they
+  can pick an option, not asking them to "read the chat history".
+- Link related tasks at creation with \`--task T-NNNN\` (or after the
+  fact with \`rfc link-task\`). The task page is the context for the
+  RFC; voters read it before commenting.
+- \`agentctl rfc show <id>\` updates your read marker for that RFC.
+  Your next \`plan\` will report \`unreadComments: 0\` for it until new
+  discussion arrives.
+
 ### Disagreement
 
 - **Disagree with an assignment**: report your concern to the assigner,
   then do it anyway unless they retract. Do not silently no-op.
+- **Disagree with an RFC mid-flight**: while it is still \`open\` or
+  \`pre-decide\`, comment with \`--reply-to\` on the specific point you
+  disagree with, or \`rfc add-option\` if the existing choices are
+  inadequate. Deciders use \`rfc revise\` to send the whole thing back
+  for rewrite if the proposal is too thin to act on. Do not silently
+  no-op.
 - **Disagree with an accepted RFC**: respect it. Open a *new* RFC only
   if you have *new* evidence the previous decision could not have seen.
 - **Disagree with another agent's report**: respond via report; never

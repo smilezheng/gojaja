@@ -207,17 +207,43 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     <you>` hint so agents who lose context are routed to recover
     their own contract every turn (within the 300-byte budget).
 
+- **PR8g — RFC v2 (multi-round, threaded, mutable options, related tasks, revise).**
+  - Status machine expands to `{open, pre-decide, revising, accepted,
+    rejected, superseded}`. Pre-decide is optional (decider proposes,
+    voters consent by silence or object by commenting, which auto-
+    reopens the RFC). Revise/edit is a "send back for rewrite" path
+    that preserves comments across the cycle.
+  - Comments move from per-role JSONs to a single threaded
+    `comments.yaml` ledger; each comment is a ULID with a `replyTo`
+    chain. Multiple comments per role preserved.
+  - 6 new CLI verbs: `add-option`, `pre-decide`, `revise`, `edit`,
+    `link-task`, `unlink-task`. New flags on existing: `rfc new
+    --description --task`, `rfc comment --reply-to`, `rfc show
+    --no-mark-seen`.
+  - `relatedTasks` field on `RfcProposal` validated against task board.
+  - `manifest.rfcs[*]` gains `unreadComments`, `relatedTasks`,
+    `pendingPreDecision`. Per-role-per-RFC read cursor under
+    `comms/cursors/<role>/rfc-<id>.json`.
+  - 7 new event types: `RFC_OPTION_ADDED`, `RFC_PRE_DECISION`,
+    `RFC_PRE_DECISION_OBJECTED`, `RFC_REVISION_REQUESTED`,
+    `RFC_REVISED`, `RFC_TASK_LINKED`, `RFC_TASK_UNLINKED`.
+  - Breaking on-disk shape change (alpha-only, no users): the
+    pre-PR8g `comments/<role>.json` layout is detected on read and
+    refused with a clear migration error.
+  - Suite 216 -> 247.
+
 ### Planned, in priority order
 
-- **PR8g — schema-level deferments.**
+- **PR8h — schema-level deferments.**
   - Task `reviewers` field so a Review handoff can sign off without
     needing task-board ownership.
   - `STATE_UPDATED` event when `state/*` files change.
   - `dependsOn` cycle detection in task board.
   - Schema-version compatibility check on `agentctl plan`.
+  - Harden `rfc new --description` from soft-warn (PR8g) to required.
   - Candidate: role-level `decisionScopes` so a role becomes a default
     RFC decider for matching scopes (currently `--deciders` is
-    per-RFC ad-hoc). Promote if PR8f-A's handbook nudge proves
+    per-RFC ad-hoc). Promote if PR8g's handbook nudge proves
     insufficient.
 
 - **PR8 — installer & upgrade.**
@@ -269,9 +295,11 @@ After PR10 we tag `v2.0.0`.
 
 PR1–PR7 + PR8a establish the protocol surface (events, sessions,
 plan/ack, tasks, RFCs, ownership, handbook). PR7a / PR8b / PR8c / PR8d /
-PR8e / PR8f-A / PR8f-B / PR8f-C are correctness + UX hardening: the
-only "breaking" surface change is PR8f-C renaming `agentctl write-state`
-to `agentctl state edit` (alpha stage; no users yet). PR8g–PR10 harden
-the layer for everyday use; PR8g is the only remaining schema-affecting
-PR before `v2.0.0`. Anything past `v2.0.0` only ships after the chaos
-suite (PR10) is green.
+PR8e / PR8f-A / PR8f-B / PR8f-C are correctness + UX hardening.
+PR8g reworks the RFC mechanism to support real multi-round decisions
+(threaded comments, add-option mid-flight, pre-decide, revise/edit).
+The only "breaking" alpha-stage surface changes are PR8f-C
+(`write-state` → `state edit`) and PR8g (comments file shape).
+PR8h–PR10 harden the layer for everyday use; PR8h is the only
+remaining schema-affecting PR before `v2.0.0`. Anything past `v2.0.0`
+only ships after the chaos suite (PR10) is green.

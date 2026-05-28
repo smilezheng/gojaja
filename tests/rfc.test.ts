@@ -96,13 +96,15 @@ describe("Store.commentRfc", () => {
   beforeEach(async () => { ctx = await freshStore(); });
   afterEach(async () => { await fsp.rm(ctx.root, { recursive: true, force: true }); });
 
-  it("writes comments/<role>.json and emits RFC_COMMENT", async () => {
+  it("appends to comments.yaml ledger and emits RFC_COMMENT (PR8g shape)", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
-    await ctx.store.commentRfc({
+    const c = await ctx.store.commentRfc({
       rfcId: r.id, role: "Backend",
       preferred: "A", rationale: "Migration is tractable.",
     });
-    const cf = path.join(ctx.root, "rfcs", `${r.id}-${r.slug}`, "comments", "Backend.json");
+    expect(c.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(c.replyTo).toBeNull();
+    const cf = path.join(ctx.root, "rfcs", `${r.id}-${r.slug}`, "comments.yaml");
     const raw = await fsp.readFile(cf, "utf8");
     expect(raw).toContain("Backend");
     expect(raw).toContain("Migration is tractable");
@@ -110,7 +112,7 @@ describe("Store.commentRfc", () => {
     expect(events.some((e) => e.type === "RFC_COMMENT" && e.from === "Backend")).toBe(true);
   });
 
-  it("overwrites an existing comment from the same role", async () => {
+  it("PR8g: preserves every comment from the same role in order (no overwrite)", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
     await ctx.store.commentRfc({
       rfcId: r.id, role: "Backend", preferred: "A", rationale: "v1",
@@ -118,10 +120,13 @@ describe("Store.commentRfc", () => {
     await ctx.store.commentRfc({
       rfcId: r.id, role: "Backend", preferred: "B", rationale: "changed my mind",
     });
-    const cf = path.join(ctx.root, "rfcs", `${r.id}-${r.slug}`, "comments", "Backend.json");
-    const c = JSON.parse(await fsp.readFile(cf, "utf8"));
-    expect(c.preferred).toBe("B");
-    expect(c.rationale).toBe("changed my mind");
+    const { comments } = await ctx.store.readRfc(r.id);
+    const beComments = comments.filter((c) => c.role === "Backend");
+    expect(beComments).toHaveLength(2);
+    expect(beComments[0].rationale).toBe("v1");
+    expect(beComments[1].rationale).toBe("changed my mind");
+    // ULIDs are monotonic so the second comment id sorts after the first.
+    expect(beComments[1].id > beComments[0].id).toBe(true);
   });
 
   it("rejects empty rationale", async () => {

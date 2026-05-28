@@ -72,12 +72,35 @@ export function rfcProposalPath(rfcId: string, slug: string): string {
   return path.posix.join(rfcDir(rfcId, slug), "proposal.yaml");
 }
 
-export function rfcCommentPath(rfcId: string, slug: string, role: string): string {
-  return path.posix.join(rfcDir(rfcId, slug), "comments", `${role}.json`);
+/**
+ * PR8g: comments moved from per-role JSON files
+ * (`comments/<role>.json`) to a single threaded ledger
+ * (`comments.yaml`) per RFC. The legacy per-role directory is detected
+ * on read and reported as a clear migration error — alpha-only hard
+ * cut, no auto-migrator.
+ */
+export function rfcCommentsFile(rfcId: string, slug: string): string {
+  return path.posix.join(rfcDir(rfcId, slug), "comments.yaml");
+}
+
+/**
+ * Pre-PR8g layout. Kept only so the back-compat detector can name the
+ * directory in its error message. Never used for new writes.
+ */
+export function rfcLegacyCommentsDir(rfcId: string, slug: string): string {
+  return path.posix.join(rfcDir(rfcId, slug), "comments");
 }
 
 export function rfcDecisionPath(rfcId: string, slug: string): string {
   return path.posix.join(rfcDir(rfcId, slug), "decision.json");
+}
+
+/**
+ * Per-role-per-RFC read cursor for PR8g `unreadComments` accounting.
+ * Updated whenever the role calls `rfc show <id>` (unless --no-mark-seen).
+ */
+export function rfcReadCursorPath(role: string, rfcId: string): string {
+  return path.posix.join(Paths.cursorsDir, role, `rfc-${rfcId}.json`);
 }
 
 /**

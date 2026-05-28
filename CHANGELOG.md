@@ -10,10 +10,119 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
 ### Planned next
 
-- PR8g: schema-level features deferred from PR8c (task `reviewers`
-  field, `STATE_UPDATED` event, `dependsOn` cycle detection,
-  schema-version compatibility check; role-level RFC `decisionScopes`
-  is a candidate).
+- PR8h: schema-level features previously slated for PR8g (task
+  `reviewers` field, `STATE_UPDATED` event, `dependsOn` cycle
+  detection, schema-version compatibility check; role-level RFC
+  `decisionScopes` is a candidate). `--description` becoming
+  hard-required on `rfc new` also lands here.
+
+## [2.0.0-alpha.15] — 2026-05-28
+
+### RFC v2: multi-round, threaded comments, mutable options, related tasks, revise (PR8g)
+
+Substantial rework of the RFC mechanism. Suite 216 -> 247.
+
+> **Breaking on-disk shape change (alpha-only, no users).** Comments
+> moved from per-role JSON files (`rfcs/<dir>/comments/<role>.json`)
+> to a single threaded ledger (`rfcs/<dir>/comments.yaml`). The CLI
+> detects the legacy layout on first read and refuses with a clear
+> `code: USAGE` message pointing at this entry. No auto-migrator —
+> projects on alpha.14 or earlier should `agentctl init` fresh or
+> hand-migrate.
+
+#### State machine grew
+
+`RfcStatus` expands from `{open, accepted, rejected, superseded}` to
+`{open, pre-decide, revising, accepted, rejected, superseded}`. New
+transitions:
+
+- `open --rfc pre-decide--> pre-decide`
+- `pre-decide --rfc comment (non-pre-decider)--> open` (auto-reopen)
+- `open / pre-decide --rfc revise--> revising`
+- `revising --rfc edit--> open`
+- `decide` / `reject` accept additional starting states (see
+  docs/RFC.md and docs/PROTOCOL.md).
+
+#### New CLI verbs
+
+- `agentctl rfc add-option <id>:<summary> --rationale ...` — surface
+  a new option mid-discussion. Allowed in `open` or `revising`.
+- `agentctl rfc pre-decide --option X --rationale ...` — decider
+  posts "I lean X; any objections?". Voters either stay silent
+  (consent) or comment (auto-reopens).
+- `agentctl rfc revise --rationale "rewrite section X"` — decider
+  kicks the proposal back without rejecting the topic.
+- `agentctl rfc edit --rationale ... [--title T --description D
+  --options A:s,B:s --deadline ISO]` — creator or decider applies
+  the rewrite; status returns to `open`. Comments preserved.
+- `agentctl rfc link-task --task T-NNNN` /
+  `agentctl rfc unlink-task --task T-NNNN` — idempotent task pointers
+  on the proposal; task ids validated against `state/task_board.yaml`.
+
+#### New flags on existing verbs
+
+- `rfc new --description <text>` — soft-required in PR8g (warn-on-
+  empty); PR8h will harden to required. This is the channel for
+  giving non-participants enough context to weigh in.
+- `rfc new --task T-NNNN[,T-NNNN]` — link tasks at creation time.
+- `rfc comment --reply-to <comment-id>` — thread under another
+  comment by id (ULIDs printed by `rfc show` / `rfc comment`).
+- `rfc show --no-mark-seen` — script-friendly read that does not
+  advance the role's per-RFC read cursor.
+
+#### New events
+
+`RFC_OPTION_ADDED`, `RFC_PRE_DECISION`, `RFC_PRE_DECISION_OBJECTED`,
+`RFC_REVISION_REQUESTED`, `RFC_REVISED`, `RFC_TASK_LINKED`,
+`RFC_TASK_UNLINKED`. All broadcast (`to: "*"`).
+
+#### Manifest additions
+
+`manifest.rfcs[*]` now carries `unreadComments`, `relatedTasks`, and
+(while in pre-decide) `pendingPreDecision`. Visibility rules for the
+new states: voter hidden during `revising` unless they are the
+creator; voter in `pre-decide` who commented after the pre-decision
+ts drops from the manifest (both objection and silent-consent paths
+end up clean). `agentctl rfc show <id>` advances the caller's per-RFC
+read marker so `unreadComments` reflects "I am caught up".
+
+#### Auto behaviours worth knowing
+
+- `commentRfc` advances the commenter's read cursor automatically
+  (no need to call `markRfcSeen` after commenting).
+- Comments on `pre-decide` from a role other than the pre-decider
+  auto-reopen the RFC and emit `RFC_PRE_DECISION_OBJECTED`. Comments
+  from the pre-decider themselves do not (lets them add reasoning
+  without aborting their own round).
+
+#### Schema additions
+
+`RfcProposal` gains `description: string`, `relatedTasks: string[]`,
+optional `preDecision: { decidedBy, chosenOption, ts, rationale }`.
+`RfcComment` gains `id: string` (ULID) and `replyTo: string | null`.
+`RfcSummary` gains `unreadComments`, `relatedTasks`, optional
+`pendingPreDecision`.
+
+#### Handbook + docs
+
+- `docs/RFC.md` rewritten end-to-end with the new state machine, the
+  10-command surface, and a worked four-role simulation that exercises
+  multi-round comments, `add-option`, `pre-decide` + objection, and a
+  `revise` + `edit` cycle before a clean `decide`.
+- `docs/PROTOCOL.md` RFC section: 6 new commands + flag additions on
+  existing commands.
+- `docs/SCHEMA.md`: new `comments.yaml` shape, new `proposal.yaml`
+  fields, new per-role-per-RFC cursor file, 7 new events in the
+  event table. Pre-PR8g `comments/<role>.json` layout flagged with
+  migration note.
+- `docs/HANDBOOK.md` and the in-prompt handbook gain "RFC multi-round
+  discussion" guidance: when to pre-decide vs decide, when to revise
+  vs reject, when to add an option, how to thread.
+
+#### Other
+
+- `SCHEMA_VERSION` bumped (RFC schema changed).
+- Soft warning if `rfc new --description` is empty.
 
 ## [2.0.0-alpha.14] — 2026-05-27
 

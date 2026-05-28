@@ -7,7 +7,10 @@ const PACKAGE_VERSION = require("../../package.json").version as string;
 export const CLI_VERSION: string = PACKAGE_VERSION;
 
 /** The on-disk schema version embedded in the .multi-agent/VERSION file. */
-export const SCHEMA_VERSION = "2.0.0";
+// Bumped in PR8g (RFC v2 — comments shape moved from per-role JSONs
+// to a single threaded comments.yaml ledger; proposal.yaml gained
+// description / relatedTasks / preDecision; new RFC_* event types).
+export const SCHEMA_VERSION = "2.0.0-rfc-v2";
 
 export const LAYER_DIRNAME = ".multi-agent";
 

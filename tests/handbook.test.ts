@@ -42,6 +42,12 @@ const KEY_TRIGGER_PHRASES: ReadonlyArray<RegExp> = [
 
   // PR8f-A: RFC deciders are per-RFC, not role-level
   /deciders are\s+\*\*per-RFC\*\*/,
+
+  // PR8g: multi-round / pre-decide / revise rules. Whitespace-tolerant
+  // because the handbook text wraps lines for legibility.
+  /RFC multi-round discussion/,
+  /pre-decide\s+whenever you can imagine an objection/,
+  /Use revise\s+when the topic is real but the writeup is too thin/,
 ];
 
 describe("COLLABORATION_HANDBOOK", () => {
@@ -102,14 +108,13 @@ describe("COLLABORATION_HANDBOOK", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("stays within a reasonable size budget (<12 KB of UTF-8)", () => {
+  it("stays within a reasonable size budget (<14 KB of UTF-8)", () => {
     // Loaded once per session into the host's persistent area, so the
     // budget is generous compared to roleReminder. Still capped so
     // future edits notice when the handbook bloats. Bumped from 8 KB
-    // to 10 KB in PR8c (review-handoff + claim --force don't), then
-    // 10 KB to 12 KB in PR8f-A (task-assignment rules from PR8e and
-    // the "deciders are per-RFC" guidance landed together).
-    expect(Buffer.byteLength(COLLABORATION_HANDBOOK, "utf8")).toBeLessThan(12 * 1024);
+    // to 10 KB in PR8c, 10 KB to 12 KB in PR8f-A, 12 KB to 14 KB in
+    // PR8g (RFC v2 multi-round / pre-decide / revise rules).
+    expect(Buffer.byteLength(COLLABORATION_HANDBOOK, "utf8")).toBeLessThan(14 * 1024);
   });
 });
 

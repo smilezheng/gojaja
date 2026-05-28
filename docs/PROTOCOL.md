@@ -3,7 +3,9 @@
 Cross-references: [DESIGN](./DESIGN.md) — why the protocol is shaped this
 way. [SCHEMA](./SCHEMA.md) — files referenced here.
 [HANDBOOK](./HANDBOOK.md) — when (policy) to use each tool documented
-below.
+below. [RFC](./RFC.md) — narrative walkthrough of the RFC lifecycle
+with a worked example (this doc is the wire spec; that doc shows the
+flow).
 
 This document is the contract between an LLM agent window and the
 coordination layer. The wire-level invariants here are what `agentctl`
@@ -266,46 +268,118 @@ The full schema is documented in
 The goal is "every relevant role records an opinion; a designated leader
 picks; the decision is durable". There is no automatic tally.
 
-Full schema: [SCHEMA -> rfcs/](./SCHEMA.md#rfcsrfc-nnnn-slug).
+PR8g made the RFC mechanism multi-round: comments are threaded
+(`replyTo`), options can be added mid-discussion, deciders can run a
+pre-decide ACK round, and deciders can send a proposal back for
+rewrite (`revise` + `edit`) without rejecting the topic.
 
-### `agentctl rfc new <slug> --title <text> --deciders <r1,...> --options <A:summary,B:summary> [--voters <r1,...>] [--deadline <iso>]`
+State machine (open / pre-decide / revising / accepted / rejected /
+superseded), worked example, and rationale live in
+[docs/RFC.md](./RFC.md). Full on-disk schema:
+[SCHEMA -> rfcs/](./SCHEMA.md#rfcsrfc-nnnn-slug).
+
+### `agentctl rfc new <slug> --title <text> --deciders <r1,...> --options <A:summary,B:summary> [--description <text>] [--voters <r1,...>] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]`
 
 - Slug must match `^[a-z0-9][a-z0-9-]{0,63}$`; reuse across RFCs is refused.
 - The store assigns the next sequential `RFC-NNNN` id under a `rfcs` lock
   (`rfcCounter` lives in `config.yaml`, so deleting an RFC dir does not
   recycle its id).
+- `--description` is soft-required in PR8g (warns if empty; PR8h
+  hardens to required). It is the channel where the creator gives
+  non-participants enough context to weigh in.
+- `--task` links one or more existing task ids; each is validated
+  against `state/task_board.yaml` and refused if not found.
 - Emits `RFC_CREATED` (broadcast).
 - The actor (`MA_SESSION` role, or `"SYSTEM"` if no session) is recorded
   as the event's `from` and the proposal's `createdBy`.
 
-### `agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>]`
+### `agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]`
 
 - The role comes from `MA_SESSION`; the framework does not allow
   ghost-commenting on behalf of another role.
 - Non-voters may comment — they often add cross-cutting context that the
   named voters miss.
-- Refuses on closed RFCs and on unknown `--option`.
-- Overwriting a prior comment from the same role is allowed; the new
-  contents replace the old. The event stream still records both calls.
+- Refuses on closed RFCs (`accepted` / `rejected` / `superseded`) and
+  on unknown `--option`.
+- `--reply-to` must reference an existing comment id in the same RFC;
+  threading is enforced.
+- PR8g: **append-only ledger**. Multiple comments per role are
+  preserved in `comments.yaml`. The commenter's read cursor for this
+  RFC is automatically advanced to the just-written comment.
+- During `pre-decide`: a comment from a role **other than** the
+  pre-decider auto-reopens the RFC to `open` and emits
+  `RFC_PRE_DECISION_OBJECTED`. A comment from the pre-decider
+  themselves does not.
 - Emits `RFC_COMMENT` (broadcast).
+
+### `agentctl rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>` (PR8g)
+
+- Any session can add. Allowed in `open` or `revising`. Refused in
+  `pre-decide` (use comment to reopen first), `accepted`, `rejected`,
+  `superseded`.
+- Option id must be unique within the RFC.
+- Emits `RFC_OPTION_ADDED`.
+
+### `agentctl rfc pre-decide <rfc-id> --option <opt> --rationale <text>` (PR8g)
+
+- Decider gate (FORBIDDEN otherwise). Valid only from `open`.
+- Sets the proposal's `preDecision` field (`decidedBy`, `chosenOption`,
+  `ts`, `rationale`) and status to `pre-decide`. Surface in
+  `manifest.rfcs[*].pendingPreDecision`.
+- Emits `RFC_PRE_DECISION`.
 
 ### `agentctl rfc decide <rfc-id> --option <opt> --rationale <text>`
 
-- Only callers whose role appears in the proposal's `deciders` list may
-  call this. The framework refuses everyone else.
-- Refuses on closed RFCs and unknown `--option`.
-- Status `open -> accepted`; writes `decision.json`; emits `RFC_DECIDED`
-  with `outcome="accepted"`.
+- Deciders gate. Valid from `open` or `pre-decide`.
+- Refuses on unknown `--option`.
+- Status -> `accepted`; writes `decision.json`; clears `preDecision`;
+  emits `RFC_DECIDED` with `outcome="accepted"`.
 
 ### `agentctl rfc reject <rfc-id> --rationale <text>`
 
-- Same deciders gate. Status `open -> rejected`; writes `decision.json`
-  with `outcome="rejected"` and `chosenOption=null`; emits `RFC_DECIDED`.
+- Deciders gate. Valid from `open` / `pre-decide` / `revising`
+  (the last so a decider can give up on the topic mid-revision).
+- Status -> `rejected`; writes `decision.json` with `outcome="rejected"`
+  and `chosenOption=null`; clears `preDecision`; emits `RFC_DECIDED`.
 
-### `agentctl rfc list [--status open|accepted|rejected|superseded]` and `agentctl rfc show <rfc-id>`
+### `agentctl rfc revise <rfc-id> --rationale <text>` (PR8g)
 
-- Read-only. The agent's per-turn view of RFCs is `manifest.rfcs`;
-  explicit list/show are for ad-hoc inspection.
+- Deciders gate. Valid from `open` or `pre-decide`.
+- Status -> `revising`; clears `preDecision`; emits
+  `RFC_REVISION_REQUESTED` carrying the rationale (which is the
+  "what to fix" message to the creator).
+- Comments are preserved untouched.
+
+### `agentctl rfc edit <rfc-id> --rationale <text> [--title <text>] [--description <text>] [--options A:summary,B:summary] [--deadline <iso>]` (PR8g)
+
+- Allowed only in `revising`. Actor must be the original `createdBy`
+  OR a role in `deciders`. Other voters cannot rewrite.
+- At least one of `--title` / `--description` / `--options` /
+  `--deadline` must be provided.
+- Status -> `open`; clears `preDecision`; emits `RFC_REVISED`
+  including which fields changed.
+- Comments preserved untouched.
+
+### `agentctl rfc link-task <rfc-id> --task T-NNNN` (PR8g)
+
+- Any session. Refused in terminal states.
+- Task id must exist on the board (USAGE otherwise).
+- Idempotent: linking an already-linked task is a no-op.
+- Emits `RFC_TASK_LINKED`.
+
+### `agentctl rfc unlink-task <rfc-id> --task T-NNNN` (PR8g)
+
+- Counterpart to `link-task`. Idempotent.
+- Emits `RFC_TASK_UNLINKED`.
+
+### `agentctl rfc list [--status open|pre-decide|revising|accepted|rejected|superseded]` and `agentctl rfc show <rfc-id> [--no-mark-seen]`
+
+- Read-only.
+- `rfc show` side effect (PR8g): advances this role's per-RFC read
+  cursor to the latest comment, so a subsequent `plan` reports
+  `unreadComments: 0` for this RFC until new discussion arrives.
+  Pass `--no-mark-seen` (e.g. from a script) to inspect without
+  moving the cursor.
 
 ## Wait / idle keepalive
 

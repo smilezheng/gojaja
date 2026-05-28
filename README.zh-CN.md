@@ -307,6 +307,7 @@ agentctl rfc decide RFC-0001 --option A --rationale "Agreed. Proceed."
 | [docs/PROTOCOL.md](./docs/PROTOCOL.md) | 协议层契约——每个命令的语义、manifest 结构、ack 语义 |
 | [docs/HANDBOOK.md](./docs/HANDBOOK.md) | 判断规则：什么时候 worklog、什么时候 report、什么时候开 RFC，什么不该麻烦用户 |
 | [docs/SCHEMA.md](./docs/SCHEMA.md) | `.multi-agent/` 下每个文件是什么、谁会写 |
+| [docs/RFC.md](./docs/RFC.md) | RFC 机制端到端讲解：模型、状态机、磁盘布局、完整示例 |
 | [docs/DESIGN.md](./docs/DESIGN.md) | 设计为什么是现在这样 |
 | [docs/RELEASE.md](./docs/RELEASE.md) | 维护者发版操作手册 |
 | [CHANGELOG.md](./CHANGELOG.md) | 版本变更 |

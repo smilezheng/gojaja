@@ -117,19 +117,61 @@ Task board (any role that owns state/task_board.yaml):
 
 RFCs (cross-role decisions; any role can open, designated decider closes):
   rfc new <slug> --title <text> --deciders <r1,...>
+                 [--description <text>]
                  --options <A:summary,B:summary>
-                 [--voters <r1,...>] [--deadline <iso>]
+                 [--voters <r1,...>] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]
       --deciders is per-RFC; there is no role-level "default decider"
         flag. Pick roles whose owns overlap the decision, plus the
         role at the top of the relevant reportsTo chain.
+      --description is the context anyone-not-in-the-conversation
+        needs to weigh in. If empty the CLI prints a soft warning; in
+        a future release this will be hard-required.
+      --task links one or more existing task ids so voters/deciders
+        can pull context with 'agentctl task show <id>'.
+
   rfc comment <rfc-id> --rationale <text> [--option <opt>]
+                       [--reply-to <comment-id>]
+      Append a comment to the threaded ledger. Multiple comments per
+      role are preserved in order. --reply-to threads under another
+      comment by id (printed by 'rfc show'). During pre-decide, a
+      comment from anyone other than the pre-decider auto-reopens the
+      RFC; silence is consent.
+
+  rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>
+      Add a new option mid-discussion. Allowed in open or revising.
+
+  rfc pre-decide <rfc-id> --option <opt> --rationale <text>
+      Decider proposes an outcome and waits for objections. Voters
+      either stay silent (consent path) or comment (auto-reopens RFC).
+      Decider may then finalise with 'rfc decide'.
+
   rfc decide  <rfc-id> --option <opt> --rationale <text>
-      Calling decide/reject from a role not in the deciders list fails
-      with FORBIDDEN (exit 9), not USAGE — the handbook tells agents to
-      escalate FORBIDDEN, not retry it.
+      Final accept. Valid from open OR pre-decide. Calling decide/reject
+      from a role not in the deciders list fails with FORBIDDEN (exit 9),
+      not USAGE — the handbook tells agents to escalate FORBIDDEN.
+
   rfc reject  <rfc-id> --rationale <text>
-  rfc list    [--status open|accepted|rejected|superseded]
-  rfc show    <rfc-id>
+      Final reject. Valid from open / pre-decide / revising.
+
+  rfc revise  <rfc-id> --rationale <text>
+      Send back to creator for rewrite (decider-only). Status moves to
+      'revising'. Rationale tells the creator what to fix.
+
+  rfc edit    <rfc-id> --rationale <text> [--title T] [--description D]
+                       [--options A:summary,B:summary] [--deadline ISO]
+      Apply a rewrite while in 'revising'; status flips back to 'open'.
+      Allowed actors: original creator OR a decider. Comments are
+      preserved across revise -> edit cycles.
+
+  rfc link-task <rfc-id> --task T-NNNN
+  rfc unlink-task <rfc-id> --task T-NNNN
+      Attach / detach a task id post-creation. Idempotent.
+
+  rfc list    [--status open|pre-decide|revising|accepted|rejected|superseded]
+  rfc show    <rfc-id> [--no-mark-seen]
+      'show' updates this role's read marker for the RFC, so 'plan'
+      will report unreadComments=0 until new discussion arrives. Use
+      --no-mark-seen for read-only inspection (e.g. from a script).
 
 Shared-state editing (ownership-gated; --file must live under state/):
   state edit --file state/<path> [mode flags] [--json]

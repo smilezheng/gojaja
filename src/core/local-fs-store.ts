@@ -25,10 +25,12 @@ import {
   Paths,
   manifestPath,
   resolveInside,
-  rfcCommentPath,
+  rfcCommentsFile,
   rfcDecisionPath,
   rfcDir,
+  rfcLegacyCommentsDir,
   rfcProposalPath,
+  rfcReadCursorPath,
   rolePaths,
   waitSentinelPath,
   worklogEntryPath,
@@ -1368,6 +1370,8 @@ export class LocalFsStore implements Store {
     options: RfcOption[];
     deadline?: string | null;
     createdBy: RoleId | "SYSTEM";
+    description?: string;
+    relatedTasks?: string[];
   }): Promise<RfcProposal> {
     validateSlug(input.slug);
     const title = String(input.title ?? "").trim();
@@ -1389,6 +1393,23 @@ export class LocalFsStore implements Store {
     const deciders = input.deciders.map((r) => validateRoleId(r));
     if (deciders.length === 0) {
       throw new UsageError("RFC must have at least one decider.");
+    }
+    const description = String(input.description ?? "").trim();
+    const relatedTasks = (input.relatedTasks ?? []).map((t) => String(t).trim()).filter((t) => t.length > 0);
+    // Validate every related task id against the live task board so we
+    // never store a pointer to a non-existent task (catches typos at
+    // creation time).
+    if (relatedTasks.length > 0) {
+      const board = await this.readTaskBoard();
+      for (const tid of relatedTasks) {
+        if (!board.tasks[tid]) {
+          throw new UsageError(
+            `Related task '${tid}' is not on the board. Existing task ids: ${
+              Object.keys(board.tasks).sort().join(", ") || "(none)"
+            }.`,
+          );
+        }
+      }
     }
 
     return this.withLock("rfcs", async () => {
@@ -1437,9 +1458,18 @@ export class LocalFsStore implements Store {
         deadline: input.deadline ?? null,
         createdAt: new Date().toISOString(),
         createdBy: input.createdBy,
+        description,
+        relatedTasks,
       };
       const dir = this.abs(rfcDir(id, input.slug));
-      await fsp.mkdir(path.join(dir, "comments"), { recursive: true });
+      await fsp.mkdir(dir, { recursive: true });
+      // PR8g: comments live in a single threaded ledger now, not per-role
+      // JSONs. Seed an empty ledger so readers don't have to special-case
+      // a missing file.
+      await atomicWriteFile(
+        this.abs(rfcCommentsFile(id, input.slug)),
+        yaml.dump([], { lineWidth: 100, noRefs: true }),
+      );
       await atomicWriteFile(
         this.abs(rfcProposalPath(id, input.slug)),
         yaml.dump(proposal, { lineWidth: 100, noRefs: true }),
@@ -1460,6 +1490,7 @@ export class LocalFsStore implements Store {
     role: RoleId;
     preferred: string;
     rationale: string;
+    replyTo?: string | null;
   }): Promise<RfcComment> {
     validateRoleId(input.role);
     const preferred = String(input.preferred ?? "").trim();
@@ -1467,10 +1498,17 @@ export class LocalFsStore implements Store {
     if (rationale.length === 0) {
       throw new UsageError("RFC comment rationale must be non-empty.");
     }
+    const replyTo =
+      input.replyTo === undefined || input.replyTo === null
+        ? null
+        : String(input.replyTo).trim();
 
     return this.withLock(`rfc-${input.rfcId}`, async () => {
-      const { proposal } = await this.readRfcUnchecked(input.rfcId);
-      if (proposal.status !== "open") {
+      const { proposal, comments } = await this.readRfcUnchecked(input.rfcId);
+      // PR8g: comments are allowed in `open` AND `pre-decide`. In
+      // `pre-decide`, a comment from anyone other than the
+      // pre-decider auto-reopens the RFC (see end of this method).
+      if (proposal.status !== "open" && proposal.status !== "pre-decide") {
         throw new UsageError(
           `RFC ${input.rfcId} is ${proposal.status}; cannot comment on a closed RFC.`,
         );
@@ -1480,24 +1518,79 @@ export class LocalFsStore implements Store {
           `RFC ${input.rfcId} has no option '${preferred}'. Options: ${proposal.options.map((o) => o.id).join(", ")}.`,
         );
       }
+      if (replyTo !== null) {
+        if (!comments.find((c) => c.id === replyTo)) {
+          throw new UsageError(
+            `replyTo target '${replyTo}' is not a comment on ${input.rfcId}.`,
+          );
+        }
+      }
       const comment: RfcComment = {
+        id: newId(),
         rfcId: proposal.id,
         role: input.role,
         ts: new Date().toISOString(),
         preferred,
+        replyTo,
         rationale,
       };
-      await atomicWriteJson(
-        this.abs(rfcCommentPath(proposal.id, proposal.slug, input.role)),
-        comment,
+      const nextLedger = [...comments, comment];
+      await atomicWriteFile(
+        this.abs(rfcCommentsFile(proposal.id, proposal.slug)),
+        yaml.dump(nextLedger, { lineWidth: 100, noRefs: true }),
       );
       await this.recordEventInternal({
         type: "RFC_COMMENT",
         from: input.role,
         to: "*",
         ref: proposal.id,
-        payload: { rfcId: proposal.id, role: input.role, preferred, rationale },
+        payload: {
+          rfcId: proposal.id,
+          role: input.role,
+          preferred,
+          rationale,
+          commentId: comment.id,
+          replyTo,
+        },
       });
+      // PR8g: the commenter has by definition seen everything up to
+      // and including their own comment. Advance their read cursor so
+      // they don't appear in their own manifest as having "unread
+      // discussion" right after they spoke.
+      const cursorTarget = this.abs(rfcReadCursorPath(input.role, proposal.id));
+      await fsp.mkdir(path.dirname(cursorTarget), { recursive: true });
+      await atomicWriteJson(cursorTarget, { lastSeenCommentId: comment.id });
+      // PR8g auto-reopen rule: any comment during pre-decide from a
+      // role OTHER than the pre-decider flips status back to open.
+      // The pre-decider themselves can keep adding reasoning to their
+      // own pending round without aborting it. Silent acknowledgement
+      // is the "consent" path.
+      if (
+        proposal.status === "pre-decide" &&
+        proposal.preDecision !== undefined &&
+        input.role !== proposal.preDecision.decidedBy
+      ) {
+        const reopened: RfcProposal = {
+          ...proposal,
+          status: "open",
+          preDecision: undefined,
+        };
+        await atomicWriteFile(
+          this.abs(rfcProposalPath(proposal.id, proposal.slug)),
+          yaml.dump(reopened, { lineWidth: 100, noRefs: true }),
+        );
+        await this.recordEventInternal({
+          type: "RFC_PRE_DECISION_OBJECTED",
+          from: input.role,
+          to: "*",
+          ref: proposal.id,
+          payload: {
+            rfcId: proposal.id,
+            triggeringCommentId: comment.id,
+            by: input.role,
+          },
+        });
+      }
       return comment;
     });
   }
@@ -1546,9 +1639,17 @@ export class LocalFsStore implements Store {
 
     return this.withLock(`rfc-${args.rfcId}`, async () => {
       const { proposal } = await this.readRfcUnchecked(args.rfcId);
-      if (proposal.status !== "open") {
+      // PR8g: decide/reject are valid from open OR pre-decide.
+      // reject is additionally valid from revising (you can give up on
+      // the topic entirely instead of waiting for a rewrite). decide
+      // from revising is refused — the proposal text is in flux.
+      const okStarts: RfcStatus[] =
+        args.outcome === "accepted"
+          ? ["open", "pre-decide"]
+          : ["open", "pre-decide", "revising"];
+      if (!okStarts.includes(proposal.status)) {
         throw new UsageError(
-          `RFC ${args.rfcId} is already ${proposal.status}; cannot finalise again.`,
+          `RFC ${args.rfcId} is ${proposal.status}; cannot ${args.outcome === "accepted" ? "decide" : "reject"} from this state.`,
         );
       }
       if (!proposal.deciders.includes(args.decidedBy)) {
@@ -1585,6 +1686,9 @@ export class LocalFsStore implements Store {
       const updatedProposal: RfcProposal = {
         ...proposal,
         status: args.outcome === "accepted" ? "accepted" : "rejected",
+        // Clear pending pre-decision (if any) since terminal status
+        // overrides it.
+        preDecision: undefined,
       };
       await atomicWriteFile(
         this.abs(rfcProposalPath(proposal.id, proposal.slug)),
@@ -1605,6 +1709,419 @@ export class LocalFsStore implements Store {
       });
       return decision;
     });
+  }
+
+  // ---- PR8g: RFC v2 state transitions ------------------------------------
+
+  async addRfcOption(input: {
+    rfcId: string;
+    actor: RoleId;
+    optionId: string;
+    summary: string;
+    rationale: string;
+  }): Promise<RfcOption> {
+    validateRoleId(input.actor);
+    const optionId = String(input.optionId ?? "").trim();
+    if (optionId.length === 0) {
+      throw new UsageError("Option id must be non-empty.");
+    }
+    const summary = String(input.summary ?? "").trim();
+    if (summary.length === 0) {
+      throw new UsageError("Option summary must be non-empty.");
+    }
+    const rationale = String(input.rationale ?? "").trim();
+    if (rationale.length === 0) {
+      throw new UsageError(
+        "add-option rationale must be non-empty (tells voters why this option is being introduced now).",
+      );
+    }
+
+    return this.withLock(`rfc-${input.rfcId}`, async () => {
+      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      // PR8g: options may only be added while the proposal is mutable.
+      // Adding mid pre-decide would invalidate the round (silently
+      // changing what voters were asked to ACK); the path is "comment to
+      // reopen, then add". Adding after terminal is meaningless.
+      if (proposal.status !== "open" && proposal.status !== "revising") {
+        throw new UsageError(
+          `Cannot add an option to ${input.rfcId} in state ${proposal.status}. ` +
+            `Options may be added only in 'open' or 'revising'.`,
+        );
+      }
+      if (proposal.options.find((o) => o.id === optionId)) {
+        throw new UsageError(
+          `Option id '${optionId}' already exists in ${input.rfcId}.`,
+        );
+      }
+      const newOption: RfcOption = { id: optionId, summary };
+      const updatedProposal: RfcProposal = {
+        ...proposal,
+        options: [...proposal.options, newOption],
+      };
+      await atomicWriteFile(
+        this.abs(rfcProposalPath(proposal.id, proposal.slug)),
+        yaml.dump(updatedProposal, { lineWidth: 100, noRefs: true }),
+      );
+      await this.recordEventInternal({
+        type: "RFC_OPTION_ADDED",
+        from: input.actor,
+        to: "*",
+        ref: proposal.id,
+        payload: {
+          rfcId: proposal.id,
+          optionId,
+          summary,
+          addedBy: input.actor,
+          rationale,
+        },
+      });
+      return newOption;
+    });
+  }
+
+  async preDecideRfc(input: {
+    rfcId: string;
+    decidedBy: RoleId;
+    chosenOption: string;
+    rationale: string;
+  }): Promise<RfcProposal> {
+    validateRoleId(input.decidedBy);
+    const chosenOption = String(input.chosenOption ?? "").trim();
+    const rationale = String(input.rationale ?? "").trim();
+    if (chosenOption.length === 0) {
+      throw new UsageError("pre-decide requires a non-empty --option.");
+    }
+    if (rationale.length === 0) {
+      throw new UsageError("pre-decide rationale must be non-empty.");
+    }
+
+    return this.withLock(`rfc-${input.rfcId}`, async () => {
+      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      if (proposal.status !== "open") {
+        throw new UsageError(
+          `Cannot pre-decide ${input.rfcId} in state ${proposal.status}; ` +
+            `pre-decide is only valid from 'open'.`,
+        );
+      }
+      if (!proposal.deciders.includes(input.decidedBy)) {
+        throw new ForbiddenError(
+          `Role '${input.decidedBy}' is not in deciders for ${input.rfcId} (deciders: ${proposal.deciders.join(", ") || "(none)"}).`,
+        );
+      }
+      if (!proposal.options.find((o) => o.id === chosenOption)) {
+        throw new UsageError(
+          `Option '${chosenOption}' is not in RFC ${input.rfcId}. Options: ${proposal.options.map((o) => o.id).join(", ")}.`,
+        );
+      }
+      const now = new Date().toISOString();
+      const updated: RfcProposal = {
+        ...proposal,
+        status: "pre-decide",
+        preDecision: {
+          decidedBy: input.decidedBy,
+          chosenOption,
+          ts: now,
+          rationale,
+        },
+      };
+      await atomicWriteFile(
+        this.abs(rfcProposalPath(proposal.id, proposal.slug)),
+        yaml.dump(updated, { lineWidth: 100, noRefs: true }),
+      );
+      await this.recordEventInternal({
+        type: "RFC_PRE_DECISION",
+        from: input.decidedBy,
+        to: "*",
+        ref: proposal.id,
+        payload: {
+          rfcId: proposal.id,
+          decidedBy: input.decidedBy,
+          chosenOption,
+          rationale,
+        },
+      });
+      return updated;
+    });
+  }
+
+  async reviseRfc(input: {
+    rfcId: string;
+    decidedBy: RoleId;
+    rationale: string;
+  }): Promise<RfcProposal> {
+    validateRoleId(input.decidedBy);
+    const rationale = String(input.rationale ?? "").trim();
+    if (rationale.length === 0) {
+      throw new UsageError(
+        "revise rationale must be non-empty (tells the creator what to fix).",
+      );
+    }
+
+    return this.withLock(`rfc-${input.rfcId}`, async () => {
+      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      if (proposal.status !== "open" && proposal.status !== "pre-decide") {
+        throw new UsageError(
+          `Cannot revise ${input.rfcId} in state ${proposal.status}; ` +
+            `revise is only valid from 'open' or 'pre-decide'.`,
+        );
+      }
+      if (!proposal.deciders.includes(input.decidedBy)) {
+        throw new ForbiddenError(
+          `Role '${input.decidedBy}' is not in deciders for ${input.rfcId} (deciders: ${proposal.deciders.join(", ") || "(none)"}).`,
+        );
+      }
+      const updated: RfcProposal = {
+        ...proposal,
+        status: "revising",
+        preDecision: undefined,
+      };
+      await atomicWriteFile(
+        this.abs(rfcProposalPath(proposal.id, proposal.slug)),
+        yaml.dump(updated, { lineWidth: 100, noRefs: true }),
+      );
+      await this.recordEventInternal({
+        type: "RFC_REVISION_REQUESTED",
+        from: input.decidedBy,
+        to: "*",
+        ref: proposal.id,
+        payload: {
+          rfcId: proposal.id,
+          requestedBy: input.decidedBy,
+          rationale,
+        },
+      });
+      return updated;
+    });
+  }
+
+  async editRfc(input: {
+    rfcId: string;
+    actor: RoleId;
+    rationale: string;
+    title?: string;
+    description?: string;
+    options?: RfcOption[];
+    deadline?: string | null;
+  }): Promise<RfcProposal> {
+    validateRoleId(input.actor);
+    const rationale = String(input.rationale ?? "").trim();
+    if (rationale.length === 0) {
+      throw new UsageError(
+        "edit rationale must be non-empty (summarise what changed).",
+      );
+    }
+    const hasAny =
+      input.title !== undefined ||
+      input.description !== undefined ||
+      input.options !== undefined ||
+      input.deadline !== undefined;
+    if (!hasAny) {
+      throw new UsageError(
+        "edit needs at least one of --title / --description / --options / --deadline.",
+      );
+    }
+
+    return this.withLock(`rfc-${input.rfcId}`, async () => {
+      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      if (proposal.status !== "revising") {
+        throw new UsageError(
+          `Cannot edit ${input.rfcId} in state ${proposal.status}; ` +
+            `edit is only valid from 'revising' (use 'rfc revise' first).`,
+        );
+      }
+      // Creator OR decider can rewrite. Voters provide opinions, not
+      // rewrite specs.
+      const isCreator = proposal.createdBy === input.actor;
+      const isDecider = proposal.deciders.includes(input.actor);
+      if (!isCreator && !isDecider) {
+        throw new ForbiddenError(
+          `Role '${input.actor}' may not edit ${input.rfcId}. Allowed: createdBy '${proposal.createdBy}' or deciders ${proposal.deciders.join(", ") || "(none)"}.`,
+        );
+      }
+
+      const changed: Array<"title" | "description" | "options" | "deadline"> = [];
+      const next: RfcProposal = { ...proposal };
+
+      if (input.title !== undefined) {
+        const t = String(input.title).trim();
+        if (t.length === 0) {
+          throw new UsageError("edit --title must be non-empty.");
+        }
+        next.title = t;
+        changed.push("title");
+      }
+      if (input.description !== undefined) {
+        next.description = String(input.description).trim();
+        changed.push("description");
+      }
+      if (input.options !== undefined) {
+        if (!Array.isArray(input.options) || input.options.length < 1) {
+          throw new UsageError("edit --options must have at least one option.");
+        }
+        const ids = new Set<string>();
+        for (const o of input.options) {
+          if (!o.id || typeof o.id !== "string") {
+            throw new UsageError("Each edited option needs a non-empty id.");
+          }
+          if (ids.has(o.id)) {
+            throw new UsageError(`Duplicate option id '${o.id}' in edit.`);
+          }
+          ids.add(o.id);
+        }
+        next.options = input.options.map((o) => ({
+          id: o.id,
+          summary: o.summary ?? "",
+        }));
+        changed.push("options");
+      }
+      if (input.deadline !== undefined) {
+        next.deadline = input.deadline;
+        changed.push("deadline");
+      }
+
+      // Status flips back to open; comments preserved untouched.
+      next.status = "open";
+      next.preDecision = undefined;
+
+      await atomicWriteFile(
+        this.abs(rfcProposalPath(proposal.id, proposal.slug)),
+        yaml.dump(next, { lineWidth: 100, noRefs: true }),
+      );
+      await this.recordEventInternal({
+        type: "RFC_REVISED",
+        from: input.actor,
+        to: "*",
+        ref: proposal.id,
+        payload: {
+          rfcId: proposal.id,
+          revisedBy: input.actor,
+          rationale,
+          changed,
+        },
+      });
+      return next;
+    });
+  }
+
+  async linkTaskToRfc(input: {
+    rfcId: string;
+    actor: RoleId;
+    taskId: string;
+  }): Promise<RfcProposal> {
+    validateRoleId(input.actor);
+    const taskId = String(input.taskId ?? "").trim();
+    if (taskId.length === 0) {
+      throw new UsageError("link-task requires a non-empty --task.");
+    }
+    // Validate the task exists; better to fail at link time than at
+    // read time. PR8g.
+    const board = await this.readTaskBoard();
+    if (!board.tasks[taskId]) {
+      throw new UsageError(
+        `Task '${taskId}' is not on the board. Existing ids: ${
+          Object.keys(board.tasks).sort().join(", ") || "(none)"
+        }.`,
+      );
+    }
+    return this.withLock(`rfc-${input.rfcId}`, async () => {
+      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      if (
+        proposal.status === "accepted" ||
+        proposal.status === "rejected" ||
+        proposal.status === "superseded"
+      ) {
+        throw new UsageError(
+          `Cannot edit task links on ${input.rfcId} in terminal state ${proposal.status}.`,
+        );
+      }
+      // Idempotent: linking an already-linked task returns unchanged.
+      if (proposal.relatedTasks.includes(taskId)) return proposal;
+      const updated: RfcProposal = {
+        ...proposal,
+        relatedTasks: [...proposal.relatedTasks, taskId],
+      };
+      await atomicWriteFile(
+        this.abs(rfcProposalPath(proposal.id, proposal.slug)),
+        yaml.dump(updated, { lineWidth: 100, noRefs: true }),
+      );
+      await this.recordEventInternal({
+        type: "RFC_TASK_LINKED",
+        from: input.actor,
+        to: "*",
+        ref: proposal.id,
+        payload: { rfcId: proposal.id, taskId, by: input.actor },
+      });
+      return updated;
+    });
+  }
+
+  async unlinkTaskFromRfc(input: {
+    rfcId: string;
+    actor: RoleId;
+    taskId: string;
+  }): Promise<RfcProposal> {
+    validateRoleId(input.actor);
+    const taskId = String(input.taskId ?? "").trim();
+    if (taskId.length === 0) {
+      throw new UsageError("unlink-task requires a non-empty --task.");
+    }
+    return this.withLock(`rfc-${input.rfcId}`, async () => {
+      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      if (
+        proposal.status === "accepted" ||
+        proposal.status === "rejected" ||
+        proposal.status === "superseded"
+      ) {
+        throw new UsageError(
+          `Cannot edit task links on ${input.rfcId} in terminal state ${proposal.status}.`,
+        );
+      }
+      if (!proposal.relatedTasks.includes(taskId)) return proposal;
+      const updated: RfcProposal = {
+        ...proposal,
+        relatedTasks: proposal.relatedTasks.filter((t) => t !== taskId),
+      };
+      await atomicWriteFile(
+        this.abs(rfcProposalPath(proposal.id, proposal.slug)),
+        yaml.dump(updated, { lineWidth: 100, noRefs: true }),
+      );
+      await this.recordEventInternal({
+        type: "RFC_TASK_UNLINKED",
+        from: input.actor,
+        to: "*",
+        ref: proposal.id,
+        payload: { rfcId: proposal.id, taskId, by: input.actor },
+      });
+      return updated;
+    });
+  }
+
+  async markRfcSeen(input: {
+    role: RoleId;
+    rfcId: string;
+  }): Promise<{ lastSeenCommentId: string | null }> {
+    validateRoleId(input.role);
+    if (!/^RFC-\d{4,}$/.test(input.rfcId)) {
+      throw new UsageError(`Invalid RFC id '${input.rfcId}'.`);
+    }
+    // Pure metadata write per role; no rfc-<id> lock needed (the
+    // cursor file is per-role, no contention with other roles).
+    const { comments } = await this.readRfcUnchecked(input.rfcId);
+    const lastSeenCommentId =
+      comments.length > 0 ? comments[comments.length - 1].id : null;
+    const target = this.abs(rfcReadCursorPath(input.role, input.rfcId));
+    await fsp.mkdir(path.dirname(target), { recursive: true });
+    await atomicWriteJson(target, { lastSeenCommentId });
+    return { lastSeenCommentId };
+  }
+
+  private async readRfcSeenCursor(
+    role: RoleId,
+    rfcId: string,
+  ): Promise<string | null> {
+    const target = this.abs(rfcReadCursorPath(role, rfcId));
+    const parsed = await readJsonFileOrNull<{ lastSeenCommentId: string | null }>(target);
+    return parsed?.lastSeenCommentId ?? null;
   }
 
   async readRfc(rfcId: string): Promise<{
@@ -1706,18 +2223,57 @@ export class LocalFsStore implements Store {
         `proposal.yaml for ${rfcId} is not valid YAML: ${(err as Error).message}`,
       );
     }
-    const commentsDir = this.abs(path.posix.join(rfcDir(rfcId, slug), "comments"));
-    const comments: RfcComment[] = [];
-    try {
-      const names = await fsp.readdir(commentsDir);
-      for (const n of names) {
-        if (!n.endsWith(".json") || n.startsWith(".")) continue;
-        const c = await readJsonFileOrNull<RfcComment>(path.join(commentsDir, n));
-        if (c) comments.push(c);
+    // PR8g back-compat: detect the old per-role comments directory and
+    // refuse to proceed silently. Alpha-stage hard cut; the user must
+    // migrate by hand or `agentctl init` a fresh project. We deliberately
+    // do NOT auto-migrate: comment timestamps + threading would need to
+    // be synthesised and that risks silently destroying audit detail.
+    const legacyDir = this.abs(rfcLegacyCommentsDir(rfcId, slug));
+    if (await exists(legacyDir)) {
+      // Only error if the legacy dir contains role JSONs; an empty
+      // `comments/` directory left over from `mkdir -p` is harmless.
+      try {
+        const legacyNames = await fsp.readdir(legacyDir);
+        const legacyJsons = legacyNames.filter(
+          (n) => n.endsWith(".json") && !n.startsWith("."),
+        );
+        if (legacyJsons.length > 0) {
+          throw new UsageError(
+            `RFC ${rfcId} has a pre-PR8g comments layout at ` +
+              `${rfcLegacyCommentsDir(rfcId, slug)}/ (per-role JSON files). ` +
+              `PR8g uses a single threaded ledger at ${rfcCommentsFile(rfcId, slug)}. ` +
+              `Migrate by hand (no auto-migrator) or open a fresh project with ` +
+              `\`agentctl init\`. See CHANGELOG 2.0.0-alpha.15 for the new shape.`,
+          );
+        }
+      } catch (err) {
+        // Re-throw the UsageError we just raised; swallow other errors
+        // (e.g. directory disappeared between exists and readdir).
+        if (err instanceof UsageError) throw err;
       }
-      comments.sort((a, b) => a.ts.localeCompare(b.ts));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    // PR8g comments ledger.
+    let comments: RfcComment[] = [];
+    const commentsFile = this.abs(rfcCommentsFile(rfcId, slug));
+    if (await exists(commentsFile)) {
+      const ledgerRaw = await fsp.readFile(commentsFile, "utf8");
+      try {
+        const parsed = yaml.load(ledgerRaw);
+        if (parsed === null || parsed === undefined) {
+          comments = [];
+        } else if (!Array.isArray(parsed)) {
+          throw new StateCorruptionError(
+            `comments.yaml for ${rfcId} is not a YAML list.`,
+          );
+        } else {
+          comments = parsed as RfcComment[];
+        }
+      } catch (err) {
+        if (err instanceof StateCorruptionError) throw err;
+        throw new StateCorruptionError(
+          `comments.yaml for ${rfcId} is not valid YAML: ${(err as Error).message}`,
+        );
+      }
     }
     const decision = await readJsonFileOrNull<RfcDecision>(
       this.abs(rfcDecisionPath(rfcId, slug)),
@@ -1766,24 +2322,83 @@ export class LocalFsStore implements Store {
   }
 
   private async rfcSummariesForRole(role: RoleId): Promise<RfcSummary[]> {
-    const open = await this.listRfcs({ status: "open" });
+    // PR8g visibility rules. Active = open / pre-decide / revising
+    // (was just "open" pre-PR8g). The per-state rules below reflect
+    // the docs/RFC.md "Manifest filter" section.
+    const active: RfcProposal[] = [
+      ...(await this.listRfcs({ status: "open" })),
+      ...(await this.listRfcs({ status: "pre-decide" })),
+      ...(await this.listRfcs({ status: "revising" })),
+    ];
     const out: RfcSummary[] = [];
-    for (const p of open) {
+    for (const p of active) {
       const isDecider = p.deciders.includes(role);
       const isVoter = p.voters.includes(role);
-      if (!isDecider && !isVoter) continue;
-      let commented = false;
-      const commentFile = this.abs(rfcCommentPath(p.id, p.slug, role));
-      if (await exists(commentFile)) commented = true;
-      // Voters whose comment is already on file fall out of the action list.
-      if (isVoter && !isDecider && commented) continue;
-      out.push({
+      const isCreator = p.createdBy === role;
+      if (!isDecider && !isVoter && !isCreator) continue;
+      // Read the comments ledger once per RFC; both `commented` and
+      // `unreadComments` derive from it.
+      const { comments } = await this.readRfcUnchecked(p.id);
+      const myComments = comments.filter((c) => c.role === role);
+      const commented = myComments.length > 0;
+      const lastSeen = await this.readRfcSeenCursor(role, p.id);
+      const unreadComments = lastSeen
+        ? comments.findIndex((c) => c.id === lastSeen) === -1
+          ? comments.length
+          : comments.length - (comments.findIndex((c) => c.id === lastSeen) + 1)
+        : comments.length;
+
+      // PR8g per-status filtering rules.
+      switch (p.status) {
+        case "open": {
+          // Voter who has already commented and is NOT a decider falls
+          // out of the action list — they have spoken. Voter who has
+          // new (unread) comments by others stays — there's new
+          // discussion to react to. Decider always stays.
+          if (isVoter && !isDecider && commented && unreadComments === 0) continue;
+          break;
+        }
+        case "pre-decide": {
+          // Decider always stays (waiting for objections / can finalise).
+          // Voter stays unless they have already commented AFTER the
+          // pre-decision was posted (silent consent path: commenting
+          // would have auto-reopened).
+          if (isVoter && !isDecider) {
+            const preDecisionTs = p.preDecision?.ts ?? "";
+            const commentedAfterPreDecide = myComments.some((c) => c.ts > preDecisionTs);
+            if (commentedAfterPreDecide) continue;
+          }
+          break;
+        }
+        case "revising": {
+          // Only the creator (rewriter) and deciders need this on their
+          // dashboard. Other voters can wait until it re-opens.
+          if (!isCreator && !isDecider) continue;
+          break;
+        }
+        default:
+          continue;
+      }
+
+      const summary: RfcSummary = {
         id: p.id,
         title: p.title,
         status: p.status,
+        // Prefer decider role label when both apply (decider work
+        // outranks voter work).
         role: isDecider ? "decider" : "voter",
         commented,
-      });
+        unreadComments,
+        relatedTasks: p.relatedTasks,
+      };
+      if (p.status === "pre-decide" && p.preDecision !== undefined) {
+        summary.pendingPreDecision = {
+          decidedBy: p.preDecision.decidedBy,
+          chosenOption: p.preDecision.chosenOption,
+          ts: p.preDecision.ts,
+        };
+      }
+      out.push(summary);
     }
     return out;
   }

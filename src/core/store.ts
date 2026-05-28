@@ -287,6 +287,10 @@ export interface Store {
     options: RfcOption[];
     deadline?: string | null;
     createdBy: RoleId | "SYSTEM";
+    /** PR8g: free-form context. Optional in PR8g (warned if empty). */
+    description?: string;
+    /** PR8g: linked task ids. Validated against task board. */
+    relatedTasks?: string[];
   }): Promise<RfcProposal>;
 
   /**
@@ -295,12 +299,56 @@ export interface Store {
    * require the role to be in the voters list — non-voters may comment,
    * since real teams often add cross-cutting context.
    */
+  /**
+   * Append a comment to the RFC's `comments.yaml` ledger.
+   *
+   * PR8g semantics (changed from PR8f):
+   * - Append-only; multiple comments per role are preserved in order.
+   * - `replyTo` ties the comment to either the RFC root (`null`) or
+   *   another comment by id.
+   * - If RFC status is `pre-decide` AND the commenter is NOT the role
+   *   that posted the pending pre-decision, the status auto-reopens
+   *   to `open` and an `RFC_PRE_DECISION_OBJECTED` event is emitted
+   *   alongside the regular `RFC_COMMENT` event. The pre-decider
+   *   themselves may comment without triggering the auto-reopen
+   *   (lets them add reasoning to their own pending round).
+   */
   commentRfc(input: {
     rfcId: string;
     role: RoleId;
     preferred: string;
     rationale: string;
+    replyTo?: string | null;
   }): Promise<RfcComment>;
+
+  /**
+   * PR8g: add a new option to an open or revising RFC. Any role with a
+   * session may add (the discussion is collaborative). Refused once the
+   * RFC has moved to `pre-decide`, `accepted`, `rejected`, or
+   * `superseded` — adding an option mid-pre-decision would invalidate
+   * the round; reopen first by commenting.
+   */
+  addRfcOption(input: {
+    rfcId: string;
+    actor: RoleId;
+    optionId: string;
+    summary: string;
+    rationale: string;
+  }): Promise<RfcOption>;
+
+  /**
+   * PR8g: post a pre-decision. Decider gate (FORBIDDEN otherwise).
+   * Status flips to `pre-decide`; the proposal's `preDecision` field
+   * carries the proposal. Voters/deciders can then either stay silent
+   * (silent ACK) or comment to object — comments by anyone other than
+   * the pre-decider auto-reopen the RFC (see `commentRfc`).
+   */
+  preDecideRfc(input: {
+    rfcId: string;
+    decidedBy: RoleId;
+    chosenOption: string;
+    rationale: string;
+  }): Promise<RfcProposal>;
 
   /**
    * Decide an RFC (accept with a chosen option). The caller's role must
@@ -322,6 +370,63 @@ export interface Store {
     decidedBy: RoleId;
     rationale: string;
   }): Promise<RfcDecision>;
+
+  /**
+   * PR8g: kick an RFC back to the creator for rewrite. Decider gate.
+   * Status moves to `revising`; the rationale is captured in the
+   * `RFC_REVISION_REQUESTED` event and tells the creator what to fix.
+   * `editRfc` re-opens it.
+   */
+  reviseRfc(input: {
+    rfcId: string;
+    decidedBy: RoleId;
+    rationale: string;
+  }): Promise<RfcProposal>;
+
+  /**
+   * PR8g: update an RFC in `revising` state and re-open it. The actor
+   * must be either the original creator OR a decider. At least one of
+   * `title` / `description` / `options` / `deadline` must be provided.
+   * Comments are preserved across the revise → edit cycle.
+   */
+  editRfc(input: {
+    rfcId: string;
+    actor: RoleId;
+    rationale: string;
+    title?: string;
+    description?: string;
+    options?: RfcOption[];
+    deadline?: string | null;
+  }): Promise<RfcProposal>;
+
+  /**
+   * PR8g: attach a task id to the RFC's `relatedTasks` list. The task
+   * must exist in `state/task_board.yaml`. Idempotent — adding an
+   * already-linked id is a no-op (still returns the proposal).
+   */
+  linkTaskToRfc(input: {
+    rfcId: string;
+    actor: RoleId;
+    taskId: string;
+  }): Promise<RfcProposal>;
+
+  /** PR8g: counterpart to `linkTaskToRfc`. Idempotent. */
+  unlinkTaskFromRfc(input: {
+    rfcId: string;
+    actor: RoleId;
+    taskId: string;
+  }): Promise<RfcProposal>;
+
+  /**
+   * PR8g: mark this role as having seen all comments up to the
+   * latest one on this RFC at the time of call. Updates the
+   * per-role-per-RFC cursor used by `manifest.rfcs[*].unreadComments`.
+   * Idempotent.
+   */
+  markRfcSeen(input: {
+    role: RoleId;
+    rfcId: string;
+  }): Promise<{ lastSeenCommentId: string | null }>;
 
   /** Read a proposal + (optionally) its comments and decision. */
   readRfc(rfcId: string): Promise<{

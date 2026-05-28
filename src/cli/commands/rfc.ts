@@ -2,7 +2,7 @@ import { boolFlag, optionalString, requireString, type ParsedArgs } from "../arg
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveActor, resolveIdentity } from "../identity";
-import type { RoleId } from "../../core/types";
+import type { RfcComment, RoleId } from "../../core/types";
 
 function splitList(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -41,10 +41,13 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
   const slug = args.positional[1];
   if (!slug) {
     throw new UsageError(
-      "Usage: agentctl rfc new <slug> --title <text> --deciders <r1,r2> [--voters <r1,r2,...>] [--options A:summary,B:summary] [--deadline <iso>]",
+      "Usage: agentctl rfc new <slug> --title <text> --deciders <r1,r2> " +
+        "[--description <text>] [--voters <r1,r2,...>] " +
+        "[--options A:summary,B:summary] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]",
     );
   }
   const title = requireString(args.flags, "title");
+  const description = optionalString(args.flags, "description") ?? "";
   const voters = splitList(optionalString(args.flags, "voters"));
   const deciders = splitList(optionalString(args.flags, "deciders"));
   if (deciders.length === 0) {
@@ -56,22 +59,36 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
       "Specify at least one option with --options <id>[:summary][,<id>[:summary]...].",
     );
   }
+  const relatedTasks = splitList(optionalString(args.flags, "task"));
   const deadline = optionalString(args.flags, "deadline") ?? null;
   const json = boolFlag(args.flags, "json");
   const { root, actor } = await actorRole(args);
   const store = await openStoreOrThrow(root);
   const proposal = await store.createRfc({
-    slug, title, voters, deciders, options, deadline, createdBy: actor,
+    slug, title, voters, deciders, options, deadline,
+    createdBy: actor, description, relatedTasks,
   });
   if (json) {
     process.stdout.write(JSON.stringify({ status: "created", proposal }) + "\n");
   } else {
     process.stdout.write(
       `Created ${proposal.id} (${proposal.status}): ${proposal.title}\n` +
-        `  voters:   ${proposal.voters.join(", ") || "(none)"}\n` +
-        `  deciders: ${proposal.deciders.join(", ")}\n` +
-        `  options:  ${proposal.options.map((o) => o.id).join(", ")}\n`,
+        `  voters:        ${proposal.voters.join(", ") || "(none)"}\n` +
+        `  deciders:      ${proposal.deciders.join(", ")}\n` +
+        `  options:       ${proposal.options.map((o) => o.id).join(", ")}\n` +
+        `  relatedTasks:  ${proposal.relatedTasks.join(", ") || "(none)"}\n`,
     );
+    if (proposal.description.length === 0) {
+      // PR8g: soft warning. Description is the channel where the
+      // creator gives non-participants enough context to weigh in.
+      // Hardening to required is planned for PR8h.
+      process.stdout.write(
+        `\nHint: this RFC has no --description. Voters and deciders read this\n` +
+          `field for context; without it they may have to revise the RFC back\n` +
+          `to you for a fuller writeup. Add one with 'agentctl rfc edit ${proposal.id}\n` +
+          `--description "..." --rationale "fill in context"' after 'rfc revise'.\n`,
+      );
+    }
   }
   return 0;
 }
@@ -79,22 +96,86 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
 async function runRfcComment(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
-    throw new UsageError("Usage: agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>]");
+    throw new UsageError(
+      "Usage: agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]",
+    );
   }
   const preferred = optionalString(args.flags, "option") ?? "";
+  const rationale = requireString(args.flags, "rationale");
+  const replyTo = optionalString(args.flags, "reply-to") ?? null;
+  const json = boolFlag(args.flags, "json");
+  const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
+  const store = await openStoreOrThrow(root);
+  const { role } = await resolveIdentity(store, { requireSession: true });
+  const comment = await store.commentRfc({ rfcId, role, preferred, rationale, replyTo });
+  if (json) {
+    process.stdout.write(JSON.stringify({ status: "commented", comment }) + "\n");
+  } else {
+    process.stdout.write(
+      `Recorded comment ${comment.id} from ${role} on ${rfcId}` +
+        (preferred ? ` (prefers ${preferred})` : "") +
+        (replyTo ? ` (reply to ${replyTo})` : "") +
+        ".\n",
+    );
+  }
+  return 0;
+}
+
+async function runRfcAddOption(args: ParsedArgs): Promise<number> {
+  const rfcId = args.positional[1];
+  if (!rfcId) {
+    throw new UsageError(
+      "Usage: agentctl rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>",
+    );
+  }
+  const optionRaw = requireString(args.flags, "option");
+  const rationale = requireString(args.flags, "rationale");
+  const parsed = parseOptions(optionRaw);
+  if (parsed.length !== 1) {
+    throw new UsageError("--option must be a single <id>:<summary> entry.");
+  }
+  const json = boolFlag(args.flags, "json");
+  const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
+  const store = await openStoreOrThrow(root);
+  const { role } = await resolveIdentity(store, { requireSession: true });
+  const option = await store.addRfcOption({
+    rfcId,
+    actor: role,
+    optionId: parsed[0].id,
+    summary: parsed[0].summary,
+    rationale,
+  });
+  if (json) {
+    process.stdout.write(JSON.stringify({ status: "option-added", option }) + "\n");
+  } else {
+    process.stdout.write(`Added option '${option.id}' to ${rfcId} by ${role}.\n`);
+  }
+  return 0;
+}
+
+async function runRfcPreDecide(args: ParsedArgs): Promise<number> {
+  const rfcId = args.positional[1];
+  if (!rfcId) {
+    throw new UsageError(
+      "Usage: agentctl rfc pre-decide <rfc-id> --option <opt> --rationale <text>",
+    );
+  }
+  const chosenOption = requireString(args.flags, "option");
   const rationale = requireString(args.flags, "rationale");
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
   const { role } = await resolveIdentity(store, { requireSession: true });
-  const comment = await store.commentRfc({ rfcId, role, preferred, rationale });
+  const proposal = await store.preDecideRfc({
+    rfcId, decidedBy: role, chosenOption, rationale,
+  });
   if (json) {
-    process.stdout.write(JSON.stringify({ status: "commented", comment }) + "\n");
+    process.stdout.write(JSON.stringify({ status: "pre-decided", proposal }) + "\n");
   } else {
     process.stdout.write(
-      `Recorded comment from ${role} on ${rfcId}` +
-        (preferred ? ` (prefers ${preferred})` : "") +
-        ".\n",
+      `Pre-decided ${rfcId} as option '${chosenOption}' by ${role}.\n` +
+        `Voters/deciders see this in their next plan; any comment from a\n` +
+        `non-pre-decider role will auto-reopen the RFC. Silence is consent.\n`,
     );
   }
   return 0;
@@ -139,17 +220,130 @@ async function runRfcReject(args: ParsedArgs): Promise<number> {
   return 0;
 }
 
+async function runRfcRevise(args: ParsedArgs): Promise<number> {
+  const rfcId = args.positional[1];
+  if (!rfcId) {
+    throw new UsageError(
+      "Usage: agentctl rfc revise <rfc-id> --rationale <text>",
+    );
+  }
+  const rationale = requireString(args.flags, "rationale");
+  const json = boolFlag(args.flags, "json");
+  const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
+  const store = await openStoreOrThrow(root);
+  const { role } = await resolveIdentity(store, { requireSession: true });
+  const proposal = await store.reviseRfc({ rfcId, decidedBy: role, rationale });
+  if (json) {
+    process.stdout.write(JSON.stringify({ status: "revising", proposal }) + "\n");
+  } else {
+    process.stdout.write(
+      `Sent ${rfcId} back for revision by ${role}.\n` +
+        `Creator (or any decider) can now run 'agentctl rfc edit ${rfcId} ...'\n` +
+        `to update the proposal; that re-opens the RFC.\n`,
+    );
+  }
+  return 0;
+}
+
+async function runRfcEdit(args: ParsedArgs): Promise<number> {
+  const rfcId = args.positional[1];
+  if (!rfcId) {
+    throw new UsageError(
+      "Usage: agentctl rfc edit <rfc-id> --rationale <text> " +
+        "[--title <text>] [--description <text>] " +
+        "[--options A:summary,B:summary] [--deadline <iso>]",
+    );
+  }
+  const rationale = requireString(args.flags, "rationale");
+  const title = optionalString(args.flags, "title");
+  const description = optionalString(args.flags, "description");
+  const optionsRaw = optionalString(args.flags, "options");
+  const options = optionsRaw === undefined ? undefined : parseOptions(optionsRaw);
+  const deadlineRaw = optionalString(args.flags, "deadline");
+  // deadline: explicit empty string clears it (sets to null); not
+  // passing the flag leaves it untouched.
+  const deadline =
+    deadlineRaw === undefined ? undefined : (deadlineRaw === "" ? null : deadlineRaw);
+  const json = boolFlag(args.flags, "json");
+  const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
+  const store = await openStoreOrThrow(root);
+  const { role } = await resolveIdentity(store, { requireSession: true });
+  const proposal = await store.editRfc({
+    rfcId, actor: role, rationale, title, description, options, deadline,
+  });
+  if (json) {
+    process.stdout.write(JSON.stringify({ status: "revised", proposal }) + "\n");
+  } else {
+    process.stdout.write(
+      `Edited ${rfcId} by ${role}; status is now ${proposal.status}.\n`,
+    );
+  }
+  return 0;
+}
+
+async function runRfcLinkTask(args: ParsedArgs): Promise<number> {
+  const rfcId = args.positional[1];
+  if (!rfcId) {
+    throw new UsageError("Usage: agentctl rfc link-task <rfc-id> --task T-NNNN");
+  }
+  const taskId = requireString(args.flags, "task");
+  const json = boolFlag(args.flags, "json");
+  const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
+  const store = await openStoreOrThrow(root);
+  const { role } = await resolveIdentity(store, { requireSession: true });
+  const proposal = await store.linkTaskToRfc({ rfcId, actor: role, taskId });
+  if (json) {
+    process.stdout.write(JSON.stringify({ status: "linked", proposal }) + "\n");
+  } else {
+    process.stdout.write(
+      `Linked ${taskId} to ${rfcId} by ${role}. relatedTasks: ${proposal.relatedTasks.join(", ")}.\n`,
+    );
+  }
+  return 0;
+}
+
+async function runRfcUnlinkTask(args: ParsedArgs): Promise<number> {
+  const rfcId = args.positional[1];
+  if (!rfcId) {
+    throw new UsageError("Usage: agentctl rfc unlink-task <rfc-id> --task T-NNNN");
+  }
+  const taskId = requireString(args.flags, "task");
+  const json = boolFlag(args.flags, "json");
+  const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
+  const store = await openStoreOrThrow(root);
+  const { role } = await resolveIdentity(store, { requireSession: true });
+  const proposal = await store.unlinkTaskFromRfc({ rfcId, actor: role, taskId });
+  if (json) {
+    process.stdout.write(JSON.stringify({ status: "unlinked", proposal }) + "\n");
+  } else {
+    process.stdout.write(
+      `Unlinked ${taskId} from ${rfcId} by ${role}. relatedTasks: ${proposal.relatedTasks.join(", ") || "(none)"}.\n`,
+    );
+  }
+  return 0;
+}
+
 async function runRfcList(args: ParsedArgs): Promise<number> {
   const statusFilter = optionalString(args.flags, "status");
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
-  const allowed = new Set(["open", "accepted", "rejected", "superseded"]);
+  // PR8g: pre-decide and revising are new valid statuses.
+  const allowed = new Set([
+    "open",
+    "pre-decide",
+    "revising",
+    "accepted",
+    "rejected",
+    "superseded",
+  ]);
   if (statusFilter && !allowed.has(statusFilter)) {
     throw new UsageError(`Invalid --status '${statusFilter}'.`);
   }
   const list = await store.listRfcs(
-    statusFilter ? { status: statusFilter as "open" | "accepted" | "rejected" | "superseded" } : undefined,
+    statusFilter
+      ? { status: statusFilter as "open" | "pre-decide" | "revising" | "accepted" | "rejected" | "superseded" }
+      : undefined,
   );
   if (json) {
     process.stdout.write(JSON.stringify({ rfcs: list }) + "\n");
@@ -160,39 +354,96 @@ async function runRfcList(args: ParsedArgs): Promise<number> {
     return 0;
   }
   for (const r of list) {
-    process.stdout.write(`${r.id.padEnd(10)} ${r.status.padEnd(10)} ${r.title}\n`);
+    process.stdout.write(`${r.id.padEnd(10)} ${r.status.padEnd(11)} ${r.title}\n`);
   }
   return 0;
+}
+
+/**
+ * Render comments as a tree by `replyTo` chains. Depth-2 indents are
+ * meaningful; deeper threads flatten to depth-2 to keep output legible.
+ */
+function renderCommentTree(comments: RfcComment[]): string[] {
+  const byParent = new Map<string | null, RfcComment[]>();
+  for (const c of comments) {
+    const key = c.replyTo;
+    const bucket = byParent.get(key) ?? [];
+    bucket.push(c);
+    byParent.set(key, bucket);
+  }
+  const lines: string[] = [];
+  const visit = (parent: string | null, depth: number) => {
+    const children = byParent.get(parent) ?? [];
+    children.sort((a, b) => a.ts.localeCompare(b.ts));
+    for (const c of children) {
+      const indent = "  ".repeat(Math.min(depth, 3));
+      const first = c.rationale.split("\n")[0] ?? "";
+      const tag = c.preferred ? ` -> ${c.preferred}` : "";
+      lines.push(`${indent}- [${c.id}] ${c.role}${tag}: ${first}`);
+      visit(c.id, depth + 1);
+    }
+  };
+  visit(null, 0);
+  return lines;
 }
 
 async function runRfcShow(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
-    throw new UsageError("Usage: agentctl rfc show <rfc-id>");
+    throw new UsageError("Usage: agentctl rfc show <rfc-id> [--json] [--no-mark-seen]");
   }
   const json = boolFlag(args.flags, "json");
+  const noMarkSeen = boolFlag(args.flags, "no-mark-seen");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
   const data = await store.readRfc(rfcId);
+
+  // PR8g: opportunistically advance the role's read marker for this
+  // RFC if there's an MA_SESSION (so subsequent `plan` results reflect
+  // "no unread comments"). A bare-hands SYSTEM call (no MA_SESSION)
+  // doesn't move a per-role cursor; that's correct.
+  if (!noMarkSeen) {
+    try {
+      const { role, session } = await resolveIdentity(store, { requireSession: false });
+      if (session) await store.markRfcSeen({ role, rfcId });
+    } catch {
+      // Reading should never fail because of cursor-update problems.
+    }
+  }
+
   if (json) {
     process.stdout.write(JSON.stringify(data) + "\n");
     return 0;
   }
   const { proposal, comments, decision } = data;
   process.stdout.write(`# ${proposal.id}: ${proposal.title}\n\n`);
-  process.stdout.write(`status:    ${proposal.status}\n`);
-  process.stdout.write(`voters:    ${proposal.voters.join(", ") || "(none)"}\n`);
-  process.stdout.write(`deciders:  ${proposal.deciders.join(", ")}\n`);
-  process.stdout.write(`options:   ${proposal.options.map((o) => `${o.id}=${o.summary}`).join(" | ")}\n`);
-  process.stdout.write(`deadline:  ${proposal.deadline ?? "(none)"}\n`);
-  process.stdout.write(`createdBy: ${proposal.createdBy}\n`);
-  process.stdout.write(`\nComments (${comments.length}):\n`);
-  for (const c of comments) {
+  process.stdout.write(`status:        ${proposal.status}\n`);
+  process.stdout.write(`voters:        ${proposal.voters.join(", ") || "(none)"}\n`);
+  process.stdout.write(`deciders:      ${proposal.deciders.join(", ")}\n`);
+  process.stdout.write(`options:       ${proposal.options.map((o) => `${o.id}=${o.summary}`).join(" | ")}\n`);
+  process.stdout.write(`relatedTasks:  ${proposal.relatedTasks.join(", ") || "(none)"}\n`);
+  process.stdout.write(`deadline:      ${proposal.deadline ?? "(none)"}\n`);
+  process.stdout.write(`createdBy:     ${proposal.createdBy}\n`);
+  if (proposal.description && proposal.description.length > 0) {
+    process.stdout.write(`\nDescription:\n${proposal.description}\n`);
+  } else {
+    process.stdout.write(`\nDescription: (empty — consider 'rfc revise' if context is missing)\n`);
+  }
+  if (proposal.status === "pre-decide" && proposal.preDecision !== undefined) {
     process.stdout.write(
-      `  - ${c.role}` +
-        (c.preferred ? ` -> ${c.preferred}` : "") +
-        `: ${c.rationale.split("\n")[0]}\n`,
+      `\nPending pre-decision by ${proposal.preDecision.decidedBy} at ${proposal.preDecision.ts}:\n` +
+        `  option:    ${proposal.preDecision.chosenOption}\n` +
+        `  rationale: ${proposal.preDecision.rationale}\n` +
+        `(Any comment from another role auto-reopens the RFC. Silence = consent.)\n`,
     );
+  }
+  process.stdout.write(`\nComments (${comments.length}):\n`);
+  if (comments.length === 0) {
+    process.stdout.write("  (no comments yet)\n");
+  } else {
+    for (const line of renderCommentTree(comments)) {
+      process.stdout.write(`  ${line}\n`);
+    }
   }
   if (decision) {
     process.stdout.write(`\nDecision (${decision.outcome}) by ${decision.decidedBy} at ${decision.ts}:\n`);
@@ -207,21 +458,33 @@ async function runRfcShow(args: ParsedArgs): Promise<number> {
 export async function runRfc(args: ParsedArgs): Promise<number> {
   const sub = args.positional[0];
   switch (sub) {
-    case "new":     return runRfcNew(args);
-    case "comment": return runRfcComment(args);
-    case "decide":  return runRfcDecide(args);
-    case "reject":  return runRfcReject(args);
-    case "list":    return runRfcList(args);
-    case "show":    return runRfcShow(args);
+    case "new":           return runRfcNew(args);
+    case "comment":       return runRfcComment(args);
+    case "add-option":    return runRfcAddOption(args);
+    case "pre-decide":    return runRfcPreDecide(args);
+    case "decide":        return runRfcDecide(args);
+    case "reject":        return runRfcReject(args);
+    case "revise":        return runRfcRevise(args);
+    case "edit":          return runRfcEdit(args);
+    case "link-task":     return runRfcLinkTask(args);
+    case "unlink-task":   return runRfcUnlinkTask(args);
+    case "list":          return runRfcList(args);
+    case "show":          return runRfcShow(args);
     default:
       throw new UsageError(
-        "Usage: agentctl rfc <new|comment|decide|reject|list|show> [args]\n" +
-          "  agentctl rfc new <slug> --title <text> --deciders <r1,r2> [--voters <...>] [--options A:summary,B:summary] [--deadline <iso>]\n" +
-          "  agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>]\n" +
+        "Usage: agentctl rfc <new|comment|add-option|pre-decide|decide|reject|revise|edit|link-task|unlink-task|list|show> [args]\n" +
+          "  agentctl rfc new <slug> --title <text> --deciders <r1,r2> [--description <text>] [--voters <...>] [--options A:summary,B:summary] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]\n" +
+          "  agentctl rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]\n" +
+          "  agentctl rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>\n" +
+          "  agentctl rfc pre-decide <rfc-id> --option <opt> --rationale <text>\n" +
           "  agentctl rfc decide <rfc-id> --option <opt> --rationale <text>\n" +
           "  agentctl rfc reject <rfc-id> --rationale <text>\n" +
-          "  agentctl rfc list [--status open|accepted|rejected|superseded]\n" +
-          "  agentctl rfc show <rfc-id>",
+          "  agentctl rfc revise <rfc-id> --rationale <text>\n" +
+          "  agentctl rfc edit <rfc-id> --rationale <text> [--title <text>] [--description <text>] [--options A:summary,B:summary] [--deadline <iso>]\n" +
+          "  agentctl rfc link-task <rfc-id> --task T-NNNN\n" +
+          "  agentctl rfc unlink-task <rfc-id> --task T-NNNN\n" +
+          "  agentctl rfc list [--status open|pre-decide|revising|accepted|rejected|superseded]\n" +
+          "  agentctl rfc show <rfc-id> [--no-mark-seen]",
       );
   }
 }

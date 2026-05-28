@@ -32,16 +32,17 @@ ownership, atomicity, and the event-stream audit can be enforced.
     decisions.md
     risks.yaml
   rfcs/RFC-NNNN-<slug>/                ← one directory per RFC
-    proposal.yaml
-    comments/<role>.json
+    proposal.yaml                       ← carries status, description, relatedTasks, preDecision (PR8g)
+    comments.yaml                       ← PR8g: append-only threaded ledger (replaces comments/<role>.json)
     decision.json                       ← present once a decider has acted
   worklog/<role>/<ulid>.md             ← one entry file per worklog entry
   comms/
     events/<ulid>.json                  ← immutable event stream
-    cursors/<role>.json                ← per-role consumer cursor
-    pending/<role>/<ack-token>.json    ← outstanding manifests
-    sessions/<role>.json               ← role lease metadata
-    heartbeats/<role>.json             ← (planned) external watcher input
+    cursors/<role>.json                 ← per-role event-stream consumer cursor
+    cursors/<role>/rfc-<rfc-id>.json    ← PR8g per-role-per-RFC read marker for unreadComments
+    pending/<role>/<ack-token>.json     ← outstanding manifests
+    sessions/<role>.json                ← role lease metadata
+    heartbeats/<role>.json              ← (planned) external watcher input
   locks/<key>.lock                     ← short-lived file lock records
 ```
 
@@ -206,6 +207,12 @@ Event types currently emitted:
 | `RFC_COMMENT`         | `agentctl rfc comment`           | Broadcast; `ref` = RFC id.                     |
 | `RFC_DECIDED`         | `agentctl rfc decide` / `reject` | Broadcast; `ref` = RFC id; final.              |
 | `RFC_REPAIRED`        | `Store.readRfc` self-heal        | Broadcast; `ref` = RFC id. Emitted when a half-written `finaliseRfc` is observed (decision.json exists but proposal.yaml still `open`) and the proposal status is forward-completed from the decision. |
+| `RFC_OPTION_ADDED`    | `agentctl rfc add-option`        | Broadcast; `ref` = RFC id; payload carries new option id + summary + rationale (PR8g). |
+| `RFC_PRE_DECISION`    | `agentctl rfc pre-decide`        | Broadcast; `ref` = RFC id; payload carries proposed option + rationale (PR8g). |
+| `RFC_PRE_DECISION_OBJECTED` | comment from non-pre-decider during `pre-decide` | Broadcast; `ref` = RFC id. Auto-reopens RFC to `open` (PR8g). |
+| `RFC_REVISION_REQUESTED` | `agentctl rfc revise`         | Broadcast; `ref` = RFC id. Status flips to `revising`; rationale tells the creator what to fix (PR8g). |
+| `RFC_REVISED`         | `agentctl rfc edit`              | Broadcast; `ref` = RFC id. Status flips back to `open`; payload lists which fields changed (PR8g). |
+| `RFC_TASK_LINKED` / `RFC_TASK_UNLINKED` | `agentctl rfc link-task` / `unlink-task` | Broadcast; `ref` = RFC id; payload carries task id (PR8g). |
 | `SESSION_CLAIMED`     | `Store.claimSession`             | First-time claim.                              |
 | `SESSION_TAKEOVER`    | `Store.claimSession` (stale)     | After lease / PID-based break.                 |
 | `SESSION_RELEASED`    | `Store.releaseSession`           | Voluntary release.                             |
@@ -395,61 +402,112 @@ rfcs/RFC-0001-switch-to-postgres/
   decision.json      ← absent until the leader decides or rejects
 ```
 
-`proposal.yaml`:
+`proposal.yaml` (PR8g shape):
 
 ```yaml
 id: RFC-0001
 slug: switch-to-postgres
 title: Switch primary store to Postgres
-status: open                              # open | accepted | rejected | superseded
+status: open                              # open | pre-decide | revising | accepted | rejected | superseded
 voters: [PM, TL, Backend, DevOps]         # advisory: who SHOULD comment
-deciders: [TL]                            # enforced: who CAN decide / reject
+deciders: [TL]                            # enforced: who CAN pre-decide / decide / reject / revise
 options:
   - id: A
     summary: Use Postgres
   - id: B
     summary: Stay on SQLite
-deadline: 2026-06-01T00:00:00.000Z        # informational
+deadline: 2026-06-01T00:00:00.000Z        # informational (framework does NOT auto-expire)
 createdAt: 2026-05-27T05:23:00.000Z
 createdBy: PM
+description: |
+  PR8g: free-form context. Soft-required in PR8g (warn-on-empty); will
+  be hard-required in PR8h. This is the text non-participants read to
+  weigh in; deciders are expected to `rfc revise` if it is too thin.
+relatedTasks: [T-0042]                    # PR8g: linked task ids; validated against task_board.yaml
+# preDecision present only when status === "pre-decide"; cleared on
+# transitions out of pre-decide:
+# preDecision:
+#   decidedBy: TL
+#   chosenOption: A
+#   ts: 2026-05-27T06:00:00.000Z
+#   rationale: "lean A; want DevOps and PM to confirm migration window."
 ```
 
-Status state machine (enforced):
+Status state machine (PR8g, enforced):
 
 ```
-        open ──decide──▶ accepted
-         │
-         └──reject──▶ rejected
+                            ┌─ rfc revise ────────────────────────────┐
+                            │                                          ▼
+   open ──comment / add-option──┐                                  revising
+       │                        │                                          │
+       │                        ▼                                          │
+       │                  pre-decide ──comment (non-pre-decider)──▶ open   │
+       │                        │                                          │
+       │                        ▼                                          │
+       └─rfc decide──▶ accepted (terminal)                ◀── rfc edit ────┘
+       └─rfc reject──▶ rejected (terminal)
 ```
 
-Both terminal in v2. `superseded` is reserved for a future v2.x command.
-Auto-tally based on comments is **not** implemented and is a design
-non-goal — the deciders are responsible for choosing.
+- `accepted` / `rejected` / `superseded` are terminal in v2.
+- `superseded` is reserved (no command produces it in v2; document
+  supersession in the new RFC's rationale).
+- Auto-tally is **not** implemented and is a design non-goal; deciders
+  pick.
+- Decider scope is **per-RFC**, set at `rfc new` time via `--deciders`.
+  There is no role-level "default decider" field on `RoleConfig`; a
+  role becomes a decider only by being named in a specific RFC's
+  `deciders` list. A role-level decision-scope field is a PR8h
+  candidate.
 
-Decider scope is **per-RFC**, set at `rfc new` time via `--deciders`.
-There is no role-level "default decider" field on `RoleConfig` today;
-a role becomes a decider only by being named in a specific RFC's
-`deciders` list. A role-level decision-scope field is on the PR8g
-shortlist if pain accumulates (e.g. agents keep omitting clearly-
-relevant roles from `--deciders`).
+`comments.yaml` (PR8g, append-only threaded ledger; replaces the
+pre-PR8g per-role JSONs):
 
-`comments/<role>.json`:
+```yaml
+- id: 01HZA000000000000000COMM1   # ULID, globally unique; reply-to target
+  rfcId: RFC-0001
+  role: Backend
+  ts: 2026-05-28T05:02:00.000Z
+  preferred: A                     # option id; may be empty for "no preference"
+  replyTo: null                    # null = reply to the RFC root
+  rationale: "Migration is tractable; sharding plan ready."
+
+- id: 01HZA000000000000000COMM2
+  rfcId: RFC-0001
+  role: TL
+  ts: 2026-05-28T05:30:00.000Z
+  preferred: A
+  replyTo: 01HZA000000000000000COMM1   # threads under another comment
+  rationale: "Agree; but worried about migration window."
+```
+
+Multiple comments per role are preserved (ULIDs ensure order). Normal
+mutation goes through `agentctl rfc comment`, which appends to the
+ledger, emits `RFC_COMMENT`, and advances the commenter's read
+cursor. Comments on closed RFCs (`accepted` / `rejected` /
+`superseded`) are refused. Comments on `pre-decide` from any role
+other than the pre-decider auto-reopen the RFC and emit
+`RFC_PRE_DECISION_OBJECTED`.
+
+> **Migration note (PR8g).** Projects that used the pre-PR8g
+> `comments/<role>.json` layout are detected on read and refused with a
+> clear `code: USAGE` error pointing the user at this section. Alpha-
+> stage hard cut, no auto-migrator.
+
+`comms/cursors/<role>/rfc-<rfc-id>.json` (PR8g, per-role-per-RFC read
+marker):
 
 ```jsonc
 {
-  "rfcId": "RFC-0001",
-  "role": "Backend",
-  "ts": "...",
-  "preferred": "A",             // option id; may be empty for "no preference"
-  "rationale": "Migrations are tractable; sharding plan ready."
+  "lastSeenCommentId": "01HZA000000000000000COMM2"
 }
 ```
 
-Hand-edits are tolerated; normal mutation goes through
-`agentctl rfc comment`, which also emits `RFC_COMMENT`. A second call from
-the same role overwrites the file. Comments on closed RFCs are refused.
+Set by `agentctl rfc show <id>` (advances to latest comment id) and by
+`agentctl rfc comment <id>` (advances to the just-written comment).
+`null` means "this role has not opened this RFC yet" → all comments
+count as unread. Surfaces in `manifest.rfcs[*].unreadComments`.
 
-`decision.json`:
+`decision.json` (unchanged shape):
 
 ```jsonc
 {
@@ -466,9 +524,15 @@ Field rules:
 
 - `slug` must match `^[a-z0-9][a-z0-9-]{0,63}$`. Slug reuse across RFCs is
   refused.
-- `options` requires at least one entry, with unique ids.
-- `deciders` requires at least one role. `agentctl rfc decide/reject`
-  refuses callers outside that list.
+- `options` requires at least one entry, with unique ids. Options
+  can be **added after creation** via `rfc add-option` (PR8g) while
+  the RFC is `open` or `revising`.
+- `deciders` requires at least one role. `agentctl rfc pre-decide /
+  decide / reject / revise` refuse callers outside that list.
+- `description` is soft-required (PR8g warning); will be hard-required
+  in PR8h.
+- `relatedTasks` entries are validated against `state/task_board.yaml`
+  at write time (both at `rfc new` and at `rfc link-task`).
 - The sequential id counter lives in `config.yaml` under `rfcCounter`
   (so deleting an RFC dir does NOT recycle its id).
 

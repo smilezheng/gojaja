@@ -1,7 +1,8 @@
 # Collaboration handbook
 
 Cross-references: [DESIGN](./DESIGN.md), [PROTOCOL](./PROTOCOL.md),
-[SCHEMA](./SCHEMA.md).
+[SCHEMA](./SCHEMA.md), [RFC](./RFC.md) (end-to-end walkthrough of the
+RFC lifecycle).
 
 [PROTOCOL.md](./PROTOCOL.md) is the **mechanism** layer: it tells the
 agent how to talk to `agentctl` (which command, what arguments, what
