@@ -309,6 +309,24 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Non-breaking: no schema change; constraint relaxation only.
   - Suite 284 -> 294.
 
+- **PR8o — `agentctl reset` (project uninstall).**
+  - Removes everything this tool wrote into a project: the
+    `.multi-agent/` layer, `.cursor/rules/multi-agent-runtime.mdc`
+    (plus empty parent dirs), and the
+    `<!-- multi-agent-runtime:BEGIN/END -->` block inside
+    `<project>/CLAUDE.md` (preserves the rest; deletes CLAUDE.md only
+    if the marker block was its only content).
+  - `--purge-codex-skill` optionally removes
+    `${CODEX_HOME:-~/.codex}/skills/multi-agent-runtime/` (off by
+    default; user-level skill is shared across projects).
+  - Default invocation prints a preview; `--confirm <basename>` is
+    required to actually delete (token = project root basename).
+    `--dry-run` forces preview mode even with `--confirm` present.
+    `MA_SESSION` must be unset (same posture as `role delete`).
+  - Part of the original PR8 (installer & upgrade) bucket; the
+    `agentctl upgrade` half stays planned.
+  - Suite 302 -> 316.
+
 - **PR8n — manifest event filter (token / attention budget).**
   - The events stream stayed broadcast-by-default but was firing every
     broadcast event into every agent's manifest. In a 6-role project
@@ -405,7 +423,8 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
 
 - **PR8 — installer & upgrade.**
   - `agentctl upgrade` driving `src/migrations/<from>-<to>.ts`.
-  - `agentctl reset --confirm <project-name>` for destructive nukes.
+  - ~~`agentctl reset --confirm <project-name>` for destructive
+    nukes.~~ Done in PR8o.
   - AGENTS.md bridge insertion with versioned marker block, re-written
     on every upgrade.
 
@@ -471,6 +490,10 @@ PR8g.1 (pre-decide field/status removed), PR8i (wait flags +
 `.wait` sentinel removed), and PR8j (task field additions, Done
 deliverable gate). PR8l and PR8n are non-breaking on-disk (PR8n
 narrows manifest visibility but does not change file shapes).
+PR8o adds the user-facing "uninstall" / `agentctl reset` command that
+removes everything this tool wrote into a project (the `.multi-agent/`
+layer + the Cursor rule + the Claude marker block, with an opt-in to
+also purge the Codex user-level skill).
 PR8h, PR8k, PR8m, and PR9–PR10 harden the layer for everyday use; PR8h
 is the only remaining RFC-affecting PR
 before `v2.0.0`. Anything past `v2.0.0` only ships after the chaos

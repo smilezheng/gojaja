@@ -25,6 +25,48 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   `config.yaml`, so an HR/Admin role can be granted role-creation
   authority via the normal ownership model.
 
+## [2.0.0-alpha.21] — 2026-05-28
+
+### `agentctl reset` — project uninstall (PR8o)
+
+New command. Removes everything this tool installed into a project so
+you can tear down the coordination layer without hand-deleting files.
+
+Surface:
+
+```
+agentctl reset                                           # preview, no delete
+agentctl reset --dry-run [--confirm <basename>]          # preview, no delete
+agentctl reset --confirm <project-basename>              # delete
+agentctl reset --confirm <project-basename> --purge-codex-skill
+```
+
+What it removes (when present):
+
+- `<project>/.multi-agent/` recursively — events, state, RFCs,
+  worklogs, sessions, locks. Everything this tool wrote.
+- `<project>/.cursor/rules/multi-agent-runtime.mdc`, plus the empty
+  `.cursor/rules/` and `.cursor/` directories after, so the project
+  tree is not left with empty parents that belong to us.
+- The `<!-- multi-agent-runtime:BEGIN ... :END -->` block inside
+  `<project>/CLAUDE.md`. Content outside the block is preserved.
+  `CLAUDE.md` is deleted only if the marker block was its only content.
+- `${CODEX_HOME:-~/.codex}/skills/multi-agent-runtime/` only when
+  `--purge-codex-skill` is passed. Off by default because the Codex
+  skill is user-level and shared across every project the user works on.
+
+Safety:
+
+- `--confirm <token>` is required to actually delete. The token must
+  equal `path.basename(projectRoot)`; mismatches raise `UsageError`
+  (exit 2).
+- `MA_SESSION` must be unset — destructive ops belong to the user, not
+  to an agent (same posture as `role delete`).
+- Default invocation prints a preview listing every path that would be
+  touched and the exact `--confirm` token to use.
+
+Suite 302 -> 316 (14 new reset tests + 2 helper tests).
+
 ## [2.0.0-alpha.20] — 2026-05-28
 
 ### Manifest event filter — token / attention budget (PR8n)

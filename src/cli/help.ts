@@ -278,6 +278,25 @@ Keepalive (agent, requires MA_SESSION):
       disk state. PR8i replaced the old --mode block | exit dichotomy
       and the .wait sentinel.
 
+Project lifecycle (user, NOT for agents):
+  reset [--dry-run] [--confirm <basename>] [--purge-codex-skill]
+      Remove everything this tool installed into the project: the
+      .multi-agent/ layer (all events, state, RFCs, worklogs, sessions
+      and locks), .cursor/rules/multi-agent-runtime.mdc, and the
+      managed BEGIN/END block inside CLAUDE.md (preserves the rest of
+      the file; deletes it if nothing else was inside).
+
+      Default invocation prints a preview and refuses to delete. Pass
+      --confirm <basename-of-project-root> to actually delete.
+
+      The Codex skill at ~/.codex/skills/multi-agent-runtime/ is
+      user-level and shared across every project that activated a
+      Codex agent; it is NOT touched by default. Pass
+      --purge-codex-skill to also remove it.
+
+      Must be run from a shell with no MA_SESSION exported (mirrors
+      role delete; destructive ops belong to the user, not an agent).
+
 Global options:
   --root <path>                               Override discovered project root.
   --json                                      Force JSON output.

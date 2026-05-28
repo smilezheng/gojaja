@@ -26,6 +26,44 @@ There are three identity domains:
 An agent window asserts a role identity by holding a fresh session id
 for that role.
 
+## Project lifecycle
+
+`agentctl init` writes `.multi-agent/` into a project. `agentctl reset`
+removes everything this tool installed there (and optionally the
+user-level Codex skill).
+
+### `agentctl reset [--dry-run] [--confirm <basename>] [--purge-codex-skill]`
+
+- Without `--confirm`, prints a preview and exits without deleting.
+  The preview lists every path that would be touched and tells the
+  user the exact confirm token (`path.basename(projectRoot)`).
+- `--dry-run` forces preview mode even when `--confirm` is present.
+- `--confirm <basename>` actually deletes when the token matches the
+  project root's basename. Mismatch raises `UsageError` (exit 2).
+- Removes, when present:
+  - `<project>/.multi-agent/` (recursive — events, state, RFCs,
+    worklogs, sessions, locks; everything this tool wrote).
+  - `<project>/.cursor/rules/multi-agent-runtime.mdc` (plus empty
+    `.cursor/rules/` and `.cursor/` after, so the project tree is
+    not left with empty parent directories belonging to us).
+  - The `<!-- multi-agent-runtime:BEGIN ... :END -->` block in
+    `<project>/CLAUDE.md`. Surrounding user content is preserved;
+    `CLAUDE.md` is deleted entirely only if the marker block was its
+    only content.
+- `--purge-codex-skill` additionally removes
+  `${CODEX_HOME:-~/.codex}/skills/multi-agent-runtime/`. Off by
+  default because that skill is user-level and shared across every
+  project the user works on; deleting it from one project's reset
+  would break other projects.
+- **Refuses when `MA_SESSION` is set.** Destructive ops are for the
+  user, not an agent — same posture as `role delete`. Open a fresh
+  shell or `unset MA_SESSION` first.
+
+The event stream and audit log live entirely under `.multi-agent/`,
+so `reset` is also the canonical "delete the audit trail" operation.
+If you need an archive, `cp -r .multi-agent .multi-agent.bak` (or git
+commit it) before running reset; we do not auto-backup.
+
 ## Role lifecycle
 
 ```

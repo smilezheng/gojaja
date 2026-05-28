@@ -8,6 +8,7 @@ import { runPlan } from "./commands/plan";
 import { runPrompt } from "./commands/prompt";
 import { runRelease } from "./commands/release";
 import { runReport } from "./commands/report";
+import { runReset } from "./commands/reset";
 import { runRfc } from "./commands/rfc";
 import { runRole } from "./commands/role";
 import { runTask } from "./commands/task";
@@ -62,6 +63,8 @@ async function dispatch(): Promise<number> {
       return runWait(args);
     case "state":
       return runState(args);
+    case "reset":
+      return runReset(args);
     default:
       throw new UsageError(`Unknown command: ${args.command}`);
   }

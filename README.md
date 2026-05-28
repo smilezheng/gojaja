@@ -257,6 +257,29 @@ agentctl role delete Frontend
 
 Open task assignments owned by `Frontend` are left in place — recreating a role with the same id reinherits them. To reassign instead, use `agentctl task assign <task-id> --to <other-role>`. Any agent window that still has the deleted role's `MA_SESSION` exported will fail with USAGE on the next command; restart that window or claim a new role there.
 
+### Uninstall everything (`agentctl reset`)
+
+When you're done with a project (or you want to tear down the coordination layer and start fresh), run:
+
+```bash
+# In a shell with no MA_SESSION exported (destructive, user-only):
+unset MA_SESSION
+agentctl reset                                  # preview what would be removed
+agentctl reset --confirm <project-basename>     # actually remove
+
+# Also remove the user-level Codex skill (shared across projects;
+# only do this if no other project relies on it):
+agentctl reset --confirm <project-basename> --purge-codex-skill
+```
+
+The default invocation prints a preview and exits without touching anything; the exact `--confirm` token is the project root's directory name. Reset removes:
+
+- `<project>/.multi-agent/` recursively (events, state, RFCs, worklogs, sessions, locks).
+- `<project>/.cursor/rules/multi-agent-runtime.mdc` and the empty `.cursor/rules/` / `.cursor/` parents.
+- The `<!-- multi-agent-runtime:BEGIN ... :END -->` block inside `<project>/CLAUDE.md`. Content outside the block is preserved; `CLAUDE.md` is deleted only if the marker block was its only content.
+
+The user-level Codex skill at `~/.codex/skills/multi-agent-runtime/` is **not** touched by default. Reset is also the canonical "delete the audit trail" operation since events live entirely under `.multi-agent/` — `cp -r .multi-agent .multi-agent.bak` first if you want a snapshot.
+
 ### Upgrade the CLI
 
 ```bash

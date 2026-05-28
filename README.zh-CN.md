@@ -257,6 +257,28 @@ agentctl role delete Frontend
 
 Frontend 名下的未完成任务会**保留**在任务板上——之后用同名再 `role create` 一个角色会自动重新认领。如果想直接转交，用 `agentctl task assign <task-id> --to <其它角色>`。如果还有 agent 窗口持有刚删掉的角色的 `MA_SESSION`，下一次执行 agentctl 命令会报 USAGE，那个窗口需要重启或者重新领其它角色。
 
+### 卸载本工具在项目里写的东西（`agentctl reset`）
+
+项目搞完了或者想把协作层推倒重来时：
+
+```bash
+# 同样是治理动作，必须无 MA_SESSION：
+unset MA_SESSION
+agentctl reset                                  # 预览，不删
+agentctl reset --confirm <项目目录名>           # 真删
+
+# 同时把用户级的 Codex skill 也删了（跨项目共享，要确认其它项目不依赖）：
+agentctl reset --confirm <项目目录名> --purge-codex-skill
+```
+
+默认调用只打印预览不动文件；`--confirm` 的 token 就是项目根目录的 basename。Reset 会清理：
+
+- `<项目>/.multi-agent/`——事件流 / state / RFC / worklog / session / 锁全部清掉。
+- `<项目>/.cursor/rules/multi-agent-runtime.mdc` 以及空了的 `.cursor/rules/` / `.cursor/` 父目录。
+- `<项目>/CLAUDE.md` 里 `<!-- multi-agent-runtime:BEGIN ... :END -->` 之间的内容；块外的用户自己写的东西原样保留。如果块就是 CLAUDE.md 的全部内容，整个文件删掉。
+
+用户级的 `~/.codex/skills/multi-agent-runtime/` 默认**不动**（跨项目共享）。Reset 也是 "把审计流删干净"的唯一姿势——所有事件都在 `.multi-agent/` 下，要保留先 `cp -r .multi-agent .multi-agent.bak` 或者 git commit 一下。
+
 ### 升级 CLI
 
 ```bash
