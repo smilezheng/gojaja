@@ -309,6 +309,23 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
   - Non-breaking: no schema change; constraint relaxation only.
   - Suite 284 -> 294.
 
+- **PR8q + PR8r — prompt artifact compression + path portability.**
+  - PR8q: `runtimeLoopBody` and `COLLABORATION_HANDBOOK` rewritten
+    for density. Cursor rule / CLAUDE.md marker block 520 → ~295
+    lines (~44%). Tables collapse the three "when to use X"
+    (worklog / report / RFC) parallel sections into one and the
+    three escalation paths into one. All `(PR8x)` version markers
+    removed. Rationale paragraphs moved to docs/HANDBOOK.md; the
+    prompt cites the long-form doc. Handbook size budget tightened
+    20 KB → 12 KB.
+  - PR8r: removed the absolute project-root path from the committed
+    artifacts (`.cursor/rules/gojaja-runtime.mdc`, CLAUDE.md marker
+    block). The path was baked in, which broke checkouts on a
+    second machine or after moving the project. `runtimeLoopBody`
+    now always renders the cwd-discovery message that Codex skill
+    already used. Activation snippets keep the path — they're
+    pasted per-window into chat and never committed.
+
 - **PR8p — rename to gojaja (过家家).**
   - Project name: `multi-agent-coordination` → `gojaja`.
   - CLI binary `agentctl` → `gojaja`.

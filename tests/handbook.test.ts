@@ -2,23 +2,31 @@ import { describe, expect, it } from "vitest";
 import { COLLABORATION_HANDBOOK } from "../src/cli/prompts/handbook";
 import { buildActivation, buildRuntime } from "../src/cli/prompts";
 
+/**
+ * Trigger phrases the compressed handbook MUST keep present (verbatim
+ * or whitespace-tolerant). Each catches an essential rule; if a future
+ * edit accidentally deletes the rule, the test fails. Phrases are
+ * deliberately specific enough to detect a behavioural regression and
+ * loose enough to survive line-wrap / formatting tweaks.
+ *
+ * PR8q: relaxed from PR8b–PR8n phrasings after the handbook was
+ * compressed for CLAUDE.md insertion. Trigger phrases now match the
+ * compressed wording.
+ */
 const KEY_TRIGGER_PHRASES: ReadonlyArray<RegExp> = [
   // Core stance + turn shape
   /gojaja is the team protocol/i,
   /Default to resolving with another agent before bouncing to the user/i,
   /every substantive turn must end\s+with wait/i,
 
-  // Worklog rules
-  /3\+ turns without a worklog/,
-  /Do NOT:\s*\n- Worklog every/,
-
-  // Report vs RFC
-  /Use report as "broadcast \+ at-mention"/,
-  /a decision that cannot be unilaterally made by any one\nrole/,
+  // Channel selection (table heading + key invariants)
+  /3\+ turns without a worklog/i,
+  /"Broadcast \+ at-mention"/i,
+  /a decision no single role can make alone/i,
 
   // Upstream / escalation
   /Blocked on T-XXXX \(no movement 2t\)/,
-  /\\?`?reportsTo\\?`?/, // mentions reportsTo at least once
+  /\breportsTo\b/, // mentions reportsTo at least once
 
   // User-vs-agent rules
   /exit code 9 \(FORBIDDEN\)/,
@@ -30,32 +38,29 @@ const KEY_TRIGGER_PHRASES: ReadonlyArray<RegExp> = [
 
   // Build/test breakage
   /Build \/ test breakage/,
-  /halt your task work, and do NOT push commits on top/,
+  /halt\s+your task work, and do NOT push commits on top/,
 
   // Hard don'ts block
   /Don't hand-edit anything under \\?`?\.gojaja/,
 
-  // PR8e task-assignment rules
+  // Task-assignment rules
   /Task assignment is push, not pull/,
   /Don't self-assign by calling/,
   /Multi-role task pattern/,
 
-  // PR8f-A: RFC deciders are per-RFC, not role-level
+  // RFC deciders are per-RFC
   /deciders are\s+\*\*per-RFC\*\*/,
 
-  // PR8g: multi-round / pre-decide / revise rules. Whitespace-tolerant
-  // because the handbook text wraps lines for legibility.
+  // RFC multi-round / pre-decide / revise rules
   /RFC multi-round discussion/,
-  /Use revise\s+when the topic is real but the writeup is too thin/,
-  // PR8g.1: pre-decide is now a mandatory-ACK round, not silent-consent.
-  /Silence does\s+NOT count as consent/,
+  /Use revise when the topic is real but\s+the writeup is too thin/,
+  /Silence does NOT count\s+as consent/,
   /myAckOwed: true/,
-  /Posting a plain `rfc comment`/,
+  /Plain `rfc comment`\s+does NOT advance the gate/,
 
-  // PR8i: wait redesigned around deadlines + RESUME + --for task-assigned.
+  // Wait redesign + --for task-assigned
   /Idle \(no work\)[^\n]*wait --for task-assigned/,
-  /wait prints one of four verdicts/,
-  /one-shot per wait session/,
+  /one-shot per\s+wait session/,
 ];
 
 describe("COLLABORATION_HANDBOOK", () => {
@@ -116,34 +121,32 @@ describe("COLLABORATION_HANDBOOK", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("stays within a reasonable size budget (<20 KB of UTF-8)", () => {
-    // Loaded once per session into the host's persistent area, so the
-    // budget is generous compared to roleReminder. Still capped so
-    // future edits notice when the handbook bloats. Bumped from 8 KB
-    // to 10 KB in PR8c, 10 KB to 12 KB in PR8f-A, 12 KB to 14 KB in
-    // PR8g (RFC v2 multi-round / pre-decide / revise rules), 14 KB to
-    // 16 KB in PR8i (wait verdict table + --for task-assigned guidance),
-    // 16 KB to 18 KB in PR8j (deliverable-gate policy paragraph), 18
-    // KB to 20 KB in PR8n (manifest event filter explanation).
-    expect(Buffer.byteLength(COLLABORATION_HANDBOOK, "utf8")).toBeLessThan(20 * 1024);
+  it("stays within a tight size budget (<12 KB of UTF-8)", () => {
+    // The handbook ships into the host's persistent prompt area —
+    // CLAUDE.md insertion in particular wants ~200 lines total
+    // (Anthropic's guidance), so the handbook gets a hard <12 KB cap
+    // here, well under the historical 8/10/12/14/16/18/20 KB ladder.
+    // PR8q compressed the body by ~60% via table layout, removal of
+    // PR-version markers, and dropping rationale paragraphs in favour
+    // of the long-form policy in docs/HANDBOOK.md.
+    expect(Buffer.byteLength(COLLABORATION_HANDBOOK, "utf8")).toBeLessThan(12 * 1024);
   });
 });
 
 describe("buildRuntime handbook integration", () => {
   const PROJ = "/tmp/example-project";
 
-  it("PR8d gate: every target body announces 'applies only when this window has been bound to a role' and forbids speculative gojaja calls", () => {
+  it("PR8d gate: every target body announces 'applies only when this window is bound to a role' and forbids speculative gojaja calls", () => {
     // Without the gate, an unactivated chat window (user opened a fresh
     // Cursor tab to ask an unrelated question, never ran `activate`)
     // would still see the runtime body in its system prompt and could
     // reflexively run `gojaja plan` / `claim`, claiming a role the
     // user never intended. The gate localises the loop to actively
     // bound windows only.
-    // Tolerate whitespace / newlines because the bold marker text wraps
-    // for readability — we care about the phrase being present, not its
-    // exact wrap column.
-    const GATE_RE = /only when this\s+window has been bound to a role/;
-    const FORBID_RE = /Do \*\*not\*\* speculatively run/;
+    // Tolerate whitespace / newlines + minor phrasing shifts since the
+    // body was compressed in PR8q.
+    const GATE_RE = /ONLY when this window is bound to a role/i;
+    const FORBID_RE = /do NOT speculatively run/i;
     for (const t of ["codex", "claude", "cursor", "generic"] as const) {
       const a = buildRuntime(t, PROJ);
       expect(a.body).toMatch(GATE_RE);

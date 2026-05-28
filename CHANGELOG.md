@@ -25,6 +25,80 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   `config.yaml`, so an HR/Admin role can be granted role-creation
   authority via the normal ownership model.
 
+## [2.0.0-alpha.23] — 2026-05-28
+
+### Prompt artifact compression + path portability (PR8q + PR8r)
+
+Two related fixes for the runtime body and handbook that `gojaja
+prompt --write` lands at `.cursor/rules/gojaja-runtime.mdc` and inside
+the `CLAUDE.md` marker block. Both files are committed to the repo,
+so they have to (a) fit a reasonable budget for CLAUDE.md (~200-line
+target per Anthropic guidance) and (b) be portable across machines.
+
+#### PR8q — handbook & runtime body compression
+
+The pre-PR8q runtime body had accumulated rationale paragraphs and
+parallel "when to use X" sections across PR8b → PR8n. Net effect:
+
+```
+.cursor/rules/gojaja-runtime.mdc:   520 lines / 22.8 KB
+CLAUDE.md marker block:             516 lines / 22.6 KB
+```
+
+PR8q compresses by ~44%:
+
+```
+.cursor/rules/gojaja-runtime.mdc:   295 lines / 13.0 KB
+CLAUDE.md marker block:             291 lines / 12.8 KB
+```
+
+Changes:
+
+- Three parallel "when to use X" sections (worklog / report / RFC) →
+  one three-column table.
+- Three escalation paths (push upstream / escalate up / bounce to
+  user) → one two-column "escalation ladder" table.
+- All \`(PR8x)\` version markers removed (internal scaffolding).
+- Rationale paragraphs dropped from the prompt; the long-form policy
+  rationale lives in \`docs/HANDBOOK.md\` in the source repo, linked
+  from the prompt's intro.
+- "Idle and lifecycle" + "Idle (no work)" merged.
+- Runtime body's verbose wait verdict table → one line ("RESUME means
+  re-run the printed wait command").
+- Identity / When-this-section-applies sections collapsed to ~3 lines
+  each from ~15 lines each.
+
+Handbook size budget tightened from 20 KB to 12 KB. Trigger-phrase
+tests loosened where the compressed phrasing wraps differently across
+lines.
+
+#### PR8r — no absolute paths in committed prompt artifacts
+
+Previously the Cursor rule and CLAUDE.md block baked the project root
+path into their text:
+
+\`\`\`
+You participate in a multi-agent coordination layer rooted at:
+
+  /Users/alice/projects/foo
+\`\`\`
+
+Both files are committed to git, so this broke immediately when the
+project was checked out on another machine, moved to a different
+location, or synced via Dropbox / Syncthing.
+
+Fix: \`runtimeLoopBody\` now always renders the cwd-discovery message
+("for whichever project this window is currently working in (gojaja
+discovers the project root from the shell's cwd)"). The Codex skill
+already did this (intentionally — it's user-level shared); Cursor and
+Claude now match.
+
+The activation snippet (\`gojaja activate\`) still includes the path
+— it's pasted per-window into chat by the user and is never committed,
+so a machine-specific path is correct there.
+
+Suite 316 -> 316.
+
 ## [2.0.0-alpha.22] — 2026-05-28
 
 ### Rename — `multi-agent-coordination` → `gojaja` (过家家)
