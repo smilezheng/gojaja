@@ -19,6 +19,55 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
   / not responded yet" without the agent having to read
   `rfc show`.
 
+## [2.0.0-alpha.17] — 2026-05-28
+
+### Wait redesigned around deadlines + RESUME + idle broadcast (PR8i)
+
+Collapses the `--mode block | exit` dichotomy into a single
+deadline-driven, chunked, resumable primitive. A long wait now
+survives any host shell timeout: each chunk is one shell call, the
+next chunk reads the same `--until` deadline off the command line
+and continues. The PR8a `.wait` sentinel and its accompanying
+`writeWaitSentinel` are gone, replaced by a session record at
+`comms/pending/<role>/wait.json` that lets `--for task-assigned`
+emit its idle WORKLOG exactly once per session even across resumes.
+
+> **Breaking CLI / on-disk shape change (alpha-only, no users).**
+> `--mode block`, `--mode exit`, `--idle <minutes>`, `--idle-seconds`,
+> and the `.wait` sentinel are removed. Passing any removed flag
+> raises USAGE pointing at the new shape. Schema version bumped to
+> `2.0.0-wait-v2`.
+
+Added:
+
+- `agentctl wait [--until <ISO> | --in <duration>] [--for <condition>] [--poll-interval <duration>]`
+- Conditions: `attention` (default), `rfc-decided:<id>`,
+  `rfc-acked:<id>`, `task-assigned`, `report-from:<role>`,
+  `event-ref:<id>`.
+- Verdicts (all exit 0): `ATTENTION`, `CONDITION_MET`, `RESUME`,
+  `TIMEOUT`. Each prints the exact next command to run.
+- `--for task-assigned` auto-broadcasts a one-shot idle WORKLOG so
+  any role with task-board ownership can re-assign the role.
+- `Store.readWaitState` / `writeWaitState` / `clearWaitState`
+  replace `writeWaitSentinel`.
+- `argv.parseDuration` helper accepts `<n>{ms|s|m|h|d}`.
+
+Runtime artifacts:
+
+- Cursor runtime body pins `agentctl wait --in 10m --poll-interval 30s`
+  so each chunk fits inside Cursor's shell timeout.
+- Codex / Claude / generic bodies use `agentctl wait --in 10m`; a
+  10-minute wait collapses to a single sleep on those hosts.
+- Handbook gains a verdict table and a `wait --for task-assigned`
+  guidance block; budget bumped 14 KB → 16 KB.
+
+User-cancel of a chunked wait is intentionally not framework-handled:
+the host's SIGTERM / SIGINT looks identical to a host-timeout from
+inside the shell, so cancel is delegated to the host (kill the chat
+or shell to stop; the next message redirects the loop).
+
+Suite 260 -> 270.
+
 ## [2.0.0-alpha.16] — 2026-05-28
 
 ### RFC v2.1: pre-decide as structured comment + mandatory ACK gate (PR8g.1)

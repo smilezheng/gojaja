@@ -209,11 +209,36 @@ Shared-state editing (ownership-gated; --file must live under state/):
       All modes are atomic and respect config.yaml's owns / mustNotEdit.
 
 Keepalive (agent, requires MA_SESSION):
-  wait [<role>] [--idle <minutes>] [--mode block|exit]
-      block: sleep without burning tokens (default; ~10 minutes idle).
-      exit:  drop a sentinel and return immediately; the host decides
-             when to re-prompt the agent. Use exit on Cursor — its
-             chat-mode shell kills long sleeps.
+  wait [<role>] [--until <ISO> | --in <duration>]
+                [--for <condition>] [--poll-interval <duration>] [--json]
+      Sleeps in chunks until either new attention arrives, the
+      condition you named fires, or the deadline passes.
+
+      Deadline (pick one; default is --in 10m):
+        --until 2026-05-28T15:00:00Z
+        --in 30s | 10m | 4h | 1d
+
+      Conditions (pick one; default is attention):
+        attention                 any event addressed to you or "*"
+        rfc-decided:RFC-NNNN      that RFC closes (accepted or rejected)
+        rfc-acked:RFC-NNNN        anyone posts an ack or object on that RFC
+        task-assigned             a task lands with you as the new owner
+                                  (also auto-emits an idle worklog so
+                                  task-board owners can find you)
+        report-from:<role>        that role sends you a directed report
+        event-ref:<id>            any event with that ref
+
+      Exit verdicts (each prints "Next: ..." with the command to run):
+        ATTENTION       new events arrived; run plan.
+        CONDITION_MET   your condition fired; run plan.
+        RESUME          chunk timed out, deadline still in the future;
+                        re-run the printed wait command.
+        TIMEOUT         deadline reached; end the turn or take initiative.
+
+      The chunked polling lets a long wait survive a short host shell
+      timeout: each chunk is one process, the next process resumes from
+      disk state. PR8i replaced the old --mode block | exit dichotomy
+      and the .wait sentinel.
 
 Global options:
   --root <path>                               Override discovered project root.

@@ -192,17 +192,49 @@ exit codes to mean "more work" vs "idle".
 v2 cleanly separates:
 
 - **`ack`** — fast, atomic; only touches the cursor.
-- **`wait`** — pure keepalive. Two modes:
-  - `--mode block` (default): shell-level `sleep` for `--idle` minutes,
-    then a single read-only check. Prints `ATTENTION` if new events
-    arrived, `IDLE` if none. Exits 0 either way.
-  - `--mode exit` (for hosts with short shell timeouts): writes a
-    `.wait` sentinel and exits immediately; the next user message or
-    external scheduler resumes the loop.
+- **`wait`** — pure keepalive, deadline-driven, resumable.
 
-The blocking sleep costs zero LLM tokens. Keeping it independent from
-`ack` means a short-timeout host can opt out of the sleep without
-compromising cursor safety.
+### Why deadline-driven (PR8i) instead of block / exit modes
+
+The PR8a–PR8c shape exposed a `--mode block | exit` dichotomy: block
+slept inside the same shell process; exit dropped a `.wait` sentinel
+and returned immediately, deferring resumption to the host. Two modes
+existed because Cursor's chat-mode shell kills any long-running tool
+call at the host's shell-timeout (seconds), while Codex / Claude /
+generic shells can sleep through minutes without complaint. The agent
+had to know which mode to use, and the runtime body had to be
+target-specific.
+
+PR8i collapses both into one primitive. Every `wait` invocation:
+
+1. Resolves a deadline (`--until <ISO>` or `--in <duration>`).
+2. Sleeps at most `min(deadline - now, --poll-interval)` (default
+   30 s) and checks for events satisfying a `--for` condition.
+3. Exits with one of four verdicts: ATTENTION (any new event for the
+   role), CONDITION_MET (the specific thing fired), RESUME (chunk
+   over but deadline still in the future), TIMEOUT (deadline reached).
+
+RESUME is the recovery mechanism that replaces the `.wait` sentinel:
+the next chunk is just another `wait` invocation pointing at the same
+deadline. Host kills the shell mid-chunk? The next chunk reads the
+same deadline off the command line and continues. Disk session record
+at `comms/pending/<role>/wait.json` makes the `--for task-assigned`
+idle worklog one-shot across resumes, but the wait itself does not
+depend on the file — losing it at worst causes one duplicate worklog.
+
+This unifies the host targets: Cursor's runtime body pins a short
+`--poll-interval 30s` so each chunk fits inside the host shell
+timeout; other hosts use the default and a 10-minute wait collapses
+into a single sleep. Same command, no per-host conditionals.
+
+**User-cancel is intentionally not framework-handled.** A host's
+SIGTERM / SIGINT looks identical to a host-timeout from inside the
+shell process, and inventing a sidechannel `wait-cancel <role>`
+verb would add a CLI surface for a problem the host already solves
+(end the chat, kill the shell). If a user wants to interrupt a
+chunked wait early, they end the chat / kill the shell themselves;
+the agent will not auto-resume because the next user message
+implicitly redirects the runtime loop.
 
 ## RFC: opinions in, leader decision out
 

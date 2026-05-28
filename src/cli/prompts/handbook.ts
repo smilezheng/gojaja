@@ -43,8 +43,21 @@ your work, not chat.
 3. Emit visible outputs through agentctl, not chat (\`report\`,
    \`worklog\`, \`task status\`, \`rfc comment\`, \`rfc decide\`).
 4. \`agentctl ack --token <t>\` — only after step 3 produced its events.
-5. \`agentctl wait\` — every substantive turn must end with wait, so
-   the rest of the team can read your status as IDLE or ATTENTION.
+5. \`agentctl wait --in <duration>\` — every substantive turn must end
+   with wait. Pick a deadline that matches what you expect (e.g.
+   \`--in 10m\` for "I expect the next ping soon"; \`--in 1h --for
+   task-assigned\` for "I'm out of work and waiting for the board").
+   wait prints one of four verdicts:
+     ATTENTION / CONDITION_MET → run \`agentctl plan\`.
+     RESUME                    → re-run the exact \`agentctl wait\`
+                                command the verdict prints. RESUME
+                                means the chunk timed out but your
+                                deadline has not been reached; the
+                                framework chunks long waits so the
+                                host's shell timeout cannot kill them.
+     TIMEOUT                   → deadline reached without attention.
+                                End the turn cleanly, or take
+                                initiative if your role allows it.
 
 ### When to write a worklog
 
@@ -294,7 +307,7 @@ directly without needing task-board ownership.
 
 ### Idle and lifecycle
 
-- Plan returned nothing, wait returned IDLE → end the turn cleanly.
+- Plan returned nothing, wait returned TIMEOUT → end the turn cleanly.
   Do NOT \`release\` the role unless the role's participation is over
   for the project; release loses the role and forces a re-claim.
 - Plan returned something stale (more than 5 turns since you last planned)
@@ -302,6 +315,26 @@ directly without needing task-board ownership.
 - A broadcast that does not require your action: ack it; no response
   is required. If it changes an assumption you were operating on,
   write a one-line worklog noting the new context.
+
+### Idle (no work) — \`wait --for task-assigned\`
+
+When plan returns no tasks and no events to chase, the right move is
+\`agentctl wait --in <duration> --for task-assigned\` (e.g.
+\`--in 1h --for task-assigned\`).
+
+- On the FIRST chunk of that wait the framework auto-broadcasts a
+  worklog: "<you> is idle since ...; waiting for new task assignment
+  until <deadline>." Any role with task-board ownership sees that and
+  can assign you work.
+- The broadcast is one-shot per wait session — RESUME re-invocations
+  do NOT re-broadcast.
+- When a \`TASK_ASSIGNED\` event with you as the new owner arrives,
+  wait exits CONDITION_MET; plan and start.
+
+Do NOT use \`--for task-assigned\` while you still have an open task
+(InProgress / Blocked / Review): finish or hand off first. The
+broadcast is for genuinely-empty queues, not for "I don't feel like
+my current task".
 
 ### Build / test breakage
 
@@ -317,7 +350,8 @@ directly without needing task-board ownership.
   track.
 - Don't re-plan in a tight loop; that is what \`wait\` exists for.
 - Don't end a substantive turn without \`wait\` — the team reads your
-  liveness from the wait result.
+  liveness from the wait result (and from the worklog auto-broadcast
+  when you wait with \`--for task-assigned\`).
 - Don't spoof a different role by editing \`MA_SESSION\` or filing a
   report with someone else's \`from\`. Both are detectable.
 - Don't open an RFC for a question that has a single clear owner.

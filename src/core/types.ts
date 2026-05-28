@@ -500,3 +500,64 @@ export interface SessionInfo {
   /** Soft TTL after which other claimers may take over. */
   leaseTtlSeconds: number;
 }
+
+// ---- PR8i wait-until -----------------------------------------------------
+
+/**
+ * The "what am I waiting for" predicate selector. `attention` triggers
+ * an ATTENTION exit on any visible event for the role; the rest trigger
+ * a CONDITION_MET exit on a more specific match. See `evaluateWaitCondition`
+ * in `local-fs-store.ts` for the per-kind predicate body.
+ */
+export type WaitConditionKind =
+  | "attention"
+  | "rfc-decided"
+  | "rfc-acked"
+  | "task-assigned"
+  | "report-from"
+  | "event-ref";
+
+export interface WaitCondition {
+  kind: WaitConditionKind;
+  /**
+   * Auxiliary reference. Meaning depends on `kind`:
+   *   - `rfc-decided`, `rfc-acked`: RFC id (`RFC-NNNN`).
+   *   - `report-from`: sender role id.
+   *   - `event-ref`: arbitrary event `ref` string.
+   *   - `attention`, `task-assigned`: unused (must be absent).
+   */
+  ref?: string;
+}
+
+/**
+ * Persisted across resumes at `comms/pending/<role>/wait.json`. Written
+ * on the first chunk of a wait session, kept while the agent re-invokes
+ * `wait` to consume more chunks (RESUME exits), cleared on terminal
+ * exits (ATTENTION / CONDITION_MET / TIMEOUT).
+ *
+ * Two purposes:
+ *   1. De-duplicate the idle worklog broadcast for `--for task-assigned`
+ *      across chunked invocations.
+ *   2. Make "who is waiting for what until when" externally observable
+ *      (PR9 `agentctl doctor`). Correctness does not rely on this file:
+ *      if it goes missing the worst-case is a duplicated idle worklog.
+ */
+export interface WaitState {
+  role: RoleId;
+  /** ISO-8601 UTC. */
+  deadline: string;
+  for: WaitCondition;
+  /** ISO-8601 UTC; recorded on the first chunk. */
+  startedAt: string;
+  /** Cursor value at session start, used by the doctor for diagnostics. */
+  ackedThroughAtStart: string;
+  /** True once the idle worklog has been posted (only used with task-assigned). */
+  idleBroadcastSent: boolean;
+}
+
+/**
+ * Terminal verdicts produced by `agentctl wait`. RESUME is the only
+ * non-terminal outcome: it tells the agent to invoke `wait` again with
+ * the same `--until` / `--for`.
+ */
+export type WaitStatus = "attention" | "condition_met" | "resume" | "timeout";

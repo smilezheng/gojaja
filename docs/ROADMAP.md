@@ -252,6 +252,27 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     field is detected on read and refused with migration hint.
   - Suite 247 -> 260.
 
+- **PR8i — wait redesigned around deadlines + RESUME + idle broadcast.**
+  - Cuts `--mode block | exit`, `--idle <minutes>`, `--idle-seconds`,
+    and the `.wait` sentinel. Removed flags raise USAGE pointing at
+    the new shape.
+  - New flags: `--until <ISO>` / `--in <duration>` /
+    `--for <condition>` / `--poll-interval <duration>`.
+  - Conditions: `attention` (default), `rfc-decided:<id>`,
+    `rfc-acked:<id>`, `task-assigned`, `report-from:<role>`,
+    `event-ref:<id>`.
+  - Four verdicts: `ATTENTION`, `CONDITION_MET`, `RESUME`, `TIMEOUT`.
+    Each prints the next command. RESUME is the chunked-polling
+    recovery mechanism that lets a long wait survive any host shell
+    timeout.
+  - `--for task-assigned` auto-broadcasts a one-shot idle WORKLOG so
+    task-board owners can re-assign the role. Dedup-ed across resumes
+    via `comms/pending/<role>/wait.json`.
+  - Cursor runtime body pins `--poll-interval 30s`; other targets
+    leave the default.
+  - Schema version bumped to `2.0.0-wait-v2`.
+  - Suite 260 -> 270.
+
 ### Planned, in priority order
 
 - **PR8h — schema-level deferments.**
@@ -322,10 +343,13 @@ PR8e / PR8f-A / PR8f-B / PR8f-C are correctness + UX hardening.
 PR8g + PR8g.1 rework the RFC mechanism to support real multi-round
 decisions: PR8g introduced threading + add-option + pre-decide +
 revise/edit; PR8g.1 walked back the pre-decide state-machine to a
-comment kind with a hard ACK gate (silence is not consent).
+comment kind with a hard ACK gate (silence is not consent). PR8i
+collapses the `wait --mode block | exit` dichotomy into a single
+deadline-driven, chunked, resumable primitive.
 The "breaking" alpha-stage surface changes are PR8f-C
-(`write-state` → `state edit`), PR8g (comments file shape) and
-PR8g.1 (pre-decide field/status removed). PR8h–PR10 harden the layer
+(`write-state` → `state edit`), PR8g (comments file shape),
+PR8g.1 (pre-decide field/status removed), and PR8i (wait flags +
+`.wait` sentinel removed). PR8h–PR10 harden the layer
 for everyday use; PR8h is the only remaining schema-affecting PR
 before `v2.0.0`. Anything past `v2.0.0` only ships after the chaos
 suite (PR10) is green.

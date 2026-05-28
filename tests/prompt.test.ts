@@ -81,19 +81,21 @@ describe("buildRuntime (role-free)", () => {
     expect(a.files).toEqual([]);
   });
 
-  it("Step 6: cursor body recommends `wait --mode exit` (cursor chat times out long blocks)", () => {
+  it("PR8i: cursor body pins a short --poll-interval (chunked wait survives short host shell timeout)", () => {
     const a = buildRuntime("cursor", ctx.root);
-    expect(a.body).toContain("agentctl wait --mode exit");
-    // Must NOT recommend the default `agentctl wait` alone — the cursor
-    // host kills sleeping shells before --idle 10 elapses.
-    expect(a.body).not.toMatch(/agentctl wait\s*\n/);
+    expect(a.body).toContain("agentctl wait --in 10m --poll-interval 30s");
+    // Removed flags from the pre-PR8i shape must not return as cargo
+    // text in any generated artifact.
+    expect(a.body).not.toContain("--mode exit");
+    expect(a.body).not.toContain("--mode block");
   });
 
-  it("Step 6: non-cursor bodies keep block-mode default `agentctl wait`", () => {
+  it("PR8i: non-cursor bodies use the simple `wait --in 10m`", () => {
     for (const t of ["codex", "claude", "generic"] as const) {
       const a = buildRuntime(t, ctx.root);
-      expect(a.body).toContain("agentctl wait");
-      expect(a.body).not.toContain("agentctl wait --mode exit");
+      expect(a.body).toContain("agentctl wait --in 10m");
+      expect(a.body).not.toContain("--poll-interval");
+      expect(a.body).not.toContain("--mode exit");
     }
   });
 

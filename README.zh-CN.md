@@ -180,7 +180,9 @@ agentctl task status T-0001 InProgress
 agentctl task status T-0001 Review
 agentctl worklog --message "T-0001 done, see commit abc123"
 agentctl ack --token <plan 返回的 token>       # 确认这一轮处理完了
-agentctl wait                                  # 进入低成本待命
+agentctl wait --in 10m                         # 待命，10 分钟内有新消息就唤醒
+# 没活儿干了想被派任务的话用这条，会自动广播一条 "我空闲了"：
+agentctl wait --in 1h --for task-assigned
 ```
 
 今天不干这个角色了：

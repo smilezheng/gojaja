@@ -15,6 +15,7 @@ import type {
   Task,
   TaskBoard,
   TaskStatus,
+  WaitState,
 } from "./types";
 
 /**
@@ -219,13 +220,26 @@ export interface Store {
     actor: RoleId | "SYSTEM";
   }): Promise<{ role: RoleId; removedSessions: number }>;
 
-  // ---- wait sentinel ------------------------------------------------------
+  // ---- wait state (PR8i) --------------------------------------------------
 
   /**
-   * Write the `comms/pending/<role>/.wait` sentinel (used by
-   * `agentctl wait --mode exit`). Returns the absolute path written.
+   * Read the current wait session for `role`, if any. `null` means no
+   * wait session is in progress (fresh start).
    */
-  writeWaitSentinel(role: RoleId): Promise<{ path: string; writtenAt: string }>;
+  readWaitState(role: RoleId): Promise<WaitState | null>;
+
+  /**
+   * Atomically persist a wait session. Called on the first chunk of a
+   * fresh session and again whenever `idleBroadcastSent` flips.
+   */
+  writeWaitState(state: WaitState): Promise<void>;
+
+  /**
+   * Remove the wait session for `role`. Idempotent: a missing file is
+   * not an error. Called on terminal exits (ATTENTION / CONDITION_MET /
+   * TIMEOUT). RESUME exits intentionally do NOT call this.
+   */
+  clearWaitState(role: RoleId): Promise<void>;
 
   // ---- task board ---------------------------------------------------------
 

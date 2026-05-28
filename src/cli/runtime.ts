@@ -15,7 +15,10 @@ export const CLI_VERSION: string = PACKAGE_VERSION;
 // `preDecision` field are removed; comments carry a structured `kind`
 // (pre-decision / ack / object). Old shapes are detected on read and
 // refused with a migration hint.
-export const SCHEMA_VERSION = "2.0.0-rfc-v2.1";
+// Bumped again in PR8i: the `.wait` sentinel is gone; `wait` writes a
+// session record at `comms/pending/<role>/wait.json` and survives host
+// shell timeouts via chunked polling with explicit deadlines.
+export const SCHEMA_VERSION = "2.0.0-wait-v2";
 
 export const LAYER_DIRNAME = ".multi-agent";
 

@@ -39,7 +39,9 @@ loop:
   agentctl ack --token <token>  → cursor advances exactly to
                                   manifest.advanceCursorTo
 
-  (optional, between turns) agentctl wait [--mode block|exit] [--idle <min>]
+  (optional, between turns) agentctl wait [--until <iso> | --in <dur>]
+                                          [--for <condition>]
+                                          [--poll-interval <dur>]
 
 agentctl release                → clears the session
 ```
@@ -422,38 +424,84 @@ An agent window that has nothing to do should stay alive — discussions,
 reviews, blocker messages may arrive from other agents — but should not
 consume tokens while idle. `wait` is the cheap-keepalive primitive.
 
-### `agentctl wait [<role>] [--idle <minutes>] [--mode block|exit]`
+PR8i redesigned `wait` from a `--mode block | exit` dichotomy into a
+single deadline-driven, chunked, resumable primitive. The `.wait`
+sentinel is gone; a session record lives at
+`comms/pending/<role>/wait.json` (see [SCHEMA](./SCHEMA.md)).
+
+### `agentctl wait [<role>] [--until <iso> | --in <dur>] [--for <condition>] [--poll-interval <dur>] [--json]`
 
 Role resolution follows the same rules as `plan` (MA_SESSION first;
 explicit role argument must agree).
 
-`--mode block` (default):
+**Deadline (pick one; default `--in 10m`):**
 
-1. Shell-level `setTimeout` blocks for `--idle` minutes. No LLM tokens
-   are consumed while sleeping.
-2. After waking, `wait` reads the cursor and lists events newer than it,
-   applying the same recipient filter as `plan` (`to ∈ {role, "*"} &&
-   from !== role`). The cursor is **not** modified, no manifest is
-   generated.
-3. Output (always exit 0):
-   - `ATTENTION role=<r> newEvents=<n> ...` if any new event matched.
-     The agent should then run `agentctl plan` to consume them.
-   - `IDLE role=<r> newEvents=0 ...` if none did. The agent may end the
-     turn.
-4. Use `--json` for machine-readable output (`status: "attention" | "idle"`).
+- `--until 2026-05-28T15:00:00Z` — absolute ISO instant. Must carry
+  `Z` or an explicit offset; bare local times are refused.
+- `--in 30s | 10m | 4h | 1d` — relative duration. Same parser as
+  `--poll-interval`.
 
-`--mode exit` (for Cursor and other hosts with short shell timeouts):
+`--until` and `--in` are mutually exclusive.
 
-1. Writes a sentinel `comms/pending/<role>/.wait`. See [SCHEMA](./SCHEMA.md).
-2. Exits 0 immediately. The agent window's outer loop is expected to be
-   resumed by the next user message (or an external scheduler in v2.x).
+**Condition (`--for <token>`; default `attention`):**
+
+| Token | Fires when |
+| --- | --- |
+| `attention` | any event with `to ∈ {role, "*"} && from !== role` |
+| `rfc-decided:RFC-NNNN` | `RFC_DECIDED` with that ref |
+| `rfc-acked:RFC-NNNN` | `RFC_COMMENT` on that RFC with `payload.kind ∈ {ack, object}` |
+| `task-assigned` | `TASK_ASSIGNED` with the role as the new owner |
+| `report-from:<role>` | `REPORT` from that role addressed to self |
+| `event-ref:<id>` | any event whose `ref === id` |
+
+`task-assigned` additionally auto-broadcasts an idle worklog the first
+time wait writes its session record. The broadcast is one-shot per
+session (RESUME re-invocations do not re-broadcast) and goes to `*`,
+so any role with task-board ownership can pick the role up.
+
+**Chunked polling.** Each invocation does at most one sleep of
+`min(deadline - now, --poll-interval)` (default 30 s). After the sleep
+it checks events and exits with one of four verdicts:
+
+```
+ATTENTION       role=<r> newEvents=<n> deadline=<iso>
+                Next: agentctl plan
+
+CONDITION_MET   condition=<token> role=<r>
+                Next: agentctl plan
+
+RESUME          deadline=<iso> chunkSleptMs=<ms>
+                Next: agentctl wait --until <iso> [--for <token>]
+
+TIMEOUT         role=<r> deadline=<iso>
+                Next: end the turn cleanly, or take initiative.
+```
+
+RESUME is the only non-terminal outcome. It tells the agent to re-invoke
+wait with the same deadline; the verdict line literally echoes the
+command. This is how a long wait survives a host shell timeout: each
+chunk is one process, the next process resumes from disk.
+
+Exit code is `0` for all four verdicts. Use `--json` to get
+`{ status: "attention" | "condition_met" | "resume" | "timeout", ... }`
+when machine-parsing.
 
 Two cardinal rules — both fix v0.1 bugs:
 
 - **No exit-code overloading.** Exit 0 in every normal outcome. Non-zero
-  is for genuine usage errors (e.g. unknown role).
+  is for genuine usage errors (e.g. unknown role, removed `--mode`
+  flag, ISO without an offset).
 - **No cursor mutation.** `wait` is a pure read; only `plan` + `ack`
   may move the cursor.
+
+**Refused while a manifest is pending.** If `cursor.pendingManifest`
+is non-null, wait refuses with USAGE and points at the outstanding
+ack token. Otherwise every event in the pending manifest would
+re-trigger ATTENTION, looping the agent.
+
+**User-cancel is a host concern.** If the user wants to interrupt a
+chunked wait early, they end the chat / kill the shell themselves;
+the framework does not provide a separate cancel verb.
 
 ## Activation in different agent hosts
 
@@ -539,7 +587,7 @@ A role's window can end its turn cleanly only when:
 
 1. No outstanding `pendingManifest` exists for the role (i.e. the last
    `plan` was acked).
-2. `wait` returned `idle` or the user has terminated the loop.
+2. `wait` returned `timeout` or the user has terminated the loop.
 3. Optionally, `agentctl release <role>` was called. If not called, the
    session lease will expire naturally; the next `claim` will take over.
 

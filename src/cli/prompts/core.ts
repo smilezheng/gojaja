@@ -6,10 +6,11 @@ export interface RuntimeBodyOptions {
   withHandbook?: boolean;
   /**
    * Host target. The runtime body uses this only to tweak the
-   * recommended `wait` invocation: Cursor's chat-mode shell typically
-   * times out within seconds, so a default `agentctl wait` (block mode,
-   * 10 minutes) will be killed by the host. Cursor builds recommend
-   * `--mode exit`; other targets stay on the cheaper block mode.
+   * recommended `wait` invocation: Cursor's chat-mode shell kills any
+   * shell command at its host-side timeout (seconds), so Cursor builds
+   * pin a short `--poll-interval`. Codex / Claude / generic hosts can
+   * comfortably sleep through the default poll interval, so we leave it
+   * unset there.
    */
   target?: Target;
 }
@@ -95,8 +96,20 @@ unread work.
      agentctl ack --token <ackToken from step 1>
 5. Stay alive without burning tokens:
      ${waitCmd}
-   It prints either ATTENTION (new work arrived) or IDLE (nothing new;
-   you may end the turn). Loop to step 1 on ATTENTION.
+   wait prints one of four verdicts and the exact next command to run:
+     ATTENTION       new work arrived; the verdict line says
+                     \`Next: agentctl plan\` — do that.
+     CONDITION_MET   the specific thing you were waiting for
+                     happened; same \`Next: agentctl plan\`.
+     RESUME          chunk over but the deadline has not been
+                     reached; the verdict echoes the exact
+                     \`agentctl wait --until ... [--for ...]\`
+                     command to re-run. Copy/paste that and loop.
+     TIMEOUT         deadline reached without attention; end the
+                     turn cleanly or take initiative.
+   On long waits, RESUME may fire many times before any of the other
+   three. That is the design — every chunk is one shell call, so the
+   host can kill the shell at any point without losing the wait.
 
 ## Rules
 
@@ -114,21 +127,19 @@ ${handbook}`;
  * Per-target recommendation for the `wait` invocation.
  *
  * Cursor's chat-mode shell wraps each tool call with a host-side
- * timeout in the seconds range, well below the default `--idle 10`
- * minutes for block mode. The block-mode sleep is silently killed by
- * the host, the agent sees a broken exit code, and the runtime loop
- * stalls. Exit-mode is the right default for Cursor (drops a sentinel,
- * returns immediately).
- *
- * Codex / Claude Code / generic shells can run a 10-minute sleep
- * without trouble — block mode is cheaper because it does not require
- * the agent to be re-prompted to resume.
+ * timeout in the seconds range. A single long sleep is killed by the
+ * host and the agent sees a broken exit code. The PR8i `wait` design
+ * answers this with chunked, resumable polling: Cursor pins a short
+ * `--poll-interval` so each chunk fits inside the host budget; on
+ * RESUME the agent re-invokes the same command. Codex / Claude /
+ * generic shells can sleep through the default chunk, so we omit the
+ * flag there.
  */
 function waitRecommendation(target: Target | undefined): string {
   if (target === "cursor") {
-    return "agentctl wait --mode exit";
+    return "agentctl wait --in 10m --poll-interval 30s";
   }
-  return "agentctl wait";
+  return "agentctl wait --in 10m";
 }
 
 /**

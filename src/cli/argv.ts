@@ -114,3 +114,42 @@ export function boolFlag(
 ): boolean {
   return flags[name] === true || flags[name] === "true";
 }
+
+/**
+ * Parse a human-readable duration string into milliseconds.
+ *
+ * Accepted forms (suffix letter mandatory; no compound forms like `1h30m`):
+ *   `<n>ms` `<n>s` `<n>m` `<n>h` `<n>d`
+ *
+ * Examples: `30s`, `10m`, `4h`, `1d`. Bare numbers and other suffixes are
+ * rejected with a `UsageError` so the caller can surface the offending
+ * flag name in the message.
+ *
+ * @throws UsageError on parse failure.
+ */
+export function parseDuration(raw: string): number {
+  const m = /^(\d+)(ms|s|m|h|d)$/.exec(raw);
+  if (!m) {
+    throw new UsageError(
+      `Invalid duration '${raw}'. Use forms like 30s, 10m, 4h, 1d, 500ms.`,
+    );
+  }
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new UsageError(`Invalid duration '${raw}': value must be >= 0.`);
+  }
+  switch (m[2]) {
+    case "ms":
+      return n;
+    case "s":
+      return n * 1000;
+    case "m":
+      return n * 60 * 1000;
+    case "h":
+      return n * 60 * 60 * 1000;
+    case "d":
+      return n * 24 * 60 * 60 * 1000;
+    default:
+      throw new UsageError(`Invalid duration '${raw}'.`);
+  }
+}

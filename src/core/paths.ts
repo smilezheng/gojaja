@@ -56,12 +56,21 @@ export function worklogEntryPath(role: string, eventId: string): string {
 }
 
 /**
- * Sentinel written by `agentctl wait --mode exit`. Its presence means the
- * role's window has voluntarily yielded between turns and is waiting for
- * an external trigger to resume.
+ * PR8i wait state. Replaces the pre-PR8i `.wait` sentinel.
+ *
+ * Persists across resumed `wait` invocations:
+ *   - Stores deadline + condition + bookkeeping for the current session.
+ *   - De-duplicates the idle worklog broadcast emitted by
+ *     `--for task-assigned` (we want exactly one broadcast per session,
+ *     not one per chunk).
+ *
+ * Cleared on terminal exits (ATTENTION / CONDITION_MET / TIMEOUT);
+ * kept across RESUME exits. Correctness does not depend on this file:
+ * the agent carries the deadline on the command line, so loss merely
+ * causes a duplicated idle worklog.
  */
-export function waitSentinelPath(role: string): string {
-  return path.posix.join(Paths.pendingDir, role, ".wait");
+export function waitStatePath(role: string): string {
+  return path.posix.join(Paths.pendingDir, role, "wait.json");
 }
 
 export function rfcDir(rfcId: string, slug: string): string {

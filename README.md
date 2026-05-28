@@ -180,7 +180,9 @@ agentctl task status T-0001 InProgress
 agentctl task status T-0001 Review
 agentctl worklog --message "T-0001 done, see commit abc123"
 agentctl ack --token <token from plan>         # confirm processed
-agentctl wait                                  # idle without burning tokens
+agentctl wait --in 10m                         # idle until attention or 10 min
+# or, when you genuinely have no task:
+agentctl wait --in 1h --for task-assigned      # also broadcasts "I'm idle"
 ```
 
 When done with a role for the day:

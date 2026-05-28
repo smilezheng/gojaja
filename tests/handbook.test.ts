@@ -6,7 +6,7 @@ const KEY_TRIGGER_PHRASES: ReadonlyArray<RegExp> = [
   // Core stance + turn shape
   /agentctl is the team protocol/i,
   /Default to resolving with another agent before bouncing to the user/i,
-  /every substantive turn must end with wait/i,
+  /every substantive turn must end\s+with wait/i,
 
   // Worklog rules
   /3\+ turns without a worklog/,
@@ -51,6 +51,11 @@ const KEY_TRIGGER_PHRASES: ReadonlyArray<RegExp> = [
   /Silence does\s+NOT count as consent/,
   /myAckOwed: true/,
   /Posting a plain `rfc comment`/,
+
+  // PR8i: wait redesigned around deadlines + RESUME + --for task-assigned.
+  /Idle \(no work\)[^\n]*wait --for task-assigned/,
+  /wait prints one of four verdicts/,
+  /one-shot per wait session/,
 ];
 
 describe("COLLABORATION_HANDBOOK", () => {
@@ -111,13 +116,14 @@ describe("COLLABORATION_HANDBOOK", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("stays within a reasonable size budget (<14 KB of UTF-8)", () => {
+  it("stays within a reasonable size budget (<16 KB of UTF-8)", () => {
     // Loaded once per session into the host's persistent area, so the
     // budget is generous compared to roleReminder. Still capped so
     // future edits notice when the handbook bloats. Bumped from 8 KB
     // to 10 KB in PR8c, 10 KB to 12 KB in PR8f-A, 12 KB to 14 KB in
-    // PR8g (RFC v2 multi-round / pre-decide / revise rules).
-    expect(Buffer.byteLength(COLLABORATION_HANDBOOK, "utf8")).toBeLessThan(14 * 1024);
+    // PR8g (RFC v2 multi-round / pre-decide / revise rules), 14 KB to
+    // 16 KB in PR8i (wait verdict table + --for task-assigned guidance).
+    expect(Buffer.byteLength(COLLABORATION_HANDBOOK, "utf8")).toBeLessThan(16 * 1024);
   });
 });
 

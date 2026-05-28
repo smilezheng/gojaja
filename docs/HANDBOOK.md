@@ -52,7 +52,9 @@ When extending the handbook, keep these constraints:
   something, link to `PROTOCOL.md` rather than restating it.
 - **Stay under the size budget.** The handbook ships in every agent
   window's persistent prompt area; the test suite enforces
-  `< 8 KB` of UTF-8.
+  `< 16 KB` of UTF-8 (bumped over time as content grew; PR8i set the
+  current ceiling after adding the wait verdict table and the idle
+  `--for task-assigned` guidance).
 
 ## Scope: what is in vs out
 
@@ -66,6 +68,9 @@ In scope:
   other agents' reports).
 - Crisis paths: build broken, test failure, FORBIDDEN exit code,
   stale manifest, idle.
+- Wait verdicts (ATTENTION / CONDITION_MET / RESUME / TIMEOUT) and
+  when to use `wait --for task-assigned` (the auto-broadcast that
+  tells task-board owners "I am free, give me work").
 
 Out of scope:
 

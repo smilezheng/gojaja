@@ -338,24 +338,35 @@ via `agentctl rfc show <id>`.
 - `release` requires the holder's `sessionId`; a mismatched call is
   refused.
 
-## `comms/pending/<role>/.wait`
+## `comms/pending/<role>/wait.json`
 
-Sentinel written by `agentctl wait --mode exit`. Its presence means
-the role's window has voluntarily yielded between turns and is waiting
-for an external trigger to resume.
+PR8i session record for `agentctl wait`. Written atomically on the
+first chunk of a fresh wait session; kept across RESUME re-invocations;
+cleared on terminal exits (ATTENTION / CONDITION_MET / TIMEOUT).
+Replaces the pre-PR8i `.wait` sentinel.
 
 ```jsonc
 {
-  "role": "PM",
-  "mode": "exit",
-  "writtenAt": "2026-05-27T05:23:00Z"
+  "role": "Backend",
+  "deadline": "2026-05-28T15:00:00Z",
+  "for": { "kind": "task-assigned" },
+  "startedAt": "2026-05-28T14:00:00Z",
+  "ackedThroughAtStart": "01HZ...",
+  "idleBroadcastSent": true
 }
 ```
 
-The sentinel is informational only; nothing else reads it in v2.0.0.
-It exists so external schedulers and `agentctl doctor` (planned) can
-distinguish "idle and intentionally yielded" from "crashed" without
-ambiguity.
+- `for.kind` is one of `attention`, `rfc-decided`, `rfc-acked`,
+  `task-assigned`, `report-from`, `event-ref`. The `ref` sub-field
+  carries an RFC id / role id / event ref where applicable.
+- `idleBroadcastSent` is true only after the framework has emitted the
+  "I am idle" worklog for a `--for task-assigned` wait. The flag exists
+  to make that broadcast one-shot across chunked invocations.
+
+Correctness does not depend on this file: the deadline is also on the
+agent's command line. Losing the file at worst causes one duplicate
+idle worklog. External observers (e.g. `agentctl doctor`, planned for
+PR9) read it to list "who is waiting on what and until when".
 
 ## `comms/heartbeats/<role>.json` (planned)
 

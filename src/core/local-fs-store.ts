@@ -32,7 +32,7 @@ import {
   rfcProposalPath,
   rfcReadCursorPath,
   rolePaths,
-  waitSentinelPath,
+  waitStatePath,
   worklogEntryPath,
 } from "./paths";
 import { validateRoleId, validateSlug } from "./role-id";
@@ -61,6 +61,7 @@ import {
   type TaskBoard,
   type TaskStatus,
   type TaskSummary,
+  type WaitState,
 } from "./types";
 
 function freshConfig(schemaVersion: string): ProjectConfig {
@@ -1007,14 +1008,25 @@ export class LocalFsStore implements Store {
     });
   }
 
-  // ---- wait sentinel ------------------------------------------------------
+  // ---- wait state (PR8i) --------------------------------------------------
 
-  async writeWaitSentinel(role: RoleId): Promise<{ path: string; writtenAt: string }> {
+  async readWaitState(role: RoleId): Promise<WaitState | null> {
     validateRoleId(role);
-    const writtenAt = new Date().toISOString();
-    const target = this.abs(waitSentinelPath(role));
-    await atomicWriteJson(target, { role, mode: "exit", writtenAt });
-    return { path: target, writtenAt };
+    const target = this.abs(waitStatePath(role));
+    const data = await readJsonFileOrNull<WaitState>(target);
+    return data;
+  }
+
+  async writeWaitState(state: WaitState): Promise<void> {
+    validateRoleId(state.role);
+    const target = this.abs(waitStatePath(state.role));
+    await atomicWriteJson(target, state);
+  }
+
+  async clearWaitState(role: RoleId): Promise<void> {
+    validateRoleId(role);
+    const target = this.abs(waitStatePath(role));
+    await safeUnlink(target);
   }
 
   // ---- ownership ----------------------------------------------------------
