@@ -247,26 +247,44 @@ agentctl release <role>       # from a shell that holds the session, or
 
 ---
 
-## How decisions get made (RFCs in 60 seconds)
+## How decisions get made (RFCs)
 
-When a decision touches multiple roles' `owns` or the architecture, an agent opens an RFC instead of acting unilaterally.
+When a decision touches multiple roles' `owns` or the architecture, an agent opens an RFC instead of acting unilaterally. RFCs support real multi-round discussion: threaded comments, options added mid-flight, a "send back for rewrite" path, and an optional pre-decide round for "I lean X, any objections?". Full walkthrough in [docs/RFC.md](./docs/RFC.md); a quick tour:
 
 ```bash
-# Any agent can open
+# Any agent can open. --description is the context anyone-not-in-the-
+# conversation needs; --task links the work this RFC is decided in
+# the context of.
 agentctl rfc new switch-to-postgres \
-  --title "Move primary store from SQLite to Postgres" \
-  --options "A:Migrate now,B:Stay on SQLite" \
-  --voters "Backend,DevOps" \
-  --deciders "TL"
+  --title       "Move primary store from SQLite to Postgres" \
+  --description "Login latency root-caused to SQLite write contention; A is the migration, B is a tuning band-aid." \
+  --options     "A:Migrate now (4 weeks),B:WAL tuning first" \
+  --voters      "Backend,DevOps" \
+  --deciders    "TL" \
+  --task        T-0042
 
-# Voters comment
+# Voters comment; replies thread under another comment by id.
 agentctl rfc comment RFC-0001 --option A --rationale "Migration is straightforward."
+agentctl rfc comment RFC-0001 --reply-to 01HZA...COMM1 --rationale "Can M2 slip 2 weeks?"
 
-# Only deciders can close (anyone else gets exit 9 FORBIDDEN)
-agentctl rfc decide RFC-0001 --option A --rationale "Agreed. Proceed."
+# Anyone with a session can add an option mid-discussion if the
+# existing ones are inadequate.
+agentctl rfc add-option RFC-0001 --option "C:Managed Postgres on RDS" --rationale "Captures the cost dimension."
+
+# Optional pre-decide round: decider proposes, voters either stay
+# silent (consent) or comment (auto-reopens to gather more discussion).
+agentctl rfc pre-decide RFC-0001 --option C --rationale "Lean C; speak up if not."
+
+# Decider can also send a thin proposal back for rewrite without
+# rejecting the topic.
+agentctl rfc revise RFC-0001 --rationale "Add a paragraph on the operating cost."
+agentctl rfc edit   RFC-0001 --rationale "Added cost paragraph." --description "<rewritten>"
+
+# Only deciders can finally close (anyone else gets exit 9 FORBIDDEN).
+agentctl rfc decide RFC-0001 --option C --rationale "Agreed. Proceed."
 ```
 
-Open RFCs requiring a role's attention appear in that role's next `agentctl plan` automatically.
+Open RFCs that need a role's attention appear in that role's next `agentctl plan` automatically, with `unreadComments` so the agent can prioritise. `agentctl rfc show <id>` advances the role's read marker for that RFC.
 
 ---
 
@@ -289,7 +307,7 @@ Open RFCs requiring a role's attention appear in that role's next `agentctl plan
 | `claim`, `plan`, `ack`, `report`, `worklog`, `wait` | Done |
 | `role` + `prompt` + `activate` (role-free runtime, per-window activation) | Done |
 | Task board (`task new/assign/status/list/show`) | Done |
-| RFCs (`rfc new/comment/decide/reject`) | Done |
+| RFCs v2: threaded comments, `add-option`, `pre-decide`, `revise`/`edit`, `link-task` | Done |
 | Collaboration handbook injected into runtime | Done |
 | `role delete` with session and config cleanup | Done |
 | `agentctl upgrade` and `reset` | Next |

@@ -247,26 +247,41 @@ agentctl release <role>       # 在持有 session 的 shell 里跑，或
 
 ---
 
-## agent 之间怎么拍板（RFC 60 秒）
+## agent 之间怎么拍板（RFC）
 
-如果一个决策影响多个角色的 `owns` 或者动到架构，agent 会开一个 RFC，而不是自己拍板。
+如果一个决策影响多个角色的 `owns` 或者动到架构，agent 会开一个 RFC，而不是自己拍板。RFC 支持真正的多轮讨论：threaded comments、中途加 option、可选的 pre-decide 软 ACK 轮、decider 打回重写。完整讲解见 [docs/RFC.md](./docs/RFC.md)；快速过一遍：
 
 ```bash
-# 任何 agent 都能开
+# 任何 agent 都能开。--description 是不参与对话的人需要的上下文；
+# --task 标明这次决策关联的具体任务。
 agentctl rfc new switch-to-postgres \
-  --title "Move primary store from SQLite to Postgres" \
-  --options "A:Migrate now,B:Stay on SQLite" \
-  --voters "Backend,DevOps" \
-  --deciders "TL"
+  --title       "Move primary store from SQLite to Postgres" \
+  --description "登录延迟根因是 SQLite 并发写争用；A 是迁移，B 是临时调优。" \
+  --options     "A:Migrate now (4 weeks),B:WAL tuning first" \
+  --voters      "Backend,DevOps" \
+  --deciders    "TL" \
+  --task        T-0042
 
-# voter 评论
-agentctl rfc comment RFC-0001 --option A --rationale "Migration is straightforward."
+# voter 评论；回复用 --reply-to 串起来（comment id 是 ULID）。
+agentctl rfc comment RFC-0001 --option A --rationale "迁移可行。"
+agentctl rfc comment RFC-0001 --reply-to 01HZA...COMM1 --rationale "M2 能不能往后推 2 周？"
 
-# 只有 decider 能关（其它角色调会拿到 exit 9 FORBIDDEN）
-agentctl rfc decide RFC-0001 --option A --rationale "Agreed. Proceed."
+# 讨论中发现既有 option 都不够好，任何 agent 都可以加一个新 option。
+agentctl rfc add-option RFC-0001 --option "C:Managed Postgres on RDS" --rationale "把成本维度纳进来。"
+
+# 可选的 pre-decide 轮：decider 先表态 "我倾向 X，有意见吗"；
+# 沉默 = 同意，留 comment 会自动 reopen 把 RFC 拉回 open 继续讨论。
+agentctl rfc pre-decide RFC-0001 --option C --rationale "倾向 C；有异议请说。"
+
+# decider 也可以把提案打回去重写，而不是直接 reject 这个话题。
+agentctl rfc revise RFC-0001 --rationale "把成本那段补全。"
+agentctl rfc edit   RFC-0001 --rationale "补了成本段。" --description "<新版描述>"
+
+# 最终只有 decider 能拍板（其它角色调会拿到 exit 9 FORBIDDEN）。
+agentctl rfc decide RFC-0001 --option C --rationale "Agreed. Proceed."
 ```
 
-某角色需要表态的 RFC 会出现在它下一次 `agentctl plan` 的结果里，不用谁来追单。
+某角色需要表态的 RFC 会出现在它下一次 `agentctl plan` 的结果里，并带 `unreadComments` 数量好让 agent 优先处理。`agentctl rfc show <id>` 自动推进该角色对这条 RFC 的"已读"标记。
 
 ---
 
@@ -289,7 +304,7 @@ agentctl rfc decide RFC-0001 --option A --rationale "Agreed. Proceed."
 | `claim`、`plan`、`ack`、`report`、`worklog`、`wait` | 已完成 |
 | `role` + `prompt` + `activate`（role-free runtime + 每窗口绑定） | 已完成 |
 | 任务板（`task new/assign/status/list/show`） | 已完成 |
-| RFC（`rfc new/comment/decide/reject`） | 已完成 |
+| RFC v2：threaded comments、`add-option`、`pre-decide`、`revise`/`edit`、`link-task` | 已完成 |
 | 注入到 runtime 的协作 handbook | 已完成 |
 | `role delete`（带 session + config 清理） | 已完成 |
 | `agentctl upgrade` 和 `reset` | 下一步 |
