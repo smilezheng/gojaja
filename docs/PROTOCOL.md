@@ -451,8 +451,13 @@ superseded), worked example, and rationale live in
 ### `gojaja rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]`
 
 - Posts a regular discussion comment (no `kind` field).
-- The role comes from `GOJAJA_SESSION`; the framework does not allow
-  ghost-commenting on behalf of another role.
+- The role comes from `GOJAJA_SESSION` when set; without a session the
+  comment is recorded as `from: "SYSTEM"` (a human running the CLI),
+  symmetric with `rfc new`'s SYSTEM path. Structured kinds
+  (`pre-decision` / `ack` / `object`) reject SYSTEM — those carry a
+  position and must be borne by a registered role.
+- The framework does not allow ghost-commenting on behalf of another
+  role; `from` is the resolved actor, never an arbitrary string.
 - Non-voters may comment — they often add cross-cutting context that the
   named voters miss.
 - Refuses on closed RFCs (`accepted` / `rejected` / `superseded`) and

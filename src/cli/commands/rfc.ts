@@ -110,13 +110,23 @@ async function runRfcComment(args: ParsedArgs): Promise<number> {
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
-  const { role } = await resolveIdentity(store, { requireSession: true });
-  const comment = await store.commentRfc({ rfcId, role, preferred, rationale, replyTo });
+  // Plain discussion comments accept SYSTEM (a human running the CLI
+  // without GOJAJA_SESSION) symmetrically with `rfc new`. Structured
+  // kinds (pre-decide / ack / object) still require a session — those
+  // commands continue to use `resolveIdentity({ requireSession: true })`.
+  const { actor } = await resolveActor(store);
+  const comment = await store.commentRfc({
+    rfcId,
+    role: actor,
+    preferred,
+    rationale,
+    replyTo,
+  });
   if (json) {
     process.stdout.write(JSON.stringify({ status: "commented", comment }) + "\n");
   } else {
     process.stdout.write(
-      `Recorded comment ${comment.id} from ${role} on ${rfcId}` +
+      `Recorded comment ${comment.id} from ${actor} on ${rfcId}` +
         (preferred ? ` (prefers ${preferred})` : "") +
         (replyTo ? ` (reply to ${replyTo})` : "") +
         ".\n",

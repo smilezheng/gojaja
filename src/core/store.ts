@@ -389,7 +389,14 @@ export interface Store {
    */
   commentRfc(input: {
     rfcId: string;
-    role: RoleId;
+    /**
+     * Plain discussion comments accept `"SYSTEM"` (no `GOJAJA_SESSION`)
+     * so a human running the CLI can leave guidance on an RFC they
+     * opened, mirroring `rfc new`'s SYSTEM path. Structured kinds
+     * (`pre-decision` / `ack` / `object`) reject `"SYSTEM"`: those
+     * carry a position and must be borne by a registered role.
+     */
+    role: RoleId | "SYSTEM";
     preferred: string;
     rationale: string;
     replyTo?: string | null;

@@ -95,6 +95,53 @@ describe("PR8g — threaded comments ledger", () => {
     ).rejects.toMatchObject({ code: "USAGE" });
   });
 
+  it("plain comments accept role: 'SYSTEM' (human-running-CLI path)", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    const c = await ctx.store.commentRfc({
+      rfcId: r.id,
+      role: "SYSTEM",
+      preferred: "",
+      rationale: "context from the user: please weigh in by EoD.",
+    });
+    expect(c.role).toBe("SYSTEM");
+    const { comments } = await ctx.store.readRfc(r.id);
+    expect(comments).toHaveLength(1);
+    expect(comments[0].role).toBe("SYSTEM");
+    // SYSTEM has no manifest / read cursor — the per-RFC read marker
+    // file under `cursors/SYSTEM/` must NOT be created (would pollute
+    // the per-role cursor namespace and never be consulted anyway).
+    const cursorsDir = path.join(ctx.root, "comms", "cursors", "SYSTEM");
+    let dirExists = false;
+    try {
+      await fsp.access(cursorsDir);
+      dirExists = true;
+    } catch {
+      dirExists = false;
+    }
+    expect(dirExists).toBe(false);
+    // The emitted RFC_COMMENT event carries `from: "SYSTEM"` and
+    // `payload.role: "SYSTEM"` so audit / dashboards see the human source.
+    const events = await ctx.store.listEventsAfter("");
+    const evt = events.find((e) => e.type === "RFC_COMMENT" && e.ref === r.id);
+    expect(evt?.from).toBe("SYSTEM");
+    expect((evt?.payload as { role: string }).role).toBe("SYSTEM");
+  });
+
+  it("structured kinds (pre-decision / ack / object) reject role: 'SYSTEM'", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    for (const kind of ["pre-decision", "ack", "object"] as const) {
+      await expect(
+        ctx.store.commentRfc({
+          rfcId: r.id,
+          role: "SYSTEM",
+          preferred: "A",
+          rationale: "no",
+          kind,
+        }),
+      ).rejects.toMatchObject({ code: "USAGE" });
+    }
+  });
+
   it("10 concurrent comments all serialize (no lost writes)", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
     const roles = ["PM", "TL", "Backend", "DevOps"] as const;

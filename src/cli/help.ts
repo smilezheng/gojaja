@@ -212,6 +212,10 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
       comment does NOT advance an active pre-decision's ACK gate —
       silence is never consent; to register a position use 'rfc ack'
       or 'rfc object'.
+      Allowed without GOJAJA_SESSION (a human running the CLI; the
+      comment is recorded as from=SYSTEM), symmetric with 'rfc new'.
+      Structured kinds (pre-decide / ack / object) still require a
+      session.
 
   rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>
       Add a new option mid-discussion. Allowed in open or revising.

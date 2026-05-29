@@ -2246,13 +2246,28 @@ export class LocalFsStore implements Store {
 
   async commentRfc(input: {
     rfcId: string;
-    role: RoleId;
+    role: RoleId | "SYSTEM";
     preferred: string;
     rationale: string;
     replyTo?: string | null;
     kind?: RfcCommentKind;
   }): Promise<RfcComment> {
-    validateRoleId(input.role);
+    // `"SYSTEM"` is allowed for plain discussion comments only — a
+    // human running the CLI without `GOJAJA_SESSION` can leave
+    // guidance on an RFC. Structured kinds (pre-decision / ack /
+    // object) carry a position and must be borne by a role; reject
+    // SYSTEM up front for those so the error message is clear
+    // instead of the downstream "deciders.includes / required.has"
+    // gates rejecting it for an unrelated-looking reason.
+    const isSystem = input.role === "SYSTEM";
+    if (isSystem && input.kind !== undefined) {
+      throw new UsageError(
+        `Cannot post a ${input.kind} comment as SYSTEM; ` +
+          `pre-decision / ack / object require a registered role. ` +
+          `Run 'gojaja claim <role>' first.`,
+      );
+    }
+    if (!isSystem) validateRoleId(input.role);
     let preferred = String(input.preferred ?? "").trim();
     const rationale = String(input.rationale ?? "").trim();
     const kind = input.kind;
@@ -2412,9 +2427,14 @@ export class LocalFsStore implements Store {
       // and including their own comment. Advance their read cursor so
       // they don't appear in their own manifest as having "unread
       // discussion" right after they spoke.
-      const cursorTarget = this.abs(rfcReadCursorPath(input.role, proposal.id));
-      await fsp.mkdir(path.dirname(cursorTarget), { recursive: true });
-      await atomicWriteJson(cursorTarget, { lastSeenCommentId: comment.id });
+      // SYSTEM never has a manifest / read cursor — skip to avoid
+      // creating a stray `cursors/SYSTEM/` directory that no role
+      // would ever consult.
+      if (!isSystem) {
+        const cursorTarget = this.abs(rfcReadCursorPath(input.role, proposal.id));
+        await fsp.mkdir(path.dirname(cursorTarget), { recursive: true });
+        await atomicWriteJson(cursorTarget, { lastSeenCommentId: comment.id });
+      }
       return comment;
     });
   }

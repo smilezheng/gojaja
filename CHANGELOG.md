@@ -8,6 +8,37 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### `rfc comment` accepts SYSTEM (no GOJAJA_SESSION) for plain comments
+
+Symmetric with `rfc new`'s SYSTEM path: a human running the CLI without
+`GOJAJA_SESSION` could open an RFC but was previously blocked from
+adding any follow-up comment to it. They had to either bounce the
+guidance through an agent's chat or claim a role they did not own —
+both bad. Plain `rfc comment` now resolves the actor via
+`resolveActor`, so SYSTEM is allowed; the resulting RFC_COMMENT event
+records `from: "SYSTEM"` (and `payload.role: "SYSTEM"`), exactly like
+a SYSTEM-created RFC.
+
+- Structured kinds (`pre-decide` / `ack` / `object`) still reject
+  SYSTEM at the store layer with a clear USAGE message; those carry
+  a position and the ACK gate is computed over `voters ∪ deciders`,
+  which SYSTEM is not in.
+- SYSTEM has no manifest / read cursor, so the per-RFC read marker
+  under `cursors/<role>/rfc-<id>.json` is skipped for SYSTEM (would
+  otherwise create a stray `cursors/SYSTEM/` directory no role would
+  ever consult).
+- Type changes: `RfcComment.role` and `RfcCommentPayload.role`
+  widened from `RoleId` to `RoleId | "SYSTEM"`. Downstream consumers
+  (ACK gate, `filterVisibleEventsForRole`, `wait --for rfc-acked`,
+  `computeActivePreDecisionInLedger`, RFC summary) are unaffected:
+  they all branch on `kind ∈ {ack, object, pre-decision}` or compute
+  set membership in `voters ∪ deciders`, neither of which a SYSTEM
+  comment can satisfy.
+- Tests in `tests/rfc-v2.test.ts` cover both directions: SYSTEM can
+  post a plain comment (event `from=SYSTEM`, no `cursors/SYSTEM/`
+  written); SYSTEM is rejected with USAGE for every structured kind.
+- Updated `gojaja rfc comment -h` and `docs/PROTOCOL.md`.
+
 ### `wait --for` is a verdict tag, not an event filter
 
 Restores the original intent of `--for`: a side-effect / verdict tag,

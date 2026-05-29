@@ -449,7 +449,14 @@ export interface RfcComment {
    */
   id: string;
   rfcId: string;
-  role: RoleId;
+  /**
+   * Author of the comment. Plain discussion comments may carry
+   * `"SYSTEM"` (a human running the CLI without `GOJAJA_SESSION`,
+   * symmetric to `rfc new`'s `createdBy: "SYSTEM"`). Structured kinds
+   * (`pre-decision` / `ack` / `object`) reject `"SYSTEM"` at the
+   * store layer because they require a role to bear the position.
+   */
+  role: RoleId | "SYSTEM";
   ts: string;
   /**
    * Preferred option id. May be empty if the commenter has no
@@ -496,7 +503,8 @@ export interface RfcCreatedPayload {
 /** Payload shape for RFC_COMMENT events. */
 export interface RfcCommentPayload {
   rfcId: string;
-  role: RoleId;
+  /** See `RfcComment.role` — `"SYSTEM"` allowed for plain comments only. */
+  role: RoleId | "SYSTEM";
   preferred: string;
   rationale: string;
   /** Lets `grep payload.kind` find pre-decision / ack / object posts. */
