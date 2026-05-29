@@ -294,6 +294,44 @@ describe("Store.decideRfc / rejectRfc", () => {
       }),
     ).rejects.toMatchObject({ code: "USAGE" });
   });
+
+  it("self-heals from a caller that ALREADY holds the rfc lock (no nested-lock deadlock)", async () => {
+    // Regression: the self-heal repairs proposal.yaml under the
+    // rfc-<id> lock. Mutating callers (commentRfc/decideRfc/...) already
+    // hold that lock when they read, so the repair must run inline
+    // instead of re-entering withLock — the file lock is NOT reentrant,
+    // and re-entry would self-deadlock until LOCK_TIMEOUT (exit 6).
+    const r = await ctx.store.createRfc(NEW_RFC);
+    const decisionPath = path.join(
+      ctx.root, "rfcs", `${r.id}-${r.slug}`, "decision.json",
+    );
+    await fsp.writeFile(
+      decisionPath,
+      JSON.stringify({
+        rfcId: r.id,
+        decidedBy: "TL",
+        ts: new Date().toISOString(),
+        outcome: "accepted",
+        chosenOption: "A",
+        rationale: "first decision (lost write to proposal)",
+      }),
+    );
+
+    // commentRfc takes the rfc-<id> lock, then reads (which triggers the
+    // self-heal). It must NOT time out on the lock; it should self-heal
+    // to `accepted` and then refuse the comment because the RFC is now
+    // closed — a USAGE error, never a LOCK_TIMEOUT.
+    await expect(
+      ctx.store.commentRfc({
+        rfcId: r.id, role: "Backend", preferred: "A", rationale: "late comment", replyTo: null,
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+
+    const events = await ctx.store.listEventsAfter("");
+    expect(events.some((e) => e.type === "RFC_REPAIRED" && e.ref === r.id)).toBe(true);
+    const { proposal } = await ctx.store.readRfc(r.id);
+    expect(proposal.status).toBe("accepted");
+  });
 });
 
 describe("Manifest.rfcs", () => {

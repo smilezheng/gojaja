@@ -35,6 +35,21 @@ describe("Store.initialise (PR8f-B project_state.md skeleton)", () => {
     expect(md).toContain("state/project_state.md");
   });
 
+  it("writes a .gitignore that excludes machine-specific runtime state", async () => {
+    await ctx.store.initialise("2.0.0-test");
+    const gi = await fsp.readFile(path.join(ctx.root, ".gitignore"), "utf8");
+    // Runtime ephemera must be ignored so a committed .gojaja/ does not
+    // resurrect stale sessions/locks/cursors on another checkout.
+    expect(gi).toContain("locks/");
+    expect(gi).toContain("comms/sessions/");
+    expect(gi).toContain("comms/pending/");
+    expect(gi).toContain("comms/heartbeats/");
+    expect(gi).toContain("comms/cursors/");
+    // The audit trail stays committable — it must NOT be ignored.
+    expect(gi).not.toMatch(/^comms\/events\/?$/m);
+    expect(gi).not.toMatch(/^worklog\/?$/m);
+  });
+
   it("seeds the skeleton only on first init; AlreadyInitializedError on second run", async () => {
     await ctx.store.initialise("2.0.0-test");
     const stateFile = path.join(ctx.root, "state/project_state.md");

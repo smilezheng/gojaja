@@ -2,7 +2,11 @@ import { boolFlag, optionalString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 
-const DEFAULT_TTL_SECONDS = 1800; // 30 minutes
+// 2 hours. Long agent tasks (large refactors, multi-file features) can
+// keep a single window busy well past the old 30-minute lease without
+// emitting a command; every authenticated command auto-renews, so this
+// only governs how long a *silent* session stays claimable by others.
+const DEFAULT_TTL_SECONDS = 7200;
 
 export async function runClaim(args: ParsedArgs): Promise<number> {
   const role = args.positional[0];

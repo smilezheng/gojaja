@@ -68,6 +68,13 @@ One role per window. Bound by \`gojaja claim <role>\` + exporting the
 printed \`GOJAJA_SESSION\`. Lose track? Run \`gojaja plan\` — the
 manifest names your role and your unread work.
 
+If your shell does NOT keep environment variables between commands
+(each tool call starts a fresh shell, so the \`export\` from claim is
+lost and every command errors with "GOJAJA_SESSION is required"), pass
+the id explicitly instead: \`gojaja <cmd> --session <id>\` (the id is
+printed by \`gojaja claim\`). Either run the loop in one persistent
+shell, or carry \`--session <id>\` on every command.
+
 ## Every turn
 
 1. \`gojaja plan\` → JSON Manifest (role, ackToken, events, tasks, rfcs).
@@ -123,8 +130,10 @@ in order:
 
   1. eval "$(gojaja claim ${role} --eval)"
      # Claims the role and exports GOJAJA_SESSION in one step.
-     # Subsequent gojaja commands in this shell will authenticate
-     # as ${role}.
+     # Subsequent gojaja commands in this shell authenticate as ${role}.
+     # If your shell does NOT persist env vars between commands, run
+     # \`gojaja claim ${role}\` (no --eval), note the printed session id,
+     # and pass \`--session <id>\` on every later gojaja command.
 
   2. gojaja role show ${role}
      # Read your own role contract: title, owns, reportsTo,

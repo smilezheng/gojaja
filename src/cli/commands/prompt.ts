@@ -3,6 +3,7 @@ import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { buildRuntime, writeArtifactFile } from "../prompts";
 import type { Target } from "../prompts";
+import { registerCodexProject } from "../prompts/codex-registry";
 
 const TARGETS: ReadonlySet<Target> = new Set(["codex", "claude", "cursor", "generic"]);
 
@@ -60,6 +61,12 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
     for (const f of artifact.files) {
       const result = await writeArtifactFile(f, { force: forceRewrite });
       writeResults.push({ path: f.path, result });
+    }
+    // The Codex skill is user-level and shared across projects. Record
+    // this project so `reset --purge-codex-skill` can ref-count and
+    // avoid deleting a skill another project still depends on.
+    if (target === "codex") {
+      await registerCodexProject(root);
     }
   }
 

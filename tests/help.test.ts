@@ -24,10 +24,13 @@ describe("gojaja help text (PR8e rewrite)", () => {
     expect(HELP_TEXT).toContain("unset GOJAJA_SESSION");
   });
 
-  it("documents exit codes 2 / 6 / 9 / 10 with agent-actionable hints", () => {
+  it("documents exit codes with agent-actionable hints, matching errors.ts", () => {
+    // The codes here must stay in sync with src/core/errors.ts; an
+    // agent branching on the wrong number is worse than no table.
     expect(HELP_TEXT).toContain("USAGE");
-    expect(HELP_TEXT).toContain("FORBIDDEN");
-    expect(HELP_TEXT).toContain("STATE_CORRUPTION");
+    expect(HELP_TEXT).toContain("3  NOT_INIT");
+    expect(HELP_TEXT).toContain("8  STATE_CORRUPT");
+    expect(HELP_TEXT).toContain("9  FORBIDDEN");
     expect(HELP_TEXT).toContain("escalate");
   });
 

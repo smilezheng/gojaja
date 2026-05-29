@@ -66,14 +66,15 @@ are not created up front.
 
 ## `VERSION`
 
-Plain text, no trailing whitespace beyond a single newline.
+Plain text, no trailing whitespace beyond a single newline. `gojaja
+init` writes the current `SCHEMA_VERSION` constant, e.g.:
 
 ```
-2.0.0
+2.0.0-manifest-filter
 ```
 
-Read with `gojaja version`. The CLI refuses to run against a layer
-whose schema is newer than its own (planned check).
+Read with `gojaja version`. A check that refuses to run against a
+layer whose schema is newer than the CLI's own is planned.
 
 ## `config.yaml`
 
@@ -496,7 +497,7 @@ framework does not parse it at runtime.
 ```
 rfcs/RFC-0001-switch-to-postgres/
   proposal.yaml      ← structured; source of truth
-  comments/<role>.json
+  comments.yaml      ← append-only threaded ledger of all comments
   decision.json      ← absent until the leader decides or rejects
 ```
 
@@ -638,9 +639,10 @@ Field rules:
 
 - `slug` must match `^[a-z0-9][a-z0-9-]{0,63}$`. Slug reuse across RFCs is
   refused.
-- `options` requires at least one entry, with unique ids. Options
-  can be **added after creation** via `rfc add-option` while the
-  RFC is `open` or `revising`.
+- `options` may be empty at creation (a brainstorm-mode RFC) or carry
+  one-or-more entries with unique ids. Options can be **added after
+  creation** via `rfc add-option` while the RFC is `open` or
+  `revising`, which upgrades a brainstorm RFC into a decision flow.
 - `deciders` requires at least one role. `gojaja rfc pre-decide /
   decide / reject / revise` refuse callers outside that list.
 - `description` is soft-required (warning when empty); will be

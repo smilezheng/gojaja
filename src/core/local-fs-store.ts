@@ -351,6 +351,24 @@ explicitly out of scope?
 - TBD — T-NNNN <title>: ...
 `;
 
+// Written to `.gojaja/.gitignore` at init. Keeps machine-specific
+// runtime state out of version control while leaving the audit trail
+// (events, worklog, rfcs, state, roles, config) committable.
+const GOJAJA_GITIGNORE = `# Managed by gojaja. Runtime state below is machine-specific and must
+# NOT be committed: a checked-in session/lock looks "live" on another
+# machine (or after a window died) and blocks 'gojaja claim' until the
+# lease expires; checked-in read cursors make a fresh checkout think it
+# has already read events.
+#
+# Everything else under .gojaja/ (events, worklog, rfcs, state, roles,
+# config.yaml, VERSION) is the shared audit trail and SHOULD be committed.
+locks/
+comms/sessions/
+comms/pending/
+comms/heartbeats/
+comms/cursors/
+`;
+
 function formatTaskId(n: number): string {
   return `T-${String(n).padStart(4, "0")}`;
 }
@@ -466,6 +484,14 @@ export class LocalFsStore implements Store {
       this.abs(Paths.projectStateFile),
       PROJECT_STATE_SKELETON,
     );
+    // Drop a .gitignore so a committed `.gojaja/` does not carry
+    // machine-specific runtime state. Sessions/locks/pending/heartbeats
+    // and per-role read cursors are ephemeral: committing them means a
+    // checkout on another machine (or after a window died) resurrects a
+    // "live"-looking session that blocks `claim` until the lease
+    // expires, or a stale lock / read cursor. The audit trail
+    // (events, worklog, rfcs, state, roles, config) stays committable.
+    await atomicWriteFile(this.abs(Paths.gitignoreFile), GOJAJA_GITIGNORE);
   }
 
   async readVersion(): Promise<string> {
@@ -1501,65 +1527,78 @@ export class LocalFsStore implements Store {
     const absolutePath = this.abs(input.relPath);
     const mode = input.mode ?? "overwrite";
 
-    if (mode === "overwrite") {
-      const content = (input as { content: string }).content;
-      await atomicWriteFile(absolutePath, content);
-      return {
-        relPath: input.relPath,
-        absolutePath,
-        bytesWritten: Buffer.byteLength(content, "utf8"),
-      };
-    }
+    // Serialise the whole write under a per-file lock. append / replace
+    // are read-modify-write, so two concurrent edits to the same file
+    // would otherwise lose each other's bytes (classic lost update);
+    // overwrite is single-write but still serialised so it cannot land
+    // between another edit's read and write. The lock key is derived
+    // from the file path (capped to the 80-char lock-key limit), so
+    // edits to unrelated state files still run in parallel.
+    const lockKey = `state-${input.relPath.replace(/[^A-Za-z0-9._-]/g, "-")}`.slice(
+      0,
+      80,
+    );
+    return this.withLock(lockKey, async () => {
+      if (mode === "overwrite") {
+        const content = (input as { content: string }).content;
+        await atomicWriteFile(absolutePath, content);
+        return {
+          relPath: input.relPath,
+          absolutePath,
+          bytesWritten: Buffer.byteLength(content, "utf8"),
+        };
+      }
 
-    if (mode === "append") {
-      const appendText = (input as { appendText: string }).appendText;
+      if (mode === "append") {
+        const appendText = (input as { appendText: string }).appendText;
+        const existing = await readFileOrEmpty(absolutePath);
+        const next = existing + appendText;
+        await atomicWriteFile(absolutePath, next);
+        return {
+          relPath: input.relPath,
+          absolutePath,
+          bytesWritten: Buffer.byteLength(appendText, "utf8"),
+        };
+      }
+
+      // mode === "replace"
+      const { oldText, newText, batch } = input as {
+        oldText: string;
+        newText: string;
+        batch?: boolean;
+      };
+      if (typeof oldText !== "string" || oldText.length === 0) {
+        throw new UsageError("--replace requires a non-empty old text.");
+      }
+      if (typeof newText !== "string") {
+        throw new UsageError("--with must be a string (may be empty).");
+      }
       const existing = await readFileOrEmpty(absolutePath);
-      const next = existing + appendText;
+      const count = countOccurrences(existing, oldText);
+      if (count === 0) {
+        throw new UsageError(
+          `Old text not found in ${input.relPath}. ` +
+            `Read the current file and pass an exact-match snippet.`,
+        );
+      }
+      if (count > 1 && !batch) {
+        throw new UsageError(
+          `Old text appears ${count} times in ${input.relPath}; ` +
+            `pass --batch to replace all occurrences, or expand the snippet ` +
+            `so it appears exactly once.`,
+        );
+      }
+      // count === 1 OR (count > 1 && batch). Replace all matches; for
+      // count === 1 this is equivalent to a single replacement.
+      const next = splitJoin(existing, oldText, newText);
       await atomicWriteFile(absolutePath, next);
       return {
         relPath: input.relPath,
         absolutePath,
-        bytesWritten: Buffer.byteLength(appendText, "utf8"),
+        bytesWritten: Buffer.byteLength(next, "utf8") - Buffer.byteLength(existing, "utf8"),
+        replacedOccurrences: count,
       };
-    }
-
-    // mode === "replace"
-    const { oldText, newText, batch } = input as {
-      oldText: string;
-      newText: string;
-      batch?: boolean;
-    };
-    if (typeof oldText !== "string" || oldText.length === 0) {
-      throw new UsageError("--replace requires a non-empty old text.");
-    }
-    if (typeof newText !== "string") {
-      throw new UsageError("--with must be a string (may be empty).");
-    }
-    const existing = await readFileOrEmpty(absolutePath);
-    const count = countOccurrences(existing, oldText);
-    if (count === 0) {
-      throw new UsageError(
-        `Old text not found in ${input.relPath}. ` +
-          `Read the current file and pass an exact-match snippet.`,
-      );
-    }
-    if (count > 1 && !batch) {
-      throw new UsageError(
-        `Old text appears ${count} times in ${input.relPath}; ` +
-          `pass --batch to replace all occurrences, or expand the snippet ` +
-          `so it appears exactly once.`,
-      );
-    }
-    // count === 1 OR (count > 1 && batch). Replace all matches; for
-    // count === 1 this is equivalent to a single replacement.
-    const next = splitJoin(existing, oldText, newText);
-    await atomicWriteFile(absolutePath, next);
-    return {
-      relPath: input.relPath,
-      absolutePath,
-      bytesWritten: Buffer.byteLength(next, "utf8") - Buffer.byteLength(existing, "utf8"),
-      replacedOccurrences: count,
-    };
+    });
   }
 
   // ---- task board ---------------------------------------------------------
@@ -1860,8 +1899,7 @@ export class LocalFsStore implements Store {
               `Done is a sign-off act; ask a reviewer or task-board owner to accept. ` +
               (task.reviewers.length > 0
                 ? `Reviewers configured: ${task.reviewers.join(", ")}.`
-                : `No reviewers configured for this task; either add one via ` +
-                  `\`gojaja task reviewer ...\` (planned) or escalate to the role ` +
+                : `No reviewers configured for this task; escalate to the role ` +
                   `that owns state/task_board.yaml.`),
           );
         }
@@ -2231,7 +2269,9 @@ export class LocalFsStore implements Store {
         : String(input.replyTo).trim();
 
     return this.withLock(`rfc-${input.rfcId}`, async () => {
-      const { proposal, comments } = await this.readRfcUnchecked(input.rfcId);
+      const { proposal, comments } = await this.readRfcUnchecked(input.rfcId, {
+        lockHeld: true,
+      });
       // pre-decide is no longer a status. Only `open` and
       // `revising` allow comments. Regular discussion is allowed in
       // both; structured kinds (ack / object) are only meaningful when
@@ -2436,7 +2476,9 @@ export class LocalFsStore implements Store {
     }
 
     return this.withLock(`rfc-${args.rfcId}`, async () => {
-      const { proposal, comments } = await this.readRfcUnchecked(args.rfcId);
+      const { proposal, comments } = await this.readRfcUnchecked(args.rfcId, {
+        lockHeld: true,
+      });
       // decide is valid from `open`. reject is additionally
       // valid from `revising` (decider may give up on the topic
       // instead of waiting for a rewrite). reject is also the only
@@ -2584,7 +2626,9 @@ export class LocalFsStore implements Store {
     }
 
     return this.withLock(`rfc-${input.rfcId}`, async () => {
-      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      const { proposal } = await this.readRfcUnchecked(input.rfcId, {
+        lockHeld: true,
+      });
       // allowed in non-terminal states (`open` / `revising`).
       // Pre-decide is no longer a status; if an active pre-decision
       // exists, this add-option silently invalidates it (see
@@ -2699,7 +2743,9 @@ export class LocalFsStore implements Store {
     }
 
     return this.withLock(`rfc-${input.rfcId}`, async () => {
-      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      const { proposal } = await this.readRfcUnchecked(input.rfcId, {
+        lockHeld: true,
+      });
       if (proposal.status !== "open") {
         throw new UsageError(
           `Cannot revise ${input.rfcId} in state ${proposal.status}; ` +
@@ -2762,7 +2808,9 @@ export class LocalFsStore implements Store {
     }
 
     return this.withLock(`rfc-${input.rfcId}`, async () => {
-      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      const { proposal } = await this.readRfcUnchecked(input.rfcId, {
+        lockHeld: true,
+      });
       if (proposal.status !== "revising") {
         throw new UsageError(
           `Cannot edit ${input.rfcId} in state ${proposal.status}; ` +
@@ -2863,7 +2911,9 @@ export class LocalFsStore implements Store {
       );
     }
     return this.withLock(`rfc-${input.rfcId}`, async () => {
-      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      const { proposal } = await this.readRfcUnchecked(input.rfcId, {
+        lockHeld: true,
+      });
       if (
         proposal.status === "accepted" ||
         proposal.status === "rejected" ||
@@ -2905,7 +2955,9 @@ export class LocalFsStore implements Store {
       throw new UsageError("unlink-task requires a non-empty --task.");
     }
     return this.withLock(`rfc-${input.rfcId}`, async () => {
-      const { proposal } = await this.readRfcUnchecked(input.rfcId);
+      const { proposal } = await this.readRfcUnchecked(input.rfcId, {
+        lockHeld: true,
+      });
       if (
         proposal.status === "accepted" ||
         proposal.status === "rejected" ||
@@ -2971,7 +3023,10 @@ export class LocalFsStore implements Store {
     return this.readRfcUnchecked(rfcId);
   }
 
-  private async readRfcUnchecked(rfcId: string): Promise<{
+  private async readRfcUnchecked(
+    rfcId: string,
+    opts: { lockHeld?: boolean } = {},
+  ): Promise<{
     proposal: RfcProposal;
     comments: RfcComment[];
     decision: RfcDecision | null;
@@ -3002,39 +3057,68 @@ export class LocalFsStore implements Store {
     // inside the lock means the second reader sees the already-repaired
     // shape and just returns it.
     if (snapshot.decision !== null && snapshot.proposal.status === "open") {
-      return this.withLock(`rfc-${rfcId}`, async () => {
-        const fresh = await this.readRfcFiles(rfcId, slug);
-        if (fresh.decision === null || fresh.proposal.status !== "open") {
-          // Another reader/writer beat us to the repair under the lock.
-          return fresh;
-        }
-        const repaired: RfcProposal = {
-          ...fresh.proposal,
-          status: fresh.decision.outcome === "accepted" ? "accepted" : "rejected",
-        };
-        await atomicWriteFile(
-          this.abs(rfcProposalPath(rfcId, slug)),
-          yaml.dump(repaired, { lineWidth: 100, noRefs: true }),
-        );
-        await this.recordEventInternal({
-          type: "RFC_REPAIRED",
-          from: "SYSTEM",
-          to: "*",
-          ref: rfcId,
-          payload: {
-            rfcId,
-            repairedStatus: repaired.status,
-            decidedBy: fresh.decision.decidedBy,
-          },
-        });
-        return {
-          proposal: repaired,
-          comments: fresh.comments,
-          decision: fresh.decision,
-        };
-      });
+      // The repair mutates proposal.yaml + emits an event, so it must
+      // run under the rfc-${id} lock. But several callers (commentRfc,
+      // decideRfc, addOption, ...) already hold that lock when they
+      // call us — re-entering `withLock` on the same key would
+      // self-deadlock, because the file lock is NOT reentrant. Those
+      // callers pass `lockHeld: true` so we repair inline; lockless
+      // readers (readRfc, listRfcs, the manifest projection) take the
+      // lock here.
+      if (opts.lockHeld) {
+        return this.repairFinalisedRfc(rfcId, slug);
+      }
+      return this.withLock(`rfc-${rfcId}`, () =>
+        this.repairFinalisedRfc(rfcId, slug),
+      );
     }
     return snapshot;
+  }
+
+  /**
+   * Forward-complete a half-written `finaliseRfc` (decision.json on disk
+   * but proposal.yaml still `open`). MUST be called with the rfc-${id}
+   * lock already held — it re-reads under the lock and no-ops if another
+   * writer already repaired the shape. Writes proposal.yaml and emits a
+   * single RFC_REPAIRED event.
+   */
+  private async repairFinalisedRfc(
+    rfcId: string,
+    slug: string,
+  ): Promise<{
+    proposal: RfcProposal;
+    comments: RfcComment[];
+    decision: RfcDecision | null;
+  }> {
+    const fresh = await this.readRfcFiles(rfcId, slug);
+    if (fresh.decision === null || fresh.proposal.status !== "open") {
+      // Another reader/writer beat us to the repair under the lock.
+      return fresh;
+    }
+    const repaired: RfcProposal = {
+      ...fresh.proposal,
+      status: fresh.decision.outcome === "accepted" ? "accepted" : "rejected",
+    };
+    await atomicWriteFile(
+      this.abs(rfcProposalPath(rfcId, slug)),
+      yaml.dump(repaired, { lineWidth: 100, noRefs: true }),
+    );
+    await this.recordEventInternal({
+      type: "RFC_REPAIRED",
+      from: "SYSTEM",
+      to: "*",
+      ref: rfcId,
+      payload: {
+        rfcId,
+        repairedStatus: repaired.status,
+        decidedBy: fresh.decision.decidedBy,
+      },
+    });
+    return {
+      proposal: repaired,
+      comments: fresh.comments,
+      decision: fresh.decision,
+    };
   }
 
   /**

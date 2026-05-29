@@ -105,10 +105,21 @@ all implemented.
 - With `--force`, takes over any existing session and emits a
   `SESSION_TAKEOVER` event. Use only when the previous window is known
   dead.
-- Returns JSON: `{ "role", "sessionId", "leaseTtlSeconds", "startedAt" }`.
+- Returns JSON (with `--json`): `{ "status": "claimed", "session": {
+  "role", "sessionId", "pid", "host", "startedAt", "heartbeatAt",
+  "leaseTtlSeconds" } }`. With `--eval` it instead prints the single
+  `export GOJAJA_SESSION=<ulid>` line and no JSON.
 
 The agent **must** export `GOJAJA_SESSION` for the rest of its shell turn so
 subsequent commands can verify identity.
+
+On hosts that do not persist environment variables across separate
+shell invocations (each tool call gets a fresh shell), the `export`
+from `claim` is lost and every later command fails with "GOJAJA_SESSION
+is required". Two ways out: run the whole loop inside one persistent
+shell, or pass the id explicitly with the global `--session <id>` flag
+on every command (`gojaja plan --session <id>`, etc.). An explicit
+`--session` flag overrides any inherited `GOJAJA_SESSION`.
 
 ## Plan / process / ack
 
@@ -659,12 +670,13 @@ the framework does not provide a separate cancel verb.
 
 ## Activation in different agent hosts
 
-`gojaja prompt <role> --target <host> [--write]` produces a prompt body
-and, when `--write` is given, drops a persistent artifact into the host's
-own configuration area. The artifact is **role-agnostic**: it tells the
-agent how to find its identity via `GOJAJA_SESSION` and `gojaja plan`.
-Per-window role binding is done by pasting a short activation snippet
-into that window's chat.
+`gojaja prompt --target <host> [--write]` produces a prompt body and,
+when `--write` is given, drops a persistent artifact into the host's
+own configuration area. The artifact is **role-agnostic** (it takes no
+role argument): it tells the agent how to find its identity via
+`GOJAJA_SESSION` and `gojaja plan`. Per-window role binding is done
+separately by `gojaja activate <role> --target <host>`, which prints a
+short snippet to paste into that window's chat.
 
 | Target | Persistent artifact location | Activation per window |
 | --- | --- | --- |

@@ -14,6 +14,7 @@ import { runRole } from "./commands/role";
 import { runTask } from "./commands/task";
 import { runVersion } from "./commands/version";
 import { runWait } from "./commands/wait";
+import { runWatch } from "./commands/watch";
 import { runWorklog } from "./commands/worklog";
 import { runState } from "./commands/state";
 import { HELP_TEXT } from "./help";
@@ -30,7 +31,28 @@ async function dispatch(): Promise<number> {
     raw[0] = "version";
   }
 
+  // A `--help` / `-h` anywhere in a subcommand prints help and exits
+  // WITHOUT running the command. Without this, e.g. `gojaja wait --help`
+  // would fall through to `runWait` and actually block on a wait, and
+  // `gojaja init --help` would initialise the project — both surprising
+  // and a footgun for the common `<cmd> --help` reflex.
+  if (raw.slice(1).some((a) => a === "--help" || a === "-h")) {
+    process.stdout.write(HELP_TEXT);
+    return 0;
+  }
+
   const args = parseArgv(raw);
+
+  // `--session <id>` is a host-portability escape hatch. Identity is
+  // normally read from the GOJAJA_SESSION env var, but some agent hosts
+  // run each tool call in a fresh shell and do NOT persist the `export`
+  // from `gojaja claim`. On those hosts the agent can pass the session
+  // id explicitly on every command instead. Setting it here means all
+  // downstream identity resolution (which reads process.env) works
+  // unchanged. An explicit flag wins over an inherited env var.
+  if (typeof args.flags.session === "string" && args.flags.session.length > 0) {
+    process.env.GOJAJA_SESSION = args.flags.session;
+  }
 
   switch (args.command) {
     case "init":
@@ -61,6 +83,8 @@ async function dispatch(): Promise<number> {
       return runActivate(args);
     case "wait":
       return runWait(args);
+    case "watch":
+      return runWatch(args);
     case "state":
       return runState(args);
     case "reset":

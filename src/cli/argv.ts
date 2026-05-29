@@ -33,7 +33,6 @@ const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "write",
   "force",
   "no-handbook",
-  "no-wait",
   "help",
   "version",
   "eval",
@@ -42,6 +41,7 @@ const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "batch",
   "no-mark-seen",
   "force-incomplete",
+  "no-open",
 ]);
 
 /**

@@ -181,11 +181,12 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
 
   rfc comment <rfc-id> --rationale <text> [--option <opt>]
                        [--reply-to <comment-id>]
-      Append a comment to the threaded ledger. Multiple comments per
-      role are preserved in order. --reply-to threads under another
-      comment by id (printed by 'rfc show'). During pre-decide, a
-      comment from anyone other than the pre-decider auto-reopens the
-      RFC; silence is consent.
+      Append a discussion comment to the threaded ledger. Multiple
+      comments per role are preserved in order. --reply-to threads
+      under another comment by id (printed by 'rfc show'). A plain
+      comment does NOT advance an active pre-decision's ACK gate —
+      silence is never consent; to register a position use 'rfc ack'
+      or 'rfc object'.
 
   rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>
       Add a new option mid-discussion. Allowed in open or revising.
@@ -293,8 +294,20 @@ Keepalive (agent, requires GOJAJA_SESSION):
       timeout: each chunk is one process, the next process resumes from
       disk state.
 
+Monitoring (you, the human scheduler):
+  watch [--port <n>] [--host <addr>] [--no-open]
+      Start a local, read-only web dashboard over this project's
+      .gojaja/ state and open it in your browser. One screen shows
+      every role's session (live / stale / idle-waiting), the task
+      board, open RFCs, and a live activity feed across all agent
+      windows. Useful because on a single machine nothing can wake a
+      turn-ended agent — you are the scheduler, and this is your view.
+      Serves on 127.0.0.1:7421 by default (falls back to a free port if
+      busy); --no-open skips launching the browser. Read-only: never
+      mutates coordination state. Ctrl-C to stop.
+
 Project lifecycle (user, NOT for agents):
-  reset [--dry-run] [--confirm <basename>] [--purge-codex-skill]
+  reset [--dry-run] [--confirm <basename>] [--purge-codex-skill] [--force]
       Remove everything this tool installed into the project: the
       .gojaja/ layer (all events, state, RFCs, worklogs, sessions
       and locks), .cursor/rules/gojaja-runtime.mdc, and the
@@ -307,7 +320,10 @@ Project lifecycle (user, NOT for agents):
       The Codex skill at ~/.codex/skills/gojaja-runtime/ is
       user-level and shared across every project that activated a
       Codex agent; it is NOT touched by default. Pass
-      --purge-codex-skill to also remove it.
+      --purge-codex-skill to also remove it — but it is reference
+      counted: if other projects still use it, this project is just
+      de-registered and the skill is kept. --force deletes it anyway
+      (breaks those projects' Codex windows).
 
       Must be run from a shell with no GOJAJA_SESSION exported (mirrors
       role delete; destructive ops belong to the user, not an agent).
@@ -315,6 +331,12 @@ Project lifecycle (user, NOT for agents):
 Global options:
   --root <path>                               Override discovered project root.
   --json                                      Force JSON output.
+  --session <id>                              Authenticate as this session id
+                                              instead of reading GOJAJA_SESSION
+                                              from the environment. Use on agent
+                                              hosts that run each command in a
+                                              fresh shell and do not persist the
+                                              exported GOJAJA_SESSION from claim.
 
 Information:
   version                                     CLI and schema version.
@@ -322,11 +344,15 @@ Information:
 
 Exit codes (relevant for scripted callers):
   0  OK
-  2  USAGE       — your invocation is wrong; fix arguments and re-run.
-  6  NOT_INIT    — .gojaja/ not initialised in this project.
-  9  FORBIDDEN   — permission denied (ownership / deciders gate).
-                   Agents: escalate to your reportsTo, do not retry.
- 10  STATE_CORRUPTION — on-disk state is malformed; stop and ask the user.
+  2  USAGE         — your invocation is wrong; fix arguments and re-run.
+  3  NOT_INIT      — .gojaja/ not initialised in this project.
+  4  ALREADY_INIT  — .gojaja/ already exists; use reset instead of init.
+  5  UNKNOWN_ROLE  — the named role is not registered.
+  6  LOCK_TIMEOUT  — could not acquire a resource lock in time; retry.
+  7  PATH_INVALID  — a --file path escaped the allowed tree.
+  8  STATE_CORRUPT — on-disk state is malformed; stop and ask the user.
+  9  FORBIDDEN     — permission denied (ownership / deciders gate).
+                     Agents: escalate to your reportsTo, do not retry.
 
 See the gojaja source repo at https://github.com/smilezheng/gojaja
 for the long-form docs (none of these files are shipped into your

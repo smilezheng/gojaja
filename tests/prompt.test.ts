@@ -199,6 +199,18 @@ describe("writeArtifactFile", () => {
     expect(openai).toContain("display_name");
   });
 
+  it("codex --write is idempotent across re-runs, incl. openai.yaml", async () => {
+    // Regression: openai.yaml has no "gojaja plan" string, so the
+    // artifact-recognition check used to refuse the SECOND write (e.g.
+    // a second project sharing the user-level skill, or any re-run),
+    // breaking multi-project Codex setups. It must be recognised as a
+    // gojaja artifact via the "gojaja-runtime" marker and overwrite
+    // cleanly (returning "unchanged" when byte-identical).
+    const a = buildRuntime("codex", ctx.root);
+    for (const f of a.files) expect(await writeArtifactFile(f)).toBe("wrote");
+    for (const f of a.files) expect(await writeArtifactFile(f)).toBe("unchanged");
+  });
+
   it("cursor --write creates the .cursor/rules file inside the project", async () => {
     const a = buildRuntime("cursor", ctx.root);
     for (const f of a.files) await writeArtifactFile(f);

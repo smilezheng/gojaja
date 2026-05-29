@@ -39,6 +39,7 @@ This is the most common confusion. Here is the boundary, once.
 | Fill in `roles/<id>.md` (description, responsibilities) | You | Right after `role create` |
 | `gojaja prompt --target X --write` | You | Once per agent host (Cursor / Claude / Codex) |
 | `gojaja activate <role> --target X` | You | Once per agent window you want to staff |
+| `gojaja watch` | You | Whenever you want to see overall progress (keep a browser tab open; optional) |
 | Write product scope / acceptance criteria in `state/project_state.md` | You | As the project evolves |
 | Upgrade the tool, re-run `prompt --write --force-rewrite`, restart windows | You | When you bump the CLI version |
 | `gojaja claim / plan / ack / wait / report / worklog / task ... / rfc ...` | The agent | Every turn, automatically |
@@ -123,7 +124,7 @@ The snippet appears between `═══ BEGIN PASTE TO AGENT ═══` and `═�
 
 Two windows of the same tool can hold different roles independently because the role lives in that window's `GOJAJA_SESSION` shell variable, not in any project file.
 
-From here, just chat with the agents normally.
+From here, just chat with the agents normally. To see overall progress at a glance, run `gojaja watch` (see [Watch progress on a dashboard](#watch-progress-on-a-dashboard-gojaja-watch)).
 
 ---
 
@@ -294,25 +295,46 @@ gojaja prompt --target cursor --write --force-rewrite   # repeat per host
 
 ### "The agent says it doesn't know who it is"
 
-Three usual causes:
+Four usual causes:
 
 1. **`GOJAJA_SESSION` is not exported in the agent's shell.** The activation snippet runs `eval "$(gojaja claim ... --eval)"` which sets it; if the agent skipped that step (some weaker models do), re-paste the snippet.
-2. **The window was open before you ran `prompt --write`.** Hosts inject rules at window-open time. Restart the window.
-3. **The role's markdown is still mostly TBD.** Run `gojaja role show <role>` to inspect; if it's empty, fill in `roles/<id>.md` and re-paste the activation snippet.
+2. **The agent's host runs every command in a fresh shell, so the `export` from `claim` is lost between tool calls** (most likely on Cursor; Claude Code / Codex usually keep a persistent shell). The symptom is "GOJAJA_SESSION is required" on every command *after* a successful claim. Fix: have the agent carry the id explicitly — `gojaja claim <role>` (no `--eval`), note the printed session id, then pass `gojaja <cmd> --session <id>` on every later command. The runtime rule already tells the agent this; weaker models may need a nudge.
+3. **The window was open before you ran `prompt --write`.** Hosts inject rules at window-open time. Restart the window.
+4. **The role's markdown is still mostly TBD.** Run `gojaja role show <role>` to inspect; if it's empty, fill in `roles/<id>.md` and re-paste the activation snippet.
 
 ### "Two agents both want to claim the same role"
 
-The second window will see "already claimed by a live session ...". The handbook tells the agent to stop and ask the user — do not pass `--force`. If the first window is genuinely dead (you killed the tab), wait for the lease to expire (~30 min default) or release explicitly: `gojaja release <role>` from a shell with that role's `GOJAJA_SESSION`.
+The second window will see "already claimed by a live session ...". The handbook tells the *agent* to stop and ask you — agents must not pass `--force`. You, the human, have three options when the first window is genuinely dead (you killed the tab): force the takeover yourself with `gojaja claim <role> --force` (the recommended path — `--force` is a human tool, not an agent one), or `gojaja release <role>` from a shell that still holds that role's `GOJAJA_SESSION`, or just wait for the lease to expire (~2 h default).
 
 ### "I deleted my chat history but the role is stuck"
 
 ```bash
-unset GOJAJA_SESSION              # in case you still have it
-gojaja release <role>       # from a shell that holds the session, or
-# wait ~30 min for the lease to expire automatically
+unset GOJAJA_SESSION             # in case you still have it
+gojaja claim <role> --force      # human takeover of a dead window (simplest), or
+gojaja release <role>            # from a shell that still holds the session, or
+# just wait ~2 h for the lease to expire automatically
 ```
 
 ---
+
+## Watch progress on a dashboard (`gojaja watch`)
+
+On a single machine nothing can wake an agent whose turn has ended — when Backend (Claude) reports to TL (Cursor), the TL window only notices if it happens to be mid-`wait`, otherwise you have to nudge it. In other words, **you are the scheduler.** `gojaja watch` gives you the one screen that role makes necessary:
+
+```bash
+gojaja watch                 # serves http://127.0.0.1:7421 and opens your browser
+gojaja watch --port 8080     # pick a port
+gojaja watch --no-open       # don't auto-launch the browser
+```
+
+It's a read-only dashboard (it never mutates coordination state) that auto-refreshes every couple of seconds and shows, across every window:
+
+- **Roles** — each role's session: `live` / `stale` / no session, the pid + host holding it, last heartbeat age, and — when a role is idle — what it's `wait`-ing for and until when.
+- **Task board** — all tasks laid out by status (Backlog → Done), with owner, priority, blockers, and deliverable count.
+- **RFCs** — open/revising/decided, with deciders and voters.
+- **Activity feed** — the live, newest-first event stream across all agents (reports, worklogs, task moves, RFC comments/decisions), which doubles as the project history.
+
+Use it to decide who to nudge next: a role sitting `idle (waiting for task-assigned)` wants work; a task stuck in `Blocked` needs its upstream owner; an RFC sitting `open` for a while needs its decider. Leave it running in a browser tab while you drive the team. Ctrl-C in the terminal stops it.
 
 ## How decisions get made (RFCs)
 
@@ -380,7 +402,9 @@ Open RFCs that need a role's attention appear in that role's next `gojaja plan` 
 | RFCs v2.1: threaded comments, `add-option`, `pre-decide` + mandatory `ack`/`object` gate, `revise`/`edit`, `link-task` | Done |
 | Collaboration handbook injected into runtime | Done |
 | `role delete` with session and config cleanup | Done |
-| `gojaja upgrade` and `reset` | Next |
+| `gojaja watch` real-time dashboard (roles / tasks / RFCs / activity) | Done |
+| `gojaja reset` (ref-counted Codex skill) | Done |
+| `gojaja upgrade` | Next |
 | `doctor`, event history, archival | Planned |
 | Multi-machine over HTTP | Future |
 

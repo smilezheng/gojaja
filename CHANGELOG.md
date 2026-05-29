@@ -8,6 +8,110 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### Cross-host collaboration: dashboard, identity escape hatch, safer init (PR8x)
+
+Hardening for the core use case — several agent windows (Cursor /
+Claude Code / Codex CLI) coordinating on one machine.
+
+- **`gojaja watch` — read-only web dashboard.** Starts a local HTTP
+  server (127.0.0.1:7421 by default, falls back to a free port) and
+  opens the browser. One screen shows every role's session
+  (live / stale / idle-waiting + pid/host/heartbeat), the task board by
+  status, open RFCs, and a live newest-first activity feed across all
+  windows. On a single machine nothing can wake a turn-ended agent, so
+  the human is the scheduler; this is their view. `--port` / `--host` /
+  `--no-open`. Never mutates state.
+- **`--session <id>` global flag.** Identity is normally read from
+  `GOJAJA_SESSION`, but some hosts run each command in a fresh shell and
+  drop the `export` from `claim`. Agents on those hosts can now pass the
+  id explicitly on every command. Dispatch sets it into the environment
+  so all existing resolution works unchanged; an explicit flag overrides
+  an inherited env var. Documented in the runtime body, activation
+  snippet, PROTOCOL, and the help text.
+- **`gojaja init` git safety gate.** Refuses to run when the project
+  has uncommitted git changes (commit/stash first for a clean revert
+  point); when the project is not a git repo, warns and asks for y/n
+  confirmation (or requires `--force` when stdin is not a TTY).
+  `--force` bypasses both checks.
+- **`.gojaja/.gitignore` written at init.** Excludes machine-specific
+  runtime state (`locks/`, `comms/sessions/`, `comms/pending/`,
+  `comms/heartbeats/`, `comms/cursors/`) so a committed `.gojaja/` does
+  not resurrect a stale "live" session that blocks `claim`, or stale
+  locks/read-cursors, on another checkout. The audit trail (events,
+  worklog, rfcs, state, roles, config) stays committable.
+- **Session TTL 30 min → 2 h.** Long agent tasks can keep a window busy
+  well past 30 minutes without emitting a command; every authenticated
+  command still auto-renews, so this only governs how long a *silent*
+  session stays claimable by others.
+- **Codex skill is now reference-counted.** The user-level skill at
+  `~/.codex/skills/gojaja-runtime/` is shared across projects.
+  `prompt --target codex --write` registers the project; `reset`
+  de-registers it and `reset --purge-codex-skill` deletes the skill
+  only when no other project still uses it (otherwise it is kept and
+  the user is told which projects depend on it). `--force` deletes
+  regardless. This replaces "delete and hope no other project needed
+  it" with a safe ref-count.
+- **Fixed: a second project's `prompt --target codex --write` was
+  refused.** The artifact-recognition guard only accepted files
+  containing "gojaja plan", but the shared `agents/openai.yaml` does
+  not contain it — so once one project had written the user-level
+  skill, every other project (and re-runs) hit "does not look like a
+  gojaja artifact". Recognition now also accepts the "gojaja-runtime"
+  marker, which all generated artifacts carry. This was what blocked
+  the Codex ref-count flow above from ever seeing a second project.
+- Docs: README (EN + zh-CN) gain a `watch` section, a cross-host
+  identity troubleshooting entry, and the human `claim --force`
+  takeover path; roadmap updated.
+
+### Project-wide audit fixes (PR8w)
+
+A full scan surfaced a batch of contract/text drift and two real
+concurrency bugs. No compile errors and the suite was green before;
+these are correctness/consistency fixes.
+
+Behaviour / concurrency:
+
+- **RFC self-heal no longer self-deadlocks.** `readRfcUnchecked`'s
+  crash-recovery (decision.json present but proposal still `open`)
+  re-entered `withLock(\`rfc-<id>\`)`. Mutating callers
+  (`commentRfc` / `decideRfc` / `addOption` / `revise` / `edit` /
+  `link`/`unlink-task`) already hold that non-reentrant lock, so the
+  repair would hang until `LOCK_TIMEOUT`. Extracted
+  `repairFinalisedRfc` (lockless) and gave `readRfcUnchecked` a
+  `lockHeld` flag; locked callers repair inline. Added a regression
+  test exercising the locked path.
+- **`gojaja state edit` is now serialised per file.** The
+  append/replace read-modify-write (and overwrite) now run under a
+  per-file lock, so two concurrent edits to the same state file can no
+  longer lose each other's bytes (lost update). Unrelated files still
+  edit in parallel.
+- **Subcommand `--help` / `-h` no longer executes the command.**
+  `gojaja wait --help` used to fall through and actually block on a
+  wait; `gojaja init --help` could initialise the project. A
+  `--help`/`-h` anywhere now prints help and exits 0 before dispatch.
+
+Text / contract accuracy (agent- and user-facing):
+
+- Fixed the `gojaja -h` exit-code table to match `errors.ts`
+  (`NOT_INIT=3`, `LOCK_TIMEOUT=6`, `PATH_INVALID=7`, `STATE_CORRUPT=8`,
+  `FORBIDDEN=9`). It previously claimed `NOT_INIT=6` and
+  `STATE_CORRUPTION=10`, which would mislead agents/scripts branching
+  on the code.
+- Rewrote the `rfc comment` help text that wrongly said a plain
+  comment auto-reopens an RFC and "silence is consent" — the ACK gate
+  requires explicit `rfc ack` / `rfc object`; silence is never consent.
+- Removed the reference to a non-existent `gojaja task reviewer ...`
+  command from the FORBIDDEN error on owner-Done.
+- Removed the dead `--no-wait` boolean flag (no consumer).
+- Docs: `PROTOCOL.md` now uses `gojaja prompt --target` (the role-free
+  form) and documents the real `claim --json` shape
+  (`{ status, session }`); `SCHEMA.md` VERSION example, RFC options
+  ("may be empty" / brainstorm), and the `rfcs/` tree (`comments.yaml`,
+  not `comments/<role>.json`) are corrected; `RFC.md` command table
+  marks `--options` / `decide --option` as conditional.
+- `gojaja init` re-init message now says "gojaja" (not "multi-agent")
+  and points at `gojaja reset`.
+
 ### Drop back-compat hints + dead migration code (PR8v)
 
 The project has no released users, so accumulated "migrate from

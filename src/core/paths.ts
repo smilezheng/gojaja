@@ -13,6 +13,7 @@ export const Paths = {
   versionFile: "VERSION",
   configFile: "config.yaml",
   auditLog: "audit.log",
+  gitignoreFile: ".gitignore",
   taskBoardFile: "state/task_board.yaml",
   projectStateFile: "state/project_state.md",
 

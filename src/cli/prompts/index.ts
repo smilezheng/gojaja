@@ -65,7 +65,19 @@ function expandHome(p: string): string {
   return p;
 }
 
-const RUNTIME_MARKER = "gojaja plan";
+// Substrings that mark a file as one gojaja wrote, so re-running
+// `prompt --write` can safely overwrite it. We must recognise EVERY
+// generated artifact: the runtime bodies (Cursor rule, Codex SKILL.md)
+// contain "gojaja plan", but the Codex `agents/openai.yaml` does not —
+// it carries "gojaja-runtime" instead. Without the second marker the
+// SECOND project to run `prompt --target codex --write` (or any re-run
+// after openai.yaml exists) is wrongly refused, breaking multi-project
+// Codex setups.
+const RUNTIME_MARKERS = ["gojaja plan", "gojaja-runtime"] as const;
+
+function looksLikeGojajaArtifact(content: string): boolean {
+  return RUNTIME_MARKERS.some((m) => content.includes(m));
+}
 
 export async function writeArtifactFile(
   file: RuntimeArtifact["files"][number],
@@ -95,7 +107,7 @@ export async function writeArtifactFile(
 
   if (await exists(target)) {
     const prior = await fsp.readFile(target, "utf8");
-    if (!prior.includes(RUNTIME_MARKER)) {
+    if (!looksLikeGojajaArtifact(prior)) {
       throw new UsageError(
         `Refusing to overwrite ${target}: file exists and does not look like a gojaja artifact. ` +
           `Move or rename it, then re-run.`,

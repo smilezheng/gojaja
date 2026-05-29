@@ -1,14 +1,17 @@
 import * as fsp from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { boolFlag, optionalString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, LAYER_DIRNAME } from "../runtime";
 import { CLAUDE_MARKER_BEGIN, CLAUDE_MARKER_END } from "../prompts/claude";
+import {
+  codexSkillDir,
+  otherCodexProjects,
+  unregisterCodexProject,
+} from "../prompts/codex-registry";
 
 const CURSOR_RULE_REL = path.join(".cursor", "rules", "gojaja-runtime.mdc");
 const CLAUDE_FILE = "CLAUDE.md";
-const CODEX_SKILL_REL = path.join("skills", "gojaja-runtime");
 
 interface ResetPlan {
   layerDir: string | null;
@@ -17,8 +20,18 @@ interface ResetPlan {
   claudeFile: string | null;
   /** True iff stripping the marker block leaves CLAUDE.md empty (we delete it). */
   claudeFileWillDelete: boolean;
-  /** Set only when --purge-codex-skill was passed AND the dir exists. */
+  /**
+   * Set only when --purge-codex-skill was passed, the dir exists, AND
+   * removing this project leaves no other project using the skill (or
+   * --force was passed). Null means "not deleting the skill".
+   */
   codexSkillDir: string | null;
+  /**
+   * When --purge-codex-skill was passed but the skill is still used by
+   * other projects (and --force was NOT passed), the roots that keep it
+   * alive. Null otherwise. Drives the "kept, still used by N" message.
+   */
+  codexSkillKeptFor: string[] | null;
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -58,14 +71,10 @@ function stripClaudeMarkerBlock(text: string): string {
   return joined.replace(/\n{3,}/g, "\n\n");
 }
 
-function codexSkillDir(): string {
-  const home = process.env.CODEX_HOME ?? path.join(os.homedir(), ".codex");
-  return path.join(home, CODEX_SKILL_REL);
-}
-
 async function buildPlan(
   projectRoot: string,
   purgeCodexSkill: boolean,
+  force: boolean,
 ): Promise<ResetPlan> {
   const layer = path.join(projectRoot, LAYER_DIRNAME);
   const cursor = path.join(projectRoot, CURSOR_RULE_REL);
@@ -81,10 +90,21 @@ async function buildPlan(
     }
   }
 
+  // Codex skill is ref-counted. Deleting it is safe only when no OTHER
+  // project still has it registered (or the user passed --force). This
+  // read does NOT mutate the registry; the execute path unregisters.
   let codexDir: string | null = null;
+  let codexSkillKeptFor: string[] | null = null;
   if (purgeCodexSkill) {
     const dir = codexSkillDir();
-    if (await pathExists(dir)) codexDir = dir;
+    if (await pathExists(dir)) {
+      const others = await otherCodexProjects(projectRoot);
+      if (others.length === 0 || force) {
+        codexDir = dir;
+      } else {
+        codexSkillKeptFor = others;
+      }
+    }
   }
 
   return {
@@ -93,6 +113,7 @@ async function buildPlan(
     claudeFile,
     claudeFileWillDelete,
     codexSkillDir: codexDir,
+    codexSkillKeptFor,
   };
 }
 
@@ -144,10 +165,11 @@ export async function runReset(args: ParsedArgs): Promise<number> {
   const expectedToken = path.basename(projectRoot);
   const confirm = optionalString(args.flags, "confirm");
   const purgeCodexSkill = boolFlag(args.flags, "purge-codex-skill");
+  const force = boolFlag(args.flags, "force");
   const dryRun = boolFlag(args.flags, "dry-run");
   const json = boolFlag(args.flags, "json");
 
-  const plan = await buildPlan(projectRoot, purgeCodexSkill);
+  const plan = await buildPlan(projectRoot, purgeCodexSkill, force);
   const items = planToRemovedList(plan);
 
   if (items.length === 0) {
@@ -200,6 +222,14 @@ export async function runReset(args: ParsedArgs): Promise<number> {
           `Codex agent. It is NOT touched by default; pass\n` +
           `--purge-codex-skill to also delete it.\n\n`,
       );
+    } else if (plan.codexSkillKeptFor) {
+      process.stdout.write(
+        `The Codex skill at ~/.codex/skills/gojaja-runtime/ will be KEPT:\n` +
+          `${plan.codexSkillKeptFor.length} other project(s) still use it:\n` +
+          plan.codexSkillKeptFor.map((p) => `    - ${p}`).join("\n") +
+          `\nThis project will be de-registered from it. Pass --force to\n` +
+          `delete the skill anyway (breaks those projects' Codex windows).\n\n`,
+      );
     }
     if (dryRun) {
       process.stdout.write(`Dry-run: nothing was removed.\n`);
@@ -244,6 +274,11 @@ export async function runReset(args: ParsedArgs): Promise<number> {
       removed.push({ path: plan.claudeFile, kind: "claude-marker-block" });
     }
   }
+  // De-register this project from the Codex skill registry regardless of
+  // --purge (the project is gone, so it no longer uses the skill). When
+  // we're deleting the whole skill dir, unregister is a harmless no-op
+  // (the registry file goes with the dir).
+  await unregisterCodexProject(projectRoot);
   if (plan.codexSkillDir) {
     await fsp.rm(plan.codexSkillDir, { recursive: true, force: true });
     removed.push({ path: plan.codexSkillDir, kind: "codex-skill" });
@@ -251,7 +286,12 @@ export async function runReset(args: ParsedArgs): Promise<number> {
 
   if (json) {
     process.stdout.write(
-      JSON.stringify({ status: "reset", projectRoot, removed }) + "\n",
+      JSON.stringify({
+        status: "reset",
+        projectRoot,
+        removed,
+        codexSkillKeptFor: plan.codexSkillKeptFor ?? undefined,
+      }) + "\n",
     );
     return 0;
   }
@@ -260,7 +300,13 @@ export async function runReset(args: ParsedArgs): Promise<number> {
   for (const it of removed) {
     process.stdout.write(`  - ${it.path}  [${it.kind}]\n`);
   }
-  if (!purgeCodexSkill) {
+  if (plan.codexSkillKeptFor) {
+    process.stdout.write(
+      `\nThe Codex skill at ~/.codex/skills/gojaja-runtime/ was KEPT and\n` +
+        `this project de-registered from it; ${plan.codexSkillKeptFor.length} other ` +
+        `project(s) still use it.\n`,
+    );
+  } else if (!purgeCodexSkill) {
     process.stdout.write(
       `\nThe Codex skill at ~/.codex/skills/gojaja-runtime/ was NOT\n` +
         `touched (user-level, shared across projects). Pass --purge-codex-skill\n` +
