@@ -79,42 +79,27 @@ shell, or carry \`--session <id>\` on every command.
 ## Every turn
 
 1. \`gojaja plan\` → JSON Manifest (role, ackToken, events, tasks, rfcs).
-2. Do the work in the project working tree (including answering the
-   user in chat if they sent a conversational message — that is also
-   "the work").
-3. Emit through gojaja, not chat: \`report\` / \`worklog\` /
-   \`task status\` / \`rfc comment\` / \`rfc decide\`.
+2. Do the work (a conversational message from the user counts as work).
+3. Emit through gojaja: \`report\` / \`worklog\` / \`task status\` /
+   \`rfc comment\` / \`rfc decide\`.
 4. \`gojaja ack --token <ackToken>\`.
 
-**End-of-turn ritual: \`${waitCmd}\`.** wait is the ONLY way to
-properly end a turn — a turn that ends without it leaves your role
-deaf and the team cannot reach you. ONE call BLOCKS this turn (no
-token cost) until ATTENTION / CONDITION_MET (→ \`gojaja plan\`), or
-TIMEOUT if you set a deadline. With no \`--in\`/\`--until\` it blocks
-indefinitely and still wakes on events. Goal: spend few turns idle —
-one long block beats many short ones (each re-run is a fresh,
-token-costing turn). If the host kills the call, that kill time IS
-its per-tool-call timeout; re-run \`gojaja wait\` (no args) to resume
-the same session, but cap yourself at ~5 resumes, then end the turn.
-See \`gojaja handbook\`.
+**End-of-turn ritual: \`${waitCmd}\`.** wait is the ONLY way to end a
+turn — without it your role goes deaf. ONE call BLOCKS (no token
+cost) until an event wakes you, or TIMEOUT if you pass \`--in\`/\`--until\`.
+Bare \`wait\` blocks indefinitely. Host killed it? Re-run \`gojaja wait\`
+(no args) to resume; cap ~5 resumes. See \`gojaja handbook\`.
 
 ## Rules
 
 - **NEVER end a turn without \`gojaja wait\` as the final tool call.**
-  \`wait\` is what keeps your role reachable — without it no event can
-  wake you and the team's coordination loop breaks silently. This
-  applies EVEN when the user sent a conversational message that
-  needed no gojaja work: answer the user, then run \`wait\` before
-  letting the turn end. "I'm online, waiting for instructions" is
-  not a turn end — \`wait\` is.
-- **Tasks pull. If your \`plan\` manifest shows a task you own in
-  Ready / InProgress / Blocked, start working on it immediately —
-  accepting the task in plan IS the start.** Do NOT pause to ask
-  "shall I begin?" / "ready when you are" / "let me know when to
-  proceed". The only legitimate detour is a blocking ambiguity, and
-  the response to that is \`gojaja report\` to the right party
-  (\`reportsTo\`, reviewer, or parent task owner) or \`gojaja rfc\` —
-  never silent waiting for the user to push you.
+  Even for a conversational message: answer the user, then \`wait\`.
+  "I'm online, ready for instructions" is NOT a turn end.
+- **Tasks pull.** If \`plan\` shows a task you own (Ready / InProgress
+  / Blocked), start it — accepting the task in plan IS the start.
+  Don't ask "shall I begin?" or "ready when you are". For a blocking
+  ambiguity use \`gojaja report\` (\`reportsTo\` / reviewer / parent
+  owner) or \`gojaja rfc\`. Never silent waiting.
 - Never hand-edit files under \`.gojaja/\`. Use \`gojaja\`.
 - Never claim to have done something without producing an event for it.
 - Lost context or unsure of your identity? \`gojaja plan\` first.
