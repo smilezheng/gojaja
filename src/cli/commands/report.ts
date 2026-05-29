@@ -1,6 +1,6 @@
 import { boolFlag, optionalString, requireString, type ParsedArgs } from "../argv";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
-import { resolveIdentity } from "../identity";
+import { resolveActor } from "../identity";
 import { nextLoopHint } from "../next-hint";
 
 export async function runReport(args: ParsedArgs): Promise<number> {
@@ -11,20 +11,25 @@ export async function runReport(args: ParsedArgs): Promise<number> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
 
-  const { role: from } = await resolveIdentity(store, {
-    requireSession: true,
-  });
+  // SYSTEM is allowed: a human running the CLI without
+  // `GOJAJA_SESSION` can direct a message at a specific role. The
+  // recipient `to` must still be a registered role (validated in
+  // store.publishReport). Symmetric with `rfc new` / `rfc comment`
+  // / `task new` / `state edit`'s SYSTEM paths. Agents should
+  // continue to claim a role first; `report` from SYSTEM is the
+  // project-owner channel into the team.
+  const { actor } = await resolveActor(store);
 
-  const event = await store.publishReport({ from, to, ref, message });
+  const event = await store.publishReport({ from: actor, to, ref, message });
 
   if (json) {
     process.stdout.write(JSON.stringify({ status: "reported", event }) + "\n");
   } else {
     process.stdout.write(
-      `Reported ${event.id} from ${from} to ${to}` +
+      `Reported ${event.id} from ${actor} to ${to}` +
         (ref ? ` (ref=${ref})` : "") +
         `.\n` +
-        nextLoopHint({ json, actor: from }),
+        nextLoopHint({ json, actor }),
     );
   }
   return 0;

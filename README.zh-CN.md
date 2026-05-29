@@ -184,6 +184,7 @@ gojaja activate Backend --target agents
 | 派活、改任务 | `task new` / `task assign` / `task status`（SYSTEM 可越过归属和 creator 限制强行调整） |
 | 发起 RFC / 脑暴 | `rfc new`（`createdBy` 记为 SYSTEM，且不会被算进 voters，所以不会卡住 pre-decide 的表决） |
 | 在 RFC 上留普通讨论评论 | `rfc comment`（评论的 `from` 记为 SYSTEM，跟 `rfc new` 对称；结构化动作仍然要角色——见下表） |
+| 给某个角色发定向消息 | `report --to <role> --message "..."`（消息的 `from` 记为 SYSTEM；这是你作为"项目主理人"打进团队的渠道。接收方收到的是普通 report，但能从审计里看出是你发的，不是别的 agent） |
 | 改共享状态 | `state edit`（SYSTEM 越过文件归属限制） |
 | 查看一切 | 除 `plan` 外的只读命令：`task show/list`、`rfc show/list`、`role show/list`、`handbook`、`-h`，以及看板 `watch` |
 | 安装 / 卸载 / 激活 | `init`、`reset`、`prompt`、`activate`、`claim` |
@@ -192,13 +193,14 @@ gojaja activate Backend --target agents
 
 | 要绑角色 | 命令 | 为什么 |
 | --- | --- | --- |
-| 发消息 | `report`（定向）、`worklog`（广播） | 消息要能归属到某个角色 |
+| 广播消息 | `worklog`（团队周知进度） | worklog 是"你这个角色对团队说的话"，必须归属到某个角色 |
+| 以**同级 agent 身份**发定向消息 | 角色 session 下跑 `report --to <role>` | 接收方应该清楚这是别的 agent 发的，不是你（项目主理人）发的 |
 | 在 RFC 上站队 | `add-option` / `pre-decide` / `ack` / `object` / `decide` / `revise` / `edit` | 这些都带立场，ACK 闸门统计的是角色名，不是匿名票 |
 | 跑轮次 | `plan`、`ack`、`wait`、`release` | 这些是角色 agent 的日常循环 |
 
-所以直接回答常见疑问：**没绑角色时，你不能以「人」的身份在群里发消息、不能在 RFC 上站队**——这些动作缺了角色就没有归属。普通的 RFC 讨论评论是个例外，专门留给开 RFC 的人在自己的 RFC 上补充上下文。更大的杠杆仍然在「项目主人」那一栏：开角色、压任务、抛 RFC / 脑暴、改状态、必要时强改任务状态。如果你想作为一个完整的「人类参与者」加入讨论（投票、ack / object、decide），给自己也建并 `claim` 一个角色（比如 `Owner` 或 `Human`），之后就能像普通 agent 一样什么都做。
+所以直接回答常见疑问：**没绑角色时，你不能广播 `worklog`、也不能在 RFC 上站队**——这些动作没有"同级 agent"归属就讲不通。但你**可以**作为「项目主人」的身份开 RFC、在 RFC 上留评论、给某个角色发定向 `report`、压任务、改状态、必要时强改任务状态。如果你想作为一个完整的「人类参与者」加入讨论（投票、ack / object、decide、广播），给自己也建并 `claim` 一个角色（比如 `Owner` 或 `Human`），之后就能像普通 agent 一样什么都做。
 
-> 「发起脑暴」和「在脑暴上留普通评论」都可以不绑角色（SYSTEM 身份）。后续的结构化动作（`add-option` / `pre-decide` / `ack` / `object` / `decide` / `revise` / `edit`）仍然各自需要角色 session。
+> SYSTEM 身份（不绑角色）能做的：`rfc new`、`rfc comment`（普通评论）、`report --to <role>`、`task new` / `assign` / `status`、`state edit`。结构化的 RFC 动作（`add-option` / `pre-decide` / `ack` / `object` / `decide` / `revise` / `edit`）和广播 `worklog` 仍然各自需要角色 session。
 
 ---
 

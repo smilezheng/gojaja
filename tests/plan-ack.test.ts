@@ -57,6 +57,42 @@ describe("Store.publishReport", () => {
       ctx.store.publishReport({ from: "PM", to: "Frontend", message: "x" }),
     ).rejects.toMatchObject({ code: "USAGE" });
   });
+
+  it("accepts from: 'SYSTEM' (human-running-CLI directing a message at a role)", async () => {
+    // Symmetric with `rfc new` / `rfc comment` / `task new` /
+    // `state edit`'s SYSTEM paths: a project owner running the CLI
+    // without GOJAJA_SESSION can send a directed report at a role.
+    // The recipient still has to be a registered role — humans send
+    // TO roles, not as roles.
+    const e = await ctx.store.publishReport({
+      from: "SYSTEM",
+      to: "TL",
+      message: "Re-evaluate the day-0 doc; mvp must also be the dev phase.",
+    });
+    expect(e.type).toBe("REPORT");
+    expect(e.from).toBe("SYSTEM");
+    expect(e.to).toBe("TL");
+    // The recipient sees this in their manifest just like any other
+    // directed REPORT — the visibility check is `e.to === role`,
+    // independent of whether `from` is a role or SYSTEM.
+    const visible = await ctx.store.filterVisibleEventsForRole([e], "TL");
+    expect(visible).toHaveLength(1);
+    // Other roles do NOT see it (directed, not broadcast).
+    const visibleBackend = await ctx.store.filterVisibleEventsForRole([e], "Backend");
+    expect(visibleBackend).toHaveLength(0);
+  });
+
+  it("from: 'SYSTEM' still requires a registered recipient", async () => {
+    // SYSTEM is not a magic bypass for the recipient gate — the
+    // typo guard is independent of who sent the message.
+    await expect(
+      ctx.store.publishReport({
+        from: "SYSTEM",
+        to: "Forntend",
+        message: "x",
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
 });
 
 // ----------------------------------------------------------------------------

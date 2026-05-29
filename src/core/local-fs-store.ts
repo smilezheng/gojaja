@@ -1043,12 +1043,16 @@ export class LocalFsStore implements Store {
   // ---- composite operations -----------------------------------------------
 
   async publishReport(input: {
-    from: RoleId;
+    from: RoleId | "SYSTEM";
     to: RoleId;
     ref?: string;
     message: string;
   }): Promise<Event> {
-    validateRoleId(input.from);
+    // `"SYSTEM"` is allowed for a human running the CLI without
+    // `GOJAJA_SESSION` — the project owner directing a question or
+    // request at a specific role. Symmetric with `rfc new` / `rfc
+    // comment` / `task new` / `state edit`'s SYSTEM paths.
+    if (input.from !== "SYSTEM") validateRoleId(input.from);
     validateRoleId(input.to);
     if (typeof input.message !== "string" || input.message.length === 0) {
       throw new UsageError("Report message must be a non-empty string.");

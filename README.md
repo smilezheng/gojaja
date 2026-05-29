@@ -182,6 +182,7 @@ These files are project content. The CLI does not create them; you and your agen
 | Push and manage work | `task new` / `task assign` / `task status` (SYSTEM overrides ownership + creator checks) |
 | Open an RFC / brainstorm | `rfc new` (`createdBy` is recorded as SYSTEM and is **not** added to voters, so it never stalls the pre-decide ack gate) |
 | Leave plain discussion comments on an RFC | `rfc comment` (recorded as `from: SYSTEM`; symmetric with `rfc new`. Structured RFC moves still need a role — see below) |
+| Send a directed message to a specific role | `report --to <role> --message "..."` (recorded as `from: SYSTEM`; the project owner channel into the team. The recipient is unchanged — they receive it like any other report, and can tell from the audit log it came from you, not a peer agent) |
 | Edit shared state | `state edit` (SYSTEM bypasses file-ownership checks) |
 | Read anything | every read-only command except `plan`: `task show/list`, `rfc show/list`, `role show/list`, `handbook`, `-h`, and the `watch` dashboard |
 | Install / uninstall / activate | `init`, `reset`, `prompt`, `activate`, `claim` |
@@ -190,13 +191,14 @@ These files are project content. The CLI does not create them; you and your agen
 
 | Needs a role | Command | Why |
 | --- | --- | --- |
-| Send messages | `report` (directed), `worklog` (broadcast) | a message must belong to a role |
+| Send broadcast messages | `worklog` (team-wide progress note) | a worklog is your role's voice on the team — must belong to a role |
+| Send a directed message AS a peer (not as the project owner) | `report --to <role>` from a claimed role | the receiver should know this came from a peer agent, not from you-the-owner |
 | Take a position on an RFC | `add-option` / `pre-decide` / `ack` / `object` / `decide` / `revise` / `edit` | each registers a stance; the ACK gate counts roles, not anonymous votes |
 | Run the loop | `plan`, `ack`, `wait`, `release` | these are a role agent's per-turn cycle |
 
-So, to answer the common question directly: **without a role you cannot send messages or take a position on an RFC as a "human" in the channel** — those acts have no owner without a role. Plain RFC comments are an exception so a human can leave context on an RFC they opened. Your bigger lever is still the project-owner column: create roles, push tasks, throw out an RFC/brainstorm, edit state, and force a task status when needed. If you want to participate as a full discussant (vote, ack/object, decide), create and `claim` a role for yourself (e.g. `Owner` or `Human`); then you can do everything any other agent can.
+So, to answer the common question directly: **without a role you cannot broadcast a `worklog` or take a position on an RFC as a "human" in the channel** — those acts have no peer-agent owner. What you CAN do as the project owner: open RFCs, comment on RFCs, send directed `report`s at specific roles, push tasks, edit state, and force task status when needed. If you want to participate as a full discussant (vote, ack/object, decide, broadcast), create and `claim` a role for yourself (e.g. `Owner` or `Human`); then you can do everything any other agent can.
 
-> Opening a brainstorm AND leaving plain comments on it can be done without a role (as SYSTEM). The structured follow-ups (`add-option` / `pre-decide` / `ack` / `object` / `decide` / `revise` / `edit`) still each need a role session.
+> SYSTEM-permitted ops (no `GOJAJA_SESSION` needed): `rfc new`, `rfc comment` (plain), `report --to <role>`, `task new` / `assign` / `status`, `state edit`. Structured RFC follow-ups (`add-option` / `pre-decide` / `ack` / `object` / `decide` / `revise` / `edit`) and broadcast `worklog` still each need a role session.
 
 ---
 

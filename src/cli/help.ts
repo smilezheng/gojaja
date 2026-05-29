@@ -482,7 +482,12 @@ export const COMMAND_HELP: Record<string, string> = {
       lifecycle. Reference material; needs no session.`,
 
   report: `  gojaja report --to <role> --message <text> [--ref <id>]
-      Directed message to one role ("I need you to act next").`,
+      Directed message to one role ("I need you to act next").
+      Allowed without GOJAJA_SESSION (a human running the CLI as the
+      project owner; recorded as from=SYSTEM), symmetric with
+      'rfc new' / 'rfc comment'. The recipient is unchanged — they
+      receive it like any other report. The 'to' role must be
+      registered.`,
 
   worklog: `  gojaja worklog --message <text>
       Broadcast a progress note to the team.`,

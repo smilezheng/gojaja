@@ -126,7 +126,16 @@ export interface Store {
    * filters the global event stream by recipient role).
    */
   publishReport(input: {
-    from: RoleId;
+    /**
+     * Sender. Accepts `"SYSTEM"` so a human running the CLI without
+     * `GOJAJA_SESSION` can leave a directed message to a role
+     * (symmetric with `rfc new` / `rfc comment` / `task new` /
+     * `state edit`'s SYSTEM paths). The recipient `to` must still be
+     * a registered role — humans send TO roles, not as roles, and
+     * the receiver always knows whether the directive came from a
+     * peer agent or from the project owner.
+     */
+    from: RoleId | "SYSTEM";
     to: RoleId;
     ref?: string;
     message: string;

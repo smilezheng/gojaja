@@ -8,6 +8,39 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### `gojaja report` accepts SYSTEM (no GOJAJA_SESSION) for project-owner directives
+
+The same SYSTEM-friendly path that `rfc new`, `rfc comment`,
+`task new`, and `state edit` already had now extends to `report`. A
+human running the CLI without `GOJAJA_SESSION` had been able to open
+RFCs and push tasks at any role — but trying to direct a one-line
+"hey, re-evaluate this" at a specific role hit a session gate. The
+gate forced the human to either bounce the directive through a peer
+agent's chat or claim a role they did not own; both ugly. `report`
+now resolves the actor via `resolveActor`; the resulting `REPORT`
+event records `from: "SYSTEM"`.
+
+- The recipient `to` field is still required to be a registered role
+  (the typo guard from PR8b is unchanged). Humans send TO roles, not
+  AS roles — the receiver's manifest displays the `from: "SYSTEM"`
+  directly so they can tell whether the directive came from a peer
+  agent or from the project owner.
+- `worklog` deliberately stays role-only. A worklog is a team-wide
+  broadcast that needs a peer-agent voice to be meaningful; the
+  project owner's broadcast channel is conversational chat, not the
+  team's progress feed.
+- Type changes: `Store.publishReport`'s `from` widened from `RoleId`
+  to `RoleId | "SYSTEM"`; `LocalFsStore.publishReport` now skips
+  `validateRoleId` when `from === "SYSTEM"`. No payload schema
+  change.
+- Tests in `tests/plan-ack.test.ts`: SYSTEM-as-from happy path
+  (event records correctly + visible to recipient + invisible to
+  unrelated role); SYSTEM still cannot bypass the recipient gate
+  (typo `to: "Forntend"` rejected).
+- Updated README.md / README.zh-CN.md (the "without a role" tables
+  and the wrap-up paragraph), `docs/PROTOCOL.md` `gojaja report`
+  section, and `gojaja report -h`.
+
 ### Runtime body: `wait` is the end-of-turn ritual + hard rule against ending unparked
 
 Direct follow-up to the previous "stalled-no-wait" PR: that one

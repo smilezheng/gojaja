@@ -225,8 +225,15 @@ ack — see the regression test
 
 ### `gojaja report --to <role> --message <text> [--ref <id>]`
 
-- `from` is derived from `GOJAJA_SESSION` (i.e. the session's role); the agent
-  cannot pass an arbitrary `--from`.
+- `from` comes from `GOJAJA_SESSION` when set; without a session the
+  report is recorded as `from: "SYSTEM"` (a human running the CLI as
+  the project owner). Symmetric with `rfc new` / `rfc comment` /
+  `task new` / `state edit`'s SYSTEM paths. The agent cannot pass an
+  arbitrary `--from`; `from` is always the resolved actor.
+- The recipient `to` must still be a registered role — humans send
+  TO roles, not as roles. The receiver's manifest shows the
+  `from: "SYSTEM"` directly so they can tell whether the directive
+  came from a peer agent or from the project owner.
 - Writes one event record into `comms/events/`. Recipients see it via
   their next `plan`, which filters the global event stream by `to`.
 - Refuses an empty message or an unknown recipient role.
