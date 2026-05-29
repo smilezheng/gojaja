@@ -17,6 +17,7 @@ import { runWait } from "./commands/wait";
 import { runWatch } from "./commands/watch";
 import { runWorklog } from "./commands/worklog";
 import { runState } from "./commands/state";
+import { runHandbook } from "./commands/handbook";
 import { HELP_TEXT } from "./help";
 
 async function dispatch(): Promise<number> {
@@ -89,6 +90,8 @@ async function dispatch(): Promise<number> {
       return runState(args);
     case "reset":
       return runReset(args);
+    case "handbook":
+      return runHandbook(args);
     default:
       throw new UsageError(`Unknown command: ${args.command}`);
   }

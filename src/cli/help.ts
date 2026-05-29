@@ -60,7 +60,13 @@ Setup (you, in your shell — runs once per project unless noted):
                                               [--no-handbook] [--json]
       Print (and with --write, install) the host-specific runtime rule
       for this project. ROLE-FREE: same artifact for every role; the
-      role is bound per-window by 'activate', not here.
+      role is bound per-window by 'activate', not here. All targets are
+      project-local: cursor -> .cursor/rules/gojaja-runtime.mdc;
+      claude -> a managed block in CLAUDE.md; codex -> a managed block
+      in AGENTS.md (Codex injects it into the model instructions at
+      session start); generic -> printed only.
+      --no-handbook drops the compact judgement cheatsheet from the
+      card (the full policy is always available via 'gojaja handbook').
       --force-rewrite overrides the byte-equal short-circuit (useful
       after an upgrade to confirm the install came from the current
       template).
@@ -90,6 +96,13 @@ Per-turn loop (agent, requires GOJAJA_SESSION):
   ack  [<role>] --token <t>
       Confirm the manifest you just processed. Cursor advances exactly
       to the snapshot the manifest captured — never further.
+  handbook [--json]
+      Print the full collaboration handbook — the judgement layer for
+      when to use worklog vs report vs RFC, escalation, multi-round
+      RFCs, deliverable gates, task lifecycle. The injected runtime
+      prompt keeps only a compact cheatsheet + a pointer here, so this
+      is where an agent reads the full policy when making a judgement
+      call. Reference material; needs no session.
 
 Messaging (agent, requires GOJAJA_SESSION):
   report --to <role> --message <text> [--ref <id>]
@@ -307,23 +320,17 @@ Monitoring (you, the human scheduler):
       mutates coordination state. Ctrl-C to stop.
 
 Project lifecycle (user, NOT for agents):
-  reset [--dry-run] [--confirm <basename>] [--purge-codex-skill] [--force]
+  reset [--dry-run] [--confirm <basename>]
       Remove everything this tool installed into the project: the
       .gojaja/ layer (all events, state, RFCs, worklogs, sessions
-      and locks), .cursor/rules/gojaja-runtime.mdc, and the
-      managed BEGIN/END block inside CLAUDE.md (preserves the rest of
-      the file; deletes it if nothing else was inside).
+      and locks), .cursor/rules/gojaja-runtime.mdc, and the managed
+      BEGIN/END block inside CLAUDE.md and AGENTS.md (preserves the
+      rest of each file; deletes a file only if nothing else was in
+      it). Everything gojaja installs is project-local, so there is
+      no user-level footprint to clean up separately.
 
       Default invocation prints a preview and refuses to delete. Pass
       --confirm <basename-of-project-root> to actually delete.
-
-      The Codex skill at ~/.codex/skills/gojaja-runtime/ is
-      user-level and shared across every project that activated a
-      Codex agent; it is NOT touched by default. Pass
-      --purge-codex-skill to also remove it — but it is reference
-      counted: if other projects still use it, this project is just
-      de-registered and the skill is kept. --force deletes it anyway
-      (breaks those projects' Codex windows).
 
       Must be run from a shell with no GOJAJA_SESSION exported (mirrors
       role delete; destructive ops belong to the user, not an agent).

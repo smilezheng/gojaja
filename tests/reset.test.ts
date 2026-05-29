@@ -209,48 +209,35 @@ describe("gojaja reset", () => {
     }
   });
 
-  it("--purge-codex-skill removes ~/.codex skill when present (via CODEX_HOME override)", async () => {
+  it("strips the AGENTS.md marker block but preserves surrounding user content", async () => {
     const { projectRoot, basename } = await freshProject();
-    const fakeHome = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-reset-codex-"));
-    const skillDir = path.join(fakeHome, "skills", "gojaja-runtime");
-    await fsp.mkdir(skillDir, { recursive: true });
-    await fsp.writeFile(path.join(skillDir, "SKILL.md"), "managed");
-    const savedCodex = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = fakeHome;
     try {
       await initLayer(projectRoot);
-      const code = await runReset(args({
-        root: projectRoot,
-        confirm: basename,
-        "purge-codex-skill": true,
-      }));
-      expect(code).toBe(0);
-      expect(await exists(skillDir)).toBe(false);
+      const block = `${CLAUDE_MARKER_BEGIN}\n# managed content\n${CLAUDE_MARKER_END}`;
+      await fsp.writeFile(
+        path.join(projectRoot, "AGENTS.md"),
+        `# My agents\n\nProject-specific agent notes.\n\n${block}\n`,
+      );
+      await runReset(args({ root: projectRoot, confirm: basename }));
+      const text = await fsp.readFile(path.join(projectRoot, "AGENTS.md"), "utf8");
+      expect(text).toContain("Project-specific agent notes");
+      expect(text).not.toContain(CLAUDE_MARKER_BEGIN);
+      expect(text).not.toContain("managed content");
     } finally {
-      if (savedCodex === undefined) delete process.env.CODEX_HOME;
-      else process.env.CODEX_HOME = savedCodex;
       await fsp.rm(projectRoot, { recursive: true, force: true });
-      await fsp.rm(fakeHome, { recursive: true, force: true });
     }
   });
 
-  it("without --purge-codex-skill leaves the Codex skill untouched", async () => {
+  it("deletes AGENTS.md entirely when the marker block was its only content", async () => {
     const { projectRoot, basename } = await freshProject();
-    const fakeHome = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-reset-codex-"));
-    const skillDir = path.join(fakeHome, "skills", "gojaja-runtime");
-    await fsp.mkdir(skillDir, { recursive: true });
-    await fsp.writeFile(path.join(skillDir, "SKILL.md"), "managed");
-    const savedCodex = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = fakeHome;
     try {
       await initLayer(projectRoot);
+      const block = `${CLAUDE_MARKER_BEGIN}\n# managed content\n${CLAUDE_MARKER_END}`;
+      await fsp.writeFile(path.join(projectRoot, "AGENTS.md"), `${block}\n`);
       await runReset(args({ root: projectRoot, confirm: basename }));
-      expect(await exists(skillDir)).toBe(true);
+      expect(await exists(path.join(projectRoot, "AGENTS.md"))).toBe(false);
     } finally {
-      if (savedCodex === undefined) delete process.env.CODEX_HOME;
-      else process.env.CODEX_HOME = savedCodex;
       await fsp.rm(projectRoot, { recursive: true, force: true });
-      await fsp.rm(fakeHome, { recursive: true, force: true });
     }
   });
 

@@ -61,5 +61,8 @@ export async function runPlan(args: ParsedArgs): Promise<number> {
   process.stdout.write(
     `\nWhen done processing, run:\n  gojaja ack ${role} --token ${manifest.ackToken}\n`,
   );
+  process.stdout.write(
+    `Unsure which tool to use or how to escalate? Run \`gojaja handbook\`.\n`,
+  );
   return 0;
 }

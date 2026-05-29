@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { COLLABORATION_HANDBOOK } from "../src/cli/prompts/handbook";
 import { buildActivation, buildRuntime } from "../src/cli/prompts";
+import { runHandbook } from "../src/cli/commands/handbook";
 
 /**
  * Trigger phrases the compressed handbook MUST keep present (verbatim
@@ -157,41 +158,89 @@ describe("buildRuntime handbook integration", () => {
     }
   });
 
-  it("default runtime artifact includes the handbook for every target", () => {
+  it("does NOT embed the full handbook — it points at `gojaja handbook` instead", () => {
+    // The injected card must stay small (CLAUDE.md ~200-line budget).
+    // The full policy is fetched on demand via `gojaja handbook`, so the
+    // card carries only a compact cheatsheet + a pointer, never the
+    // ~250-line handbook body.
     for (const t of ["codex", "claude", "cursor", "generic"] as const) {
       const a = buildRuntime(t, PROJ);
-      expect(a.body).toContain("Collaboration handbook");
-      // Runtime mechanics still present alongside the handbook.
       expect(a.body).toContain("gojaja plan");
-      // Codex/Claude/Cursor also drop the handbook into the persistent file.
+      expect(a.body).toContain("gojaja handbook"); // the pointer
+      expect(a.body).not.toContain("## Collaboration handbook"); // not the full body
+      // The compact "when to use which" cheatsheet is present by default.
+      expect(a.body).toContain("When to use which");
       if (t !== "generic") {
-        expect(a.files[0].content).toContain("Collaboration handbook");
+        expect(a.files[0].content).toContain("gojaja handbook");
+        expect(a.files[0].content).not.toContain("## Collaboration handbook");
       }
     }
   });
 
-  it("--no-handbook (withHandbook: false) omits the handbook section", () => {
+  it("the injected card stays well under CLAUDE.md's ~200-line budget", () => {
+    for (const t of ["codex", "claude", "cursor"] as const) {
+      const content = buildRuntime(t, PROJ).files[0].content;
+      const lines = content.split("\n").length;
+      expect(lines).toBeLessThan(130);
+    }
+  });
+
+  it("--no-handbook (withHandbook: false) omits the cheatsheet but keeps the loop + pointer", () => {
     for (const t of ["codex", "claude", "cursor", "generic"] as const) {
       const a = buildRuntime(t, PROJ, { withHandbook: false });
-      expect(a.body).not.toContain("Collaboration handbook");
-      expect(a.body).not.toContain("Hard \"don't\"s");
+      expect(a.body).not.toContain("When to use which");
       expect(a.body).toContain("gojaja plan");
+      // The "where to look things up" pointer is always present.
+      expect(a.body).toContain("gojaja handbook");
       if (t !== "generic") {
-        expect(a.files[0].content).not.toContain("Collaboration handbook");
+        expect(a.files[0].content).not.toContain("When to use which");
       }
     }
   });
 
-  it("dropping the handbook shrinks the cursor file by at least ~2 KB", () => {
-    const withH = buildRuntime("cursor", PROJ).files[0].content;
-    const noH = buildRuntime("cursor", PROJ, { withHandbook: false }).files[0].content;
-    expect(withH.length - noH.length).toBeGreaterThan(2000);
+  it("generic activation carries the cheatsheet too (since there is no install location)", () => {
+    const s = buildActivation("generic", "PM", PROJ);
+    expect(s).toContain("When to use which");
+    const sNo = buildActivation("generic", "PM", PROJ, { withHandbook: false });
+    expect(sNo).not.toContain("When to use which");
+  });
+});
+
+describe("`gojaja handbook` command", () => {
+  function capture(): { drain: () => string; release: () => void } {
+    let buf = "";
+    const orig = process.stdout.write.bind(process.stdout);
+    (process.stdout as unknown as { write: (c: string) => boolean }).write = (c: string) => {
+      buf += c;
+      return true;
+    };
+    return {
+      drain: () => buf,
+      release: () => {
+        (process.stdout as unknown as { write: typeof orig }).write = orig;
+      },
+    };
+  }
+
+  it("prints the full collaboration handbook on demand", async () => {
+    const cap = capture();
+    try {
+      const code = await runHandbook({ command: "handbook", positional: [], flags: {} });
+      expect(code).toBe(0);
+      expect(cap.drain()).toContain(COLLABORATION_HANDBOOK.trim());
+    } finally {
+      cap.release();
+    }
   });
 
-  it("generic activation carries the handbook too (since there is no install location)", () => {
-    const s = buildActivation("generic", "PM", PROJ);
-    expect(s).toContain("Collaboration handbook");
-    const sNo = buildActivation("generic", "PM", PROJ, { withHandbook: false });
-    expect(sNo).not.toContain("Collaboration handbook");
+  it("emits JSON with --json", async () => {
+    const cap = capture();
+    try {
+      await runHandbook({ command: "handbook", positional: [], flags: { json: true } });
+      const parsed = JSON.parse(cap.drain().trim());
+      expect(parsed.handbook).toBe(COLLABORATION_HANDBOOK);
+    } finally {
+      cap.release();
+    }
   });
 });

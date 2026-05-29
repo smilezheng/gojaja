@@ -29,10 +29,10 @@ for that role.
 ## Project lifecycle
 
 `gojaja init` writes `.gojaja/` into a project. `gojaja reset`
-removes everything this tool installed there (and optionally the
-user-level Codex skill).
+removes everything this tool installed there. Everything is
+project-local (no user-level footprint).
 
-### `gojaja reset [--dry-run] [--confirm <basename>] [--purge-codex-skill]`
+### `gojaja reset [--dry-run] [--confirm <basename>]`
 
 - Without `--confirm`, prints a preview and exits without deleting.
   The preview lists every path that would be touched and tells the
@@ -47,14 +47,9 @@ user-level Codex skill).
     `.cursor/rules/` and `.cursor/` after, so the project tree is
     not left with empty parent directories belonging to us).
   - The `<!-- gojaja-runtime:BEGIN ... :END -->` block in
-    `<project>/CLAUDE.md`. Surrounding user content is preserved;
-    `CLAUDE.md` is deleted entirely only if the marker block was its
-    only content.
-- `--purge-codex-skill` additionally removes
-  `${CODEX_HOME:-~/.codex}/skills/gojaja-runtime/`. Off by
-  default because that skill is user-level and shared across every
-  project the user works on; deleting it from one project's reset
-  would break other projects.
+    `<project>/CLAUDE.md` and `<project>/AGENTS.md`. Surrounding user
+    content is preserved; a file is deleted entirely only if the
+    marker block was its only content.
 - **Refuses when `GOJAJA_SESSION` is set.** Destructive ops are for the
   user, not an agent — same posture as `role delete`. Open a fresh
   shell or `unset GOJAJA_SESSION` first.
@@ -680,7 +675,7 @@ short snippet to paste into that window's chat.
 
 | Target | Persistent artifact location | Activation per window |
 | --- | --- | --- |
-| `codex` | `${CODEX_HOME:-~/.codex}/skills/gojaja-runtime/SKILL.md` and `agents/openai.yaml` | User pastes `Use $gojaja-runtime. I am the <role> agent for <project root>.` |
+| `codex` | A `<!-- gojaja-runtime:BEGIN ... :END -->` marker block inside `<project>/AGENTS.md` (Codex injects AGENTS.md into the model instructions at session start; preserves user content around it) | User pastes the activation snippet into the chat |
 | `claude` | A `<!-- gojaja-runtime:BEGIN ... :END -->` marker block inside `<project>/CLAUDE.md` (preserves user content around it) | User pastes the activation snippet into the chat |
 | `cursor` | `<project>/.cursor/rules/gojaja-runtime.mdc` with `alwaysApply: true` | User pastes the activation snippet into the chat |
 | `generic` | Nothing written | User pastes the full prompt body into the chat |
@@ -691,7 +686,18 @@ date)` and touch no files. Pass `--force-rewrite` to overwrite even
 when bytes match (useful after a CLI upgrade, to confirm the install
 came from the current template). The CLI refuses to clobber an
 existing file that does not look like a previous artifact (heuristic:
-must contain the `gojaja plan` marker phrase).
+must contain the `gojaja plan` or `gojaja-runtime` marker phrase).
+
+The injected artifact is a compact **runtime card** (~80 lines): the
+loop, identity recovery, hard invariants, a short "when to use which"
+cheatsheet, and pointers. It deliberately stays inside CLAUDE.md's
+~200-line budget. The full judgement layer (channel choice rationale,
+escalation ladder, multi-round RFC mechanics, deliverable gates, task
+lifecycle) is NOT injected — an agent fetches it on demand with
+`gojaja handbook`. Command/flag reference is `gojaja -h`. So a
+context-compressed agent re-orients from the always-present card
+(run `gojaja plan` → identity + work; `gojaja handbook` → policy)
+without the policy text costing system-prompt budget every turn.
 
 **Window-restart caveat.** Cursor, Claude Code, and Codex inject these
 rule files into the agent's system prompt only when an agent window

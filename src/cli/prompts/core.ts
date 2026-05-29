@@ -1,8 +1,12 @@
-import { COLLABORATION_HANDBOOK } from "./handbook";
 import type { Target } from "./types";
 
 export interface RuntimeBodyOptions {
-  /** Append the collaboration handbook (heuristics for "when to use what"). */
+  /**
+   * Include the compact "when to use which" cheatsheet in the injected
+   * card. Default true. The full judgement layer is NOT embedded — it is
+   * served on demand by `gojaja handbook`, so the always-injected card
+   * stays inside CLAUDE.md's ~200-line budget.
+   */
   withHandbook?: boolean;
   /**
    * Host target. The runtime body uses this only to tweak the
@@ -34,7 +38,7 @@ export function runtimeLoopBody(
   _projectRoot: string,
   opts: RuntimeBodyOptions = { withHandbook: true },
 ): string {
-  const handbook = opts.withHandbook === false ? "" : `\n\n${COLLABORATION_HANDBOOK}`;
+  const cheatsheet = opts.withHandbook === false ? "" : `\n${WHEN_TO_USE_WHICH}`;
   const waitCmd = waitRecommendation(opts.target);
   // projectRoot is intentionally NOT baked into the runtime body. The
   // body is written into committed files (cursor rule, CLAUDE.md
@@ -94,8 +98,40 @@ shell, or carry \`--session <id>\` on every command.
 - Never claim to have done something without producing an event for it.
 - Lost context or unsure of your identity? \`gojaja plan\` first.
 - Blocked by a cross-role decision? Open an RFC; don't guess.
-${handbook}`;
+- Don't spoof another role (editing GOJAJA_SESSION, faking a report's
+  \`from\`). Don't \`--force\` a claim — that is a human action.
+${cheatsheet}
+## Where to look things up
+
+- **This turn's work**: \`gojaja plan\` output is authoritative (your
+  role, unread events, active tasks, RFCs you owe a response on).
+- **Judgement policy** (picking a tool, disagreement, escalation,
+  multi-round RFCs, deliverables): \`gojaja handbook\`.
+- **Command + flag reference**: \`gojaja -h\`.
+`;
 }
+
+/**
+ * Compact "which channel when" cheatsheet embedded in the injected card.
+ * The full policy lives in \`gojaja handbook\`; this is just enough to
+ * stop the most damaging mistakes even if the agent never fetches it.
+ */
+const WHEN_TO_USE_WHICH = `## When to use which (full policy: \`gojaja handbook\`)
+
+- \`worklog\` (broadcast): team-visible progress that has no event of its
+  own. Don't echo an event you already emitted.
+- \`report --to <role>\` (directed): you need ONE named role to act next,
+  or a question only one role can answer.
+- \`rfc new\` (decision): a choice no single role owns — spans multiple
+  \`owns\`, or changes architecture / API / data model / rollback. Not
+  for single-owner questions.
+- Stuck on a dependency? \`report\` up your \`reportsTo\` chain.
+- Idle (no task AND no events)? \`gojaja wait --for task-assigned\`
+  (broadcasts that you're free). Don't use \`--for task-assigned\` while
+  you still hold an open task — finish or hand it off first.
+- "Done" means every acceptance criterion is met; if the task has file
+  deliverables they must exist on disk before \`task status ... Done\`.
+`;
 
 /**
  * Per-target recommendation for the `wait` invocation.
@@ -146,7 +182,7 @@ in order:
      # often (task, rfc, report, worklog, plan, ack, wait, ...).
 
 Then enter the runtime loop documented in the gojaja-runtime
-instructions installed in this host (Cursor rule / CLAUDE.md / Codex
-skill — whichever applies to you).
+instructions installed in this host (Cursor rule / CLAUDE.md /
+AGENTS.md block — whichever applies to you).
 `;
 }

@@ -52,10 +52,13 @@ describe("buildRuntime (role-free)", () => {
     }
   });
 
-  it("codex artifact lists exactly two files: SKILL.md and openai.yaml", () => {
+  it("codex artifact is a marker-block targeting <root>/AGENTS.md", () => {
     const a = buildRuntime("codex", ctx.root);
-    const names = a.files.map((f) => path.basename(f.path)).sort();
-    expect(names).toEqual(["SKILL.md", "openai.yaml"]);
+    expect(a.files).toHaveLength(1);
+    expect(a.files[0].path).toBe(path.join(ctx.root, "AGENTS.md"));
+    expect(a.files[0].mode).toBe("marker-block");
+    expect(a.files[0].markerBegin).toBe(CLAUDE_MARKER_BEGIN);
+    expect(a.files[0].markerEnd).toBe(CLAUDE_MARKER_END);
   });
 
   it("cursor artifact targets .cursor/rules/gojaja-runtime.mdc with alwaysApply", () => {
@@ -99,17 +102,16 @@ describe("buildRuntime (role-free)", () => {
     }
   });
 
-  it("M1: codex SKILL.md is project-agnostic — same bytes for any projectRoot", async () => {
+  it("codex AGENTS.md block is project-path-agnostic — same bytes for any projectRoot", async () => {
+    // The block goes into <root>/AGENTS.md (project-local), but its
+    // CONTENT bakes no absolute path: gojaja discovers the root from cwd
+    // at runtime. So the block bytes are identical regardless of root,
+    // and never leak a machine-specific path into a committed file.
     const a1 = buildRuntime("codex", "/tmp/project-A");
     const b1 = buildRuntime("codex", "/Users/someone/code/project-B");
-    const skillA = a1.files.find((f) => path.basename(f.path) === "SKILL.md");
-    const skillB = b1.files.find((f) => path.basename(f.path) === "SKILL.md");
-    expect(skillA).toBeDefined();
-    expect(skillB).toBeDefined();
-    expect(skillA!.content).toBe(skillB!.content);
-    // And the skill should NOT contain either of those project paths.
-    expect(skillA!.content).not.toContain("/tmp/project-A");
-    expect(skillA!.content).not.toContain("/Users/someone/code/project-B");
+    expect(a1.files[0].content).toBe(b1.files[0].content);
+    expect(a1.files[0].content).not.toContain("/tmp/project-A");
+    expect(a1.files[0].content).not.toContain("/Users/someone/code/project-B");
   });
 });
 
@@ -126,9 +128,12 @@ describe("buildActivation (role-bound, never persisted)", () => {
     }
   });
 
-  it("codex activation includes the $gojaja-runtime trigger phrase", () => {
+  it("codex activation is the standard snippet (runtime lives in AGENTS.md, not a skill)", () => {
     const s = buildActivation("codex", "PM", ctx.root);
-    expect(s).toContain("$gojaja-runtime");
+    expect(s).toContain("You are the PM agent");
+    expect(s).toContain('eval "$(gojaja claim PM --eval)"');
+    // No skill-invocation trigger phrase anymore.
+    expect(s).not.toContain("$gojaja-runtime");
   });
 
   it("cursor and claude activations stay short — they assume the runtime body is installed", () => {
@@ -154,61 +159,43 @@ describe("buildActivation (role-bound, never persisted)", () => {
     const s = buildActivation("generic", "PM", ctx.root);
     // Should be substantially larger because it includes the full body.
     expect(s.length).toBeGreaterThan(2000);
-    expect(s).toContain("Collaboration handbook"); // default body includes handbook
-    expect(s).toContain("BEGIN");
-    expect(s).toContain("END");
+    expect(s).toContain("When to use which"); // default body includes the cheatsheet
+    expect(s).toContain("gojaja handbook"); // pointer to the full policy
   });
 
-  it("generic activation with withHandbook=false omits the handbook", () => {
+  it("generic activation with withHandbook=false omits the cheatsheet", () => {
     const s = buildActivation("generic", "PM", ctx.root, { withHandbook: false });
-    expect(s).not.toContain("Collaboration handbook");
+    expect(s).not.toContain("When to use which");
     expect(s).toContain("gojaja plan");
   });
 });
 
 describe("writeArtifactFile", () => {
   let ctx: { root: string; store: LocalFsStore };
-  let codexHomeOrig: string | undefined;
-  let codexHomeTmp: string;
   beforeEach(async () => {
     ctx = await freshProject();
-    codexHomeTmp = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-codex-home-"));
-    codexHomeOrig = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = codexHomeTmp;
   });
   afterEach(async () => {
-    if (codexHomeOrig !== undefined) process.env.CODEX_HOME = codexHomeOrig;
-    else delete process.env.CODEX_HOME;
-    await fsp.rm(codexHomeTmp, { recursive: true, force: true });
     await fsp.rm(ctx.root, { recursive: true, force: true });
   });
 
-  it("codex --write creates SKILL.md and openai.yaml under CODEX_HOME", async () => {
+  it("codex --write upserts a marker block in <root>/AGENTS.md, preserving prior content", async () => {
     const a = buildRuntime("codex", ctx.root);
-    for (const f of a.files) await writeArtifactFile(f);
-    const skill = await fsp.readFile(
-      path.join(codexHomeTmp, "skills", "gojaja-runtime", "SKILL.md"),
-      "utf8",
-    );
-    const openai = await fsp.readFile(
-      path.join(codexHomeTmp, "skills", "gojaja-runtime", "agents", "openai.yaml"),
-      "utf8",
-    );
-    expect(skill).toContain("gojaja-runtime");
-    expect(skill).toContain("gojaja plan");
-    expect(openai).toContain("display_name");
+    const target = a.files[0].path;
+    expect(target).toBe(path.join(ctx.root, "AGENTS.md"));
+    await fsp.writeFile(target, "# My project\n\nHand-written agent notes.\n");
+    const first = await writeArtifactFile(a.files[0]);
+    expect(first).toBe("wrote");
+    const after = await fsp.readFile(target, "utf8");
+    expect(after).toContain("Hand-written agent notes");
+    expect(after).toContain(CLAUDE_MARKER_BEGIN);
+    expect(after).toContain("gojaja plan");
   });
 
-  it("codex --write is idempotent across re-runs, incl. openai.yaml", async () => {
-    // Regression: openai.yaml has no "gojaja plan" string, so the
-    // artifact-recognition check used to refuse the SECOND write (e.g.
-    // a second project sharing the user-level skill, or any re-run),
-    // breaking multi-project Codex setups. It must be recognised as a
-    // gojaja artifact via the "gojaja-runtime" marker and overwrite
-    // cleanly (returning "unchanged" when byte-identical).
+  it("codex --write is idempotent across re-runs", async () => {
     const a = buildRuntime("codex", ctx.root);
-    for (const f of a.files) expect(await writeArtifactFile(f)).toBe("wrote");
-    for (const f of a.files) expect(await writeArtifactFile(f)).toBe("unchanged");
+    expect(await writeArtifactFile(a.files[0])).toBe("wrote");
+    expect(await writeArtifactFile(a.files[0])).toBe("unchanged");
   });
 
   it("cursor --write creates the .cursor/rules file inside the project", async () => {

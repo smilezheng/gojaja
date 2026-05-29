@@ -98,7 +98,7 @@ gojaja prompt --target cursor --write
 # Claude Code: upserts a marker block in CLAUDE.md
 gojaja prompt --target claude --write
 
-# Codex CLI: writes ~/.codex/skills/gojaja-runtime/
+# Codex CLI: upserts a managed block in AGENTS.md (Codex's project system prompt)
 gojaja prompt --target codex --write
 
 # Any other shell-capable agent (prints body; nothing installed)
@@ -269,19 +269,15 @@ When you're done with a project (or you want to tear down the coordination layer
 unset GOJAJA_SESSION
 gojaja reset                                  # preview what would be removed
 gojaja reset --confirm <project-basename>     # actually remove
-
-# Also remove the user-level Codex skill (shared across projects;
-# only do this if no other project relies on it):
-gojaja reset --confirm <project-basename> --purge-codex-skill
 ```
 
 The default invocation prints a preview and exits without touching anything; the exact `--confirm` token is the project root's directory name. Reset removes:
 
 - `<project>/.gojaja/` recursively (events, state, RFCs, worklogs, sessions, locks).
 - `<project>/.cursor/rules/gojaja-runtime.mdc` and the empty `.cursor/rules/` / `.cursor/` parents.
-- The `<!-- gojaja-runtime:BEGIN ... :END -->` block inside `<project>/CLAUDE.md`. Content outside the block is preserved; `CLAUDE.md` is deleted only if the marker block was its only content.
+- The `<!-- gojaja-runtime:BEGIN ... :END -->` block inside `<project>/CLAUDE.md` and `<project>/AGENTS.md`. Content outside the block is preserved; the file is deleted only if the marker block was its only content.
 
-The user-level Codex skill at `~/.codex/skills/gojaja-runtime/` is **not** touched by default. Reset is also the canonical "delete the audit trail" operation since events live entirely under `.gojaja/` — `cp -r .gojaja .gojaja.bak` first if you want a snapshot.
+Everything gojaja installs is **project-local** — there is no user-level footprint to clean up separately. Reset is also the canonical "delete the audit trail" operation since events live entirely under `.gojaja/` — `cp -r .gojaja .gojaja.bak` first if you want a snapshot.
 
 ### Upgrade the CLI
 
@@ -403,7 +399,7 @@ Open RFCs that need a role's attention appear in that role's next `gojaja plan` 
 | Collaboration handbook injected into runtime | Done |
 | `role delete` with session and config cleanup | Done |
 | `gojaja watch` real-time dashboard (roles / tasks / RFCs / activity) | Done |
-| `gojaja reset` (ref-counted Codex skill) | Done |
+| `gojaja reset` (project-local; removes everything gojaja installed) | Done |
 | `gojaja upgrade` | Next |
 | `doctor`, event history, archival | Planned |
 | Multi-machine over HTTP | Future |

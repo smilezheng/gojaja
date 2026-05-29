@@ -8,6 +8,49 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### Shrink injected prompt + Codex goes project-local (PR8y)
+
+The artifact `gojaja prompt --write` injects into each host's system
+prompt was ~313 lines (the runtime loop + the full ~250-line
+collaboration handbook), well past Claude Code's ~200-line CLAUDE.md
+budget. Split it into tiers:
+
+- **Injected "runtime card" is now ~80 lines / ~3.7 KB** (was ~313 /
+  ~14 KB). It keeps only what an agent needs to re-orient after context
+  compression: the loop, identity recovery, the hard invariants, a
+  compact "when to use which" cheatsheet, and pointers.
+- **`gojaja handbook`** (new command) prints the full judgement layer
+  (channel choice, escalation, multi-round RFC mechanics, deliverable
+  gates, task lifecycle) on demand. It is no longer embedded in the
+  system prompt — an agent fetches it when making a judgement call.
+  `plan`'s text footer points at it; the card points at it; `gojaja -h`
+  remains the command/flag reference.
+- `--no-handbook` now drops just the compact cheatsheet (the full
+  policy is always available via `gojaja handbook`).
+
+### Codex runtime is now project-local in AGENTS.md (drops ref-counting)
+
+Codex injects each project's `AGENTS.md` into the model instructions at
+session start — the same always-on, survives-compaction channel as
+Cursor's rule file and Claude's CLAUDE.md block, but **project-local**.
+
+- `prompt --target codex --write` now upserts a managed
+  `<!-- gojaja-runtime:BEGIN ... :END -->` block in `<project>/AGENTS.md`
+  (preserving surrounding user content), instead of installing a
+  user-level skill at `~/.codex/skills/gojaja-runtime/`. This also fixes
+  a latent flaw: a skill is invoked on demand and not guaranteed to stay
+  in the system prompt, whereas AGENTS.md always is.
+- **Reference-counting is gone.** It only existed because the skill was
+  user-level and shared across projects. Removed `codex-registry.ts`,
+  the `prompt`/`reset` ref-count plumbing, and `reset --purge-codex-skill`
+  / its `--force`. `reset` now strips the gojaja block from both
+  CLAUDE.md and AGENTS.md, exactly like it already did for CLAUDE.md.
+- Codex activation is now the standard chat-paste snippet (no
+  `$gojaja-runtime` skill-invocation trigger).
+- All three hosts are now symmetric and project-local: Cursor `.mdc`,
+  Claude `CLAUDE.md` block, Codex `AGENTS.md` block — no user-level
+  footprint, all removed by `reset`.
+
 ### Cross-host collaboration: dashboard, identity escape hatch, safer init (PR8x)
 
 Hardening for the core use case — several agent windows (Cursor /
