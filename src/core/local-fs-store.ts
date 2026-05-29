@@ -623,6 +623,14 @@ export class LocalFsStore implements Store {
         case "TASK_CREATED":
           needsConfig = true;
           break;
+        case "WORKLOG":
+          // `kind: "idle"` worklogs are narrowed to task-board owners
+          // (see isBroadcastVisible). Pre-load `config.yaml` so we can
+          // resolve that ownership set without one I/O per event.
+          if ((e.payload as { kind?: unknown }).kind === "idle") {
+            needsConfig = true;
+          }
+          break;
         case "TASK_STATUS_CHANGED":
         case "TASK_DELIVERABLE_BYPASSED":
           needsBoard = true;
@@ -715,7 +723,19 @@ export class LocalFsStore implements Store {
     rfcParticipants: Map<string, Set<RoleId>>,
   ): boolean {
     switch (e.type) {
-      case "WORKLOG":
+      case "WORKLOG": {
+        // `kind: "idle"` is the auto-broadcast that `wait --for
+        // task-assigned` emits at session open. Its informational
+        // value is "give me work", which only matters to roles that
+        // own the task board. Broadcasting it to everyone caused
+        // mutual-wakeup loops between idle agents (each one's wait
+        // ATTENTION-fired on the other's idle worklog, ack'd, parked,
+        // re-broadcast, ad infinitum). Narrow it here.
+        if ((e.payload as { kind?: unknown }).kind === "idle") {
+          return taskBoardOwners.has(role);
+        }
+        return true;
+      }
       case "RFC_DECIDED":
       case "REPORT":
         return true;
@@ -991,16 +1011,30 @@ export class LocalFsStore implements Store {
     });
   }
 
-  async publishWorklog(input: { from: RoleId; message: string }): Promise<Event> {
+  async publishWorklog(input: {
+    from: RoleId;
+    message: string;
+    kind?: "idle";
+  }): Promise<Event> {
     validateRoleId(input.from);
     if (typeof input.message !== "string" || input.message.length === 0) {
       throw new UsageError("Worklog message must be a non-empty string.");
     }
+    // The event payload omits `kind` entirely for regular worklogs so
+    // existing event files stay byte-identical to the pre-PR shape and
+    // any external consumer that does not know about `kind` keeps
+    // working unchanged. `kind: "idle"` is added only when the caller
+    // asks for it; `filterVisibleEventsForRole` reads it back to
+    // narrow visibility for the wait-idle broadcast.
+    const payload: { message: string; kind?: "idle" } = {
+      message: input.message,
+    };
+    if (input.kind !== undefined) payload.kind = input.kind;
     const event = await this.recordEventInternal({
       type: "WORKLOG",
       from: input.from,
       to: "*",
-      payload: { message: input.message },
+      payload,
     });
     // Best-effort markdown copy for git-friendly browsing. If this fails the
     // canonical record (the event file) is already durable.

@@ -150,7 +150,8 @@ each agent's per-turn attention small. Two filters apply in order:
 
    | Event type | Surfaced to |
    | --- | --- |
-   | `WORKLOG` | every role (manual team-status channel) |
+   | `WORKLOG` (default) | every role (manual team-status channel) |
+   | `WORKLOG` with `payload.kind: "idle"` | task-board owners only (the auto-broadcast that `wait --for task-assigned` emits at session open; peer idle roles must NOT be woken by it, see Wait/lifecycle for the mutual-wakeup-loop rationale) |
    | `RFC_DECIDED` | every role (decisions are team-wide knowledge) |
    | `RFC_CREATED`, `RFC_COMMENT`, `RFC_OPTION_ADDED`, `RFC_REVISION_REQUESTED`, `RFC_REVISED` | the RFC's `voters ∪ deciders ∪ {createdBy}` |
    | `RFC_TASK_LINKED`, `RFC_TASK_UNLINKED` | RFC participants OR the linked task's stakeholders |
@@ -620,9 +621,14 @@ uses — `Store.filterVisibleEventsForRole`). `--for` does two things:
    the report points at that event's id; otherwise the verdict is
    `ATTENTION`. wait still wakes either way.
 2. **Side effect (only `task-assigned`).** Auto-broadcasts a one-shot
-   idle worklog when the wait session is first opened, so any role with
-   task-board ownership can pick the role up. Resuming after a host
-   kill does not re-broadcast.
+   idle worklog (`WORKLOG` with `payload.kind = "idle"`) when the wait
+   session is first opened, so any role with task-board ownership can
+   pick the role up. The event is broadcast (`to: "*"`) for audit
+   completeness, but `filterVisibleEventsForRole` narrows
+   `kind: "idle"` worklogs to **task-board owners only** — peer idle
+   roles do NOT see each other's idle broadcasts (otherwise two peer-
+   idle agents would ATTENTION-fire on each other and burn turns in a
+   mutual-wakeup loop). Resuming after a host kill does not re-broadcast.
 
 The "verdict tag" predicates (default `attention`):
 

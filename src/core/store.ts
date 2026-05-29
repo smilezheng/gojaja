@@ -136,7 +136,20 @@ export interface Store {
    * Publish a WORKLOG event (broadcast to "*") AND write a markdown copy
    * to `worklog/<role>/<id>.md` for human-readable browsing in git.
    */
-  publishWorklog(input: { from: RoleId; message: string }): Promise<Event>;
+  publishWorklog(input: {
+    from: RoleId;
+    message: string;
+    /**
+     * Sub-classification. Default (`undefined`) is a regular team-wide
+     * progress update, visible to every role. `"idle"` is reserved for
+     * the `wait --for task-assigned` auto-broadcast: payload survives
+     * in the audit stream as a normal WORKLOG, but
+     * `filterVisibleEventsForRole` narrows it to task-board owners
+     * only so peer idle agents are not woken by it (which would
+     * otherwise create a mutual-wakeup loop).
+     */
+    kind?: "idle";
+  }): Promise<Event>;
 
   /**
    * Generate a manifest for the role, or return the outstanding one.

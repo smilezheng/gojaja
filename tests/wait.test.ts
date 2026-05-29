@@ -272,6 +272,47 @@ describe("gojaja wait (PR8i)", () => {
     }
   });
 
+  it("a peer's idle worklog does NOT wake another peer's wait (no mutual-wakeup loop)", async () => {
+    // Regression for the mutual-wakeup loop: when two non-owner roles
+    // both went idle around the same time, each one's wait would
+    // ATTENTION-fire on the other's "I am idle" worklog (a broadcast
+    // visible to everyone before this PR), ack it, re-park, re-broadcast
+    // its own idle worklog, and so on — burning turns indefinitely.
+    //
+    // The fix: idle worklogs carry `kind: "idle"` and
+    // `filterVisibleEventsForRole` narrows them to task-board owners
+    // only. Neither TL nor Backend owns the task board in the default
+    // freshProject() role set, so Backend's idle worklog must NOT be
+    // visible attention for TL.
+    const cap = captureStdio();
+    try {
+      // Backend goes idle first (manually emit the same shape `wait
+      // --for task-assigned` would produce, so the test does not depend
+      // on running two waits concurrently).
+      await ctx.store.publishWorklog({
+        from: "Backend",
+        message: "Backend is idle since ...; waiting for new task assignment.",
+        kind: "idle",
+      });
+      // TL waits with --for attention (the default — strictly broader
+      // than --for task-assigned, so if the regression were here it
+      // would show up under attention too).
+      const before = Date.now();
+      const code = await runWait(
+        args("TL", { in: "1s", "poll-interval": "200ms", root: ctx.root }),
+      );
+      const elapsed = Date.now() - before;
+      expect(code).toBe(0);
+      // No visible event for TL → the wait must time out cleanly,
+      // not wake on Backend's idle broadcast.
+      expect(cap.stdout).toContain("TIMEOUT");
+      expect(cap.stdout).not.toContain("ATTENTION");
+      expect(elapsed).toBeGreaterThanOrEqual(900);
+    } finally {
+      cap.release();
+    }
+  });
+
   it("--for task-assigned exits CONDITION_MET when a TASK_ASSIGNED event names self", async () => {
     const cap = captureStdio();
     try {

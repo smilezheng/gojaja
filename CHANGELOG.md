@@ -8,6 +8,35 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### `wait --for task-assigned` idle worklog narrowed to task-board owners
+
+A direct fix for a mutual-wakeup loop introduced together with the
+prior `wait --for` change ("verdict tag, not event filter"). When two
+peer roles went idle around the same time, each one's `wait` would
+ATTENTION-fire on the other's "I am idle" worklog (a broadcast visible
+to everyone), `ack`, re-park, re-broadcast its own idle worklog, and
+repeat — burning turns indefinitely with no real attention.
+
+- `WorklogPayload` gains an optional `kind?: "idle"` field. Default
+  (undefined) is the original team-wide progress update.
+- `wait --for task-assigned` now passes `kind: "idle"` when emitting
+  its session-open auto-broadcast.
+- `filterVisibleEventsForRole`'s WORKLOG case checks `kind`: idle
+  worklogs are narrowed to **task-board owners only** (the only
+  audience whose attention the broadcast was ever meant to attract).
+  Default-kind worklogs stay broadcast to every role, unchanged.
+- The event itself is still recorded as `to: "*"` so audit / history /
+  `gojaja doctor` see the full broadcast intent. Visibility is the
+  per-role projection layer's concern.
+- Self-events (`from === role`) are still filtered out before the
+  kind check, so the author also never sees their own idle broadcast.
+- Tests in `tests/plan-ack.test.ts` (idle visibility) and
+  `tests/wait.test.ts` (peer idle does not wake another peer) pin
+  the contract.
+- Updated `docs/PROTOCOL.md`: the per-role visibility table now lists
+  `WORKLOG` with and without `kind: "idle"` separately, and the wait
+  side-effect description points at this rationale.
+
 ### Action commands print a `Next: ...` loop reminder
 
 The recurring failure mode this guards against: an agent runs a

@@ -135,6 +135,21 @@ export interface ReportPayload {
 /** Payload shape for type=WORKLOG events. */
 export interface WorklogPayload {
   message: string;
+  /**
+   * Optional sub-classification.
+   *
+   * - undefined (default) — regular worklog: a substantive progress
+   *   update meant for the whole team. Visible to every role's
+   *   manifest (the original WORKLOG visibility rule).
+   * - `"idle"` — auto-emitted by `gojaja wait --for task-assigned` at
+   *   session open, telling task-board owners "this role is free,
+   *   give it work". An idle worklog has no informational value to
+   *   peer roles who are themselves idle; broadcasting it to
+   *   everyone caused mutual-wakeup loops between idle agents.
+   *   `filterVisibleEventsForRole` therefore narrows
+   *   `kind: "idle"` worklogs to task-board owners only.
+   */
+  kind?: "idle";
 }
 
 /**

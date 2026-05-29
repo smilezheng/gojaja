@@ -396,12 +396,20 @@ export async function runWait(args: ParsedArgs): Promise<number> {
       idleBroadcastSent: false,
     };
     if (cond.kind === "task-assigned") {
+      // `kind: "idle"` narrows visibility to task-board owners so
+      // peer idle agents are not woken by this broadcast. Without
+      // that, two roles that go idle around the same time would
+      // ATTENTION-fire on each other's idle worklog, ack, re-park,
+      // re-broadcast (because resume preserves the one-shot guard
+      // but a freshly-issued `wait --for task-assigned` does not),
+      // and burn turns in a tight mutual-wakeup loop.
       await store.publishWorklog({
         from: role,
         message:
           `${role} is idle since ${waitState.startedAt}; ` +
           `waiting for new task assignment ` +
           `${deadlineIso ? `until ${deadlineIso}` : "indefinitely"}.`,
+        kind: "idle",
       });
       waitState.idleBroadcastSent = true;
     }

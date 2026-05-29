@@ -196,6 +196,69 @@ describe("Store.publishWorklog", () => {
     expect(md).toContain("Drafted criteria");
     expect(md).toContain(`Worklog entry ${e.id}`);
   });
+
+  it("kind: 'idle' is narrowed to task-board owners (peer idle agents do not see it)", async () => {
+    // Use an isolated store so we can configure `owns` cleanly:
+    // freshStore() creates roles with no `owns`, and we need PM to own
+    // the task board for this scenario.
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-idle-"));
+    const store = new LocalFsStore(root, { safetyMarginMs: 0 });
+    try {
+      await store.initialise("2.0.0-test");
+      await store.createRole({
+        id: "PM",
+        title: "PM",
+        owns: ["state/task_board.yaml"],
+      });
+      await store.createRole({ id: "TL", title: "TL" });
+      await store.createRole({ id: "Backend", title: "Backend" });
+      await store.createRole({ id: "QA", title: "QA" });
+
+      const e = await store.publishWorklog({
+        from: "TL",
+        message: "TL is idle since ...; waiting for new task assignment.",
+        kind: "idle",
+      });
+      expect(e.type).toBe("WORKLOG");
+      expect((e.payload as { kind?: string }).kind).toBe("idle");
+
+      // PM owns the task board → sees it (so it can push work to TL).
+      const visiblePM = await store.filterVisibleEventsForRole([e], "PM");
+      expect(visiblePM).toHaveLength(1);
+
+      // Backend / QA are peer roles, not task-board owners → must NOT
+      // see it. Without this filter, two peer-idle agents would
+      // ATTENTION-fire on each other's idle worklog and burn turns in
+      // a mutual-wakeup loop.
+      const visibleBackend = await store.filterVisibleEventsForRole([e], "Backend");
+      expect(visibleBackend).toHaveLength(0);
+      const visibleQA = await store.filterVisibleEventsForRole([e], "QA");
+      expect(visibleQA).toHaveLength(0);
+
+      // The author never sees their own event (self-events are
+      // filtered separately, before the kind check).
+      const visibleSelf = await store.filterVisibleEventsForRole([e], "TL");
+      expect(visibleSelf).toHaveLength(0);
+    } finally {
+      await fsp.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("regular worklog (no kind) stays broadcast to every role", async () => {
+    const e = await ctx.store.publishWorklog({
+      from: "TL",
+      message: "shipped login flow",
+    });
+    expect((e.payload as { kind?: unknown }).kind).toBeUndefined();
+    // Visible to every other role; only TL itself filters out via the
+    // self-event rule.
+    for (const role of ["PM", "Backend", "QA"] as const) {
+      const visible = await ctx.store.filterVisibleEventsForRole([e], role);
+      expect(visible).toHaveLength(1);
+    }
+    const visibleSelf = await ctx.store.filterVisibleEventsForRole([e], "TL");
+    expect(visibleSelf).toHaveLength(0);
+  });
 });
 
 describe("Store.openOrCreatePlan — safetyMarginMs watermark", () => {
