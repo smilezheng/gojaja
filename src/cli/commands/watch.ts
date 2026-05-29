@@ -51,14 +51,19 @@ export async function runWatch(args: ParsedArgs): Promise<number> {
   );
   if (!noOpen) openBrowser(url);
 
-  return new Promise<number>((resolve) => {
+  // Never resolves; the process exits when a stop signal arrives. We
+  // exit immediately rather than `server.close()`-ing, because the
+  // browser's keep-alive socket keeps a graceful close (and the event
+  // loop) alive forever — that's why Ctrl-C used to do nothing. A
+  // read-only viewer has nothing to flush. `once` so no listener
+  // accumulates if signals repeat.
+  return new Promise<number>(() => {
     const shutdown = () => {
-      server.close(() => resolve(0));
-      // If close hangs on a lingering keep-alive socket, force-exit soon.
-      setTimeout(() => resolve(0), 500).unref();
+      process.stdout.write("\ngojaja watch stopped.\n");
+      process.exit(0);
     };
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
   });
 }
 
