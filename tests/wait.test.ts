@@ -308,80 +308,94 @@ describe("gojaja wait (PR8i)", () => {
 
   // ---------- other --for predicates ----------
 
-  it("--for rfc-decided:<id> fires on the matching RFC_DECIDED only", async () => {
+  it("--for rfc-decided:<id> upgrades the wake verdict to CONDITION_MET on the named RFC", async () => {
     const cap = captureStdio();
     try {
-      // Set up two RFCs so we can prove specificity.
-      const rfc1 = await ctx.store.createRfc({
+      // PM decides so the resulting RFC_DECIDED event has `from=PM`;
+      // the manifest projection would drop a `from=TL` self-event for
+      // the role we're waiting as. TL is a voter, so it's still an
+      // RFC participant and sees the broadcast.
+      const rfc = await ctx.store.createRfc({
         slug: "alpha",
         title: "Alpha",
-        voters: ["PM"],
-        deciders: ["TL"],
+        voters: ["TL"],
+        deciders: ["PM"],
         options: [{ id: "A", summary: "do a" }],
         createdBy: "TL",
         description: "ctx",
       });
-      const rfc2 = await ctx.store.createRfc({
-        slug: "beta",
-        title: "Beta",
-        voters: ["PM"],
-        deciders: ["TL"],
-        options: [{ id: "A", summary: "do a" }],
-        createdBy: "TL",
-        description: "ctx",
+      await ctx.store.preDecideRfc({
+        rfcId: rfc.id,
+        decidedBy: "PM",
+        chosenOption: "A",
+        rationale: "let's go",
       });
-      // Drain plan/ack for TL so the cursor is current.
+      await ctx.store.ackRfc({ rfcId: rfc.id, role: "TL" });
+      // Drain pre-wait events so the wait cursor is current and only
+      // the deferred decide event will wake it.
       const m = await ctx.store.openOrCreatePlan("TL");
       await ctx.store.ackManifest("TL", m.ackToken);
 
       const t = runWait(
         args("TL", {
           in: "3s",
-          for: `rfc-decided:${rfc2.id}`,
+          for: `rfc-decided:${rfc.id}`,
           "poll-interval": "200ms",
           root: ctx.root,
         }),
       );
-      // Pre-decide and ack so decide can fire. rfc1 has no voters
-      // besides PM; PM must ack first.
-      await ctx.store.preDecideRfc({
-        rfcId: rfc1.id,
-        decidedBy: "TL",
-        chosenOption: "A",
-        rationale: "let's go",
-      });
-      await ctx.store.ackRfc({ rfcId: rfc1.id, role: "PM" });
-      await ctx.store.preDecideRfc({
-        rfcId: rfc2.id,
-        decidedBy: "TL",
-        chosenOption: "A",
-        rationale: "let's go",
-      });
-      await ctx.store.ackRfc({ rfcId: rfc2.id, role: "PM" });
-      // Drain again — pre-decide / ack produced new events.
-      const m2 = await ctx.store.openOrCreatePlan("TL");
-      await ctx.store.ackManifest("TL", m2.ackToken);
-
       setTimeout(() => {
         void ctx.store.decideRfc({
-          rfcId: rfc1.id,
-          decidedBy: "TL",
+          rfcId: rfc.id,
+          decidedBy: "PM",
           chosenOption: "A",
           rationale: "ok",
         });
-      }, 150);
-      setTimeout(() => {
-        void ctx.store.decideRfc({
-          rfcId: rfc2.id,
-          decidedBy: "TL",
-          chosenOption: "A",
-          rationale: "ok",
-        });
-      }, 350);
+      }, 200);
       const code = await t;
       expect(code).toBe(0);
       expect(cap.stdout).toContain("CONDITION_MET");
-      expect(cap.stdout).toContain(`condition=rfc-decided:${rfc2.id}`);
+      expect(cap.stdout).toContain(`condition=rfc-decided:${rfc.id}`);
+    } finally {
+      cap.release();
+    }
+  });
+
+  it("--for X still wakes (as ATTENTION) on unrelated visible events — `--for` is not a filter", async () => {
+    // Regression for the user-reported bug: a developer parked on
+    // `--for task-assigned` was missing all-hands events (CTO opens an
+    // RFC requesting input from everyone). `--for` is a verdict tag /
+    // side-effect, not an event filter; any event that would land in
+    // the role's manifest must wake the wait.
+    const cap = captureStdio();
+    try {
+      const t = runWait(
+        args("TL", {
+          in: "3s",
+          for: "task-assigned",
+          "poll-interval": "100ms",
+          root: ctx.root,
+        }),
+      );
+      setTimeout(() => {
+        // RFC where TL is a voter — visible to TL via the manifest
+        // projection; does NOT match `task-assigned`.
+        void ctx.store.createRfc({
+          slug: "all-hands",
+          title: "All hands",
+          voters: ["TL"],
+          deciders: ["PM"],
+          options: [{ id: "A", summary: "do a" }],
+          createdBy: "PM",
+          description: "everyone weigh in",
+        });
+      }, 200);
+      const code = await t;
+      expect(code).toBe(0);
+      expect(cap.stdout).toContain("ATTENTION");
+      expect(cap.stdout).not.toContain("CONDITION_MET");
+      expect(cap.stdout).not.toContain("TIMEOUT");
+      expect(await exists(waitJsonPath(ctx.root, "TL"))).toBe(false);
     } finally {
       cap.release();
     }
@@ -436,7 +450,7 @@ describe("gojaja wait (PR8i)", () => {
     }
   });
 
-  it("--for report-from:<role> ignores reports from other roles", async () => {
+  it("--for report-from:<role> upgrades to CONDITION_MET on a report from that role", async () => {
     const cap = captureStdio();
     try {
       const t = runWait(
@@ -448,16 +462,44 @@ describe("gojaja wait (PR8i)", () => {
         }),
       );
       setTimeout(() => {
-        // Wrong sender first — must not trigger.
-        void ctx.store.publishReport({ from: "Backend", to: "TL", message: "noise" });
-      }, 150);
-      setTimeout(() => {
         void ctx.store.publishReport({ from: "PM", to: "TL", message: "wanted" });
-      }, 350);
+      }, 200);
       const code = await t;
       expect(code).toBe(0);
       expect(cap.stdout).toContain("CONDITION_MET");
       expect(cap.stdout).toContain("condition=report-from:PM");
+    } finally {
+      cap.release();
+    }
+  });
+
+  it("--for report-from:<role> still wakes (as ATTENTION) on a report from a DIFFERENT role", async () => {
+    // Same shape as the all-hands regression above, but for the
+    // narrower `report-from` predicate: a directed REPORT from another
+    // role is visible attention and must wake the wait, just without
+    // upgrading the verdict to CONDITION_MET.
+    const cap = captureStdio();
+    try {
+      const t = runWait(
+        args("TL", {
+          in: "2s",
+          for: "report-from:PM",
+          "poll-interval": "100ms",
+          root: ctx.root,
+        }),
+      );
+      setTimeout(() => {
+        void ctx.store.publishReport({
+          from: "Backend",
+          to: "TL",
+          message: "fyi",
+        });
+      }, 200);
+      const code = await t;
+      expect(code).toBe(0);
+      expect(cap.stdout).toContain("ATTENTION");
+      expect(cap.stdout).not.toContain("CONDITION_MET");
+      expect(cap.stdout).not.toContain("TIMEOUT");
     } finally {
       cap.release();
     }

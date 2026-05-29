@@ -8,6 +8,33 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### `wait --for` is a verdict tag, not an event filter
+
+Restores the original intent of `--for`: a side-effect / verdict tag,
+NOT a predicate that mutes unrelated events. The previous shape made
+`--for X` ignore every event that wasn't `X`, which had a designed-in
+correctness bug — a developer parked on `--for task-assigned` was
+missing a CTO-led, all-hands RFC because the event "didn't match".
+
+- **Behavior change.** `gojaja wait` now wakes on **any** event the
+  role would see in its manifest (the same projection `plan` uses,
+  `Store.filterVisibleEventsForRole`), regardless of `--for`. `--for`
+  no longer filters anything.
+- `--for` keeps its two original purposes: (a) verdict tag — when a
+  visible wake event also satisfies the predicate, the verdict
+  upgrades from `ATTENTION` to `CONDITION_MET` and the report points
+  at that event's id; otherwise the verdict is `ATTENTION` and wait
+  still ends; (b) for `--for task-assigned`, a one-shot idle WORKLOG
+  emitted at session open so task-board owners can pick the role up.
+- Both verdicts mean "run plan next"; the distinction is
+  informational, not a gate. Picking the wrong `--for` cannot mute
+  cross-team attention any more.
+- `tests/wait.test.ts`: rewrote the `rfc-decided` and `report-from`
+  cases around the new "tag, not filter" semantics, and added a
+  regression covering the bug above (`--for task-assigned` waking on
+  an unrelated `RFC_CREATED` as `ATTENTION`).
+- Updated `-h`, handbook, `docs/PROTOCOL.md`, `docs/DESIGN.md`.
+
 ### `wait` is one blocking call again — internal polling, no RESUME loop
 
 Restores the original intent of `wait`: a single invocation parks the

@@ -217,11 +217,15 @@ transition refuses with \`FORBIDDEN\`; ask one of the task's
 ### Idle (no work) — \`wait --for task-assigned\`
 
 When plan returns no tasks AND no events, run
-\`gojaja wait --in <duration> --for task-assigned\`. When the wait
-session opens, the framework auto-broadcasts an idle worklog once per
-session (re-running after a host kill does NOT re-broadcast).
-Task-board owners see it and can assign you work. \`TASK_ASSIGNED\`
-with you as new owner exits the wait CONDITION_MET.
+\`gojaja wait --in <duration> --for task-assigned\`. The framework
+auto-broadcasts an idle worklog once per session (resuming after a
+host kill does NOT re-broadcast); task-board owners see it and can
+push you work.
+
+\`--for\` is NOT a filter. The wait still wakes on ANY event that
+would land in your manifest (cross-team RFC, directed REPORT, task
+status changes you depend on) — as ATTENTION. A TASK_ASSIGNED naming
+you upgrades the verdict to CONDITION_MET. Both mean "run plan next".
 
 Do NOT use \`--for task-assigned\` while you still have an open task
 (InProgress / Blocked / Review). Finish or hand off first.

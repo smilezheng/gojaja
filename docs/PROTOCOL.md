@@ -606,21 +606,33 @@ explicit role argument must agree).
 **indefinite**: it blocks until an event/condition fires or the host
 kills the call (no TIMEOUT). `wait.json` records `deadline: null`.
 
-**Condition (`--for <token>`; default `attention`):**
+**`--for <token>` is NOT an event filter.** wait always wakes on any
+event the role would see in its manifest (the same projection `plan`
+uses — `Store.filterVisibleEventsForRole`). `--for` does two things:
 
-| Token | Fires when |
+1. **Verdict tag.** If a visible wake event also satisfies the predicate
+   below, the verdict upgrades from `ATTENTION` to `CONDITION_MET` and
+   the report points at that event's id; otherwise the verdict is
+   `ATTENTION`. wait still wakes either way.
+2. **Side effect (only `task-assigned`).** Auto-broadcasts a one-shot
+   idle worklog when the wait session is first opened, so any role with
+   task-board ownership can pick the role up. Resuming after a host
+   kill does not re-broadcast.
+
+The "verdict tag" predicates (default `attention`):
+
+| Token | Upgrades to `CONDITION_MET` when the wake event is ... |
 | --- | --- |
-| `attention` | any event with `to ∈ {role, "*"} && from !== role` |
+| `attention` | (no upgrade — verdict is always `ATTENTION`) |
 | `rfc-decided:RFC-NNNN` | `RFC_DECIDED` with that ref |
 | `rfc-acked:RFC-NNNN` | `RFC_COMMENT` on that RFC with `payload.kind ∈ {ack, object}` |
 | `task-assigned` | `TASK_ASSIGNED` with the role as the new owner |
 | `report-from:<role>` | `REPORT` from that role addressed to self |
 | `event-ref:<id>` | any event whose `ref === id` |
 
-`task-assigned` additionally auto-broadcasts an idle worklog when the
-wait session is first opened. The broadcast is one-shot per session
-(resuming after a host kill does not re-broadcast) and goes to `*`,
-so any role with task-board ownership can pick the role up.
+Choosing the wrong `--for` cannot mute attention: a developer parked
+on `--for task-assigned` still wakes (as `ATTENTION`) on a CTO-led RFC
+asking everyone to weigh in, on a directed REPORT, and so on.
 
 Before it starts blocking, a non-`--json` invocation prints a start
 line so the agent can see the wall clock at entry (and, if the call is

@@ -107,13 +107,13 @@ function formatConditionToken(cond: WaitCondition): string {
 }
 
 /**
- * Per-condition predicate. Returns the first matching event (oldest by
- * ULID) or null. `attention` produces ATTENTION; the other kinds
- * produce CONDITION_MET.
- *
- * For `kind: "attention"`, the upstream `findFirstHit` pre-filters
- * events through `Store.filterVisibleEventsForRole`, so this function
- * only sees events that would actually appear in the role's manifest.
+ * Does `e` satisfy the named `--for` predicate? Used ONLY to decide
+ * whether to upgrade the wake verdict from ATTENTION to CONDITION_MET.
+ * `--for` is NOT an event filter (see `findFirstHit`): wait wakes on
+ * any event the role would see in its manifest. `--for` is the
+ * agent's hint about which event would be the "specifically wanted"
+ * one; we look for it in the wake batch and, if found, point the
+ * verdict at it. Caller never invokes this for `kind: "attention"`.
  */
 function matchEvent(
   e: Event,
@@ -122,8 +122,7 @@ function matchEvent(
 ): boolean {
   switch (cond.kind) {
     case "attention":
-      // events have been pre-filtered upstream; any event here is
-      // already a relevant attention signal.
+      // Caller short-circuits this case; included for exhaustiveness.
       return true;
     case "rfc-decided":
       return e.type === "RFC_DECIDED" && e.ref === cond.ref;
@@ -148,30 +147,59 @@ function matchEvent(
   }
 }
 
+interface WaitHit {
+  /**
+   * The event we will report back. If a `--for` predicate matched any
+   * visible event, this is the earliest such match (so the agent's
+   * `matchedEventId` points at the thing it explicitly named);
+   * otherwise it is the earliest visible event.
+   */
+  event: Event;
+  /** Total visible events in this poll batch. Used as `newEventCount`. */
+  count: number;
+  /**
+   * True iff a `--for` predicate matched at least one visible event.
+   * Drives the ATTENTION → CONDITION_MET verdict upgrade.
+   */
+  conditionMet: boolean;
+}
+
+/**
+ * Look for new events that should wake the role. The contract is:
+ *
+ * 1. ALWAYS project new events through `filterVisibleEventsForRole`,
+ *    the same projection `plan` uses to build the manifest. wait wakes
+ *    on any event the role would actually see — never anything else,
+ *    never less. `--for` is NOT an event filter; muting a CTO-led
+ *    cross-team RFC just because the role happened to be parked on
+ *    `--for task-assigned` would be a designed-in correctness bug.
+ *
+ * 2. If `--for` is set (anything other than `attention`), and any of
+ *    the visible events also satisfies that predicate, prefer the
+ *    earliest such event for the report and flip `conditionMet` to
+ *    true. The caller turns that into a CONDITION_MET verdict;
+ *    otherwise the verdict is ATTENTION.
+ *
+ * Returns null when no visible event has appeared since `cursor`.
+ */
 async function findFirstHit(
   store: Store,
   role: RoleId,
   cursor: string,
   cond: WaitCondition,
-): Promise<{ event: Event; count: number } | null> {
-  let events = (await store.listEventsAfter(cursor)) as Event[];
-  // for `--for attention`, pre-filter through the same projection
-  // that builds `manifest.events`. Otherwise wait would wake the role
-  // for broadcast events that plan would have hidden — a guaranteed
-  // useless turn.
-  if (cond.kind === "attention") {
-    events = await store.filterVisibleEventsForRole(events, role);
-  }
-  let hit: Event | null = null;
-  let count = 0;
-  for (const e of events) {
-    if (matchEvent(e, cond, role)) {
-      if (hit === null) hit = e;
-      count++;
+): Promise<WaitHit | null> {
+  const raw = (await store.listEventsAfter(cursor)) as Event[];
+  const events = await store.filterVisibleEventsForRole(raw, role);
+  if (events.length === 0) return null;
+
+  if (cond.kind !== "attention") {
+    for (const e of events) {
+      if (matchEvent(e, cond, role)) {
+        return { event: e, count: events.length, conditionMet: true };
+      }
     }
   }
-  if (hit === null) return null;
-  return { event: hit, count };
+  return { event: events[0], count: events.length, conditionMet: false };
 }
 
 interface WaitTimes {
@@ -391,22 +419,30 @@ export async function runWait(args: ParsedArgs): Promise<number> {
     );
   }
 
-  // Block until the condition fires or the deadline passes. We poll the
-  // event stream every poll-interval INSIDE this one process — the agent
-  // stays parked in a single tool call (no per-poll re-invocation, no
-  // token cost). An indefinite wait loops here until an event fires or
-  // the host harness kills the call; the agent then re-runs `gojaja
+  // Block until a visible event arrives or the deadline passes. We poll
+  // the event stream every poll-interval INSIDE this one process — the
+  // agent stays parked in a single tool call (no per-poll re-invocation,
+  // no token cost). An indefinite wait loops here until an event fires
+  // or the host harness kills the call; the agent then re-runs `gojaja
   // wait` (no args) to continue.
+  //
+  // Verdict mapping (one shared helper for the loop body and the
+  // post-deadline boundary check below):
+  //   - hit.conditionMet === true  → CONDITION_MET (the named --for fired)
+  //   - any other visible event    → ATTENTION (wake on anything the role
+  //                                  would see in its manifest)
+  const reportHit = async (hit: WaitHit): Promise<number> => {
+    await store.clearWaitState(role);
+    if (hit.conditionMet) {
+      return emit("condition_met", exitCtx, { matchedEventId: hit.event.id });
+    }
+    return emit("attention", exitCtx, { newEventCount: hit.count });
+  };
+
   const cursor = cursorState.ackedThrough;
   while (Date.now() < deadlineMs) {
     const hit = await findFirstHit(store, role, cursor, cond);
-    if (hit !== null) {
-      await store.clearWaitState(role);
-      if (cond.kind === "attention") {
-        return emit("attention", exitCtx, { newEventCount: hit.count });
-      }
-      return emit("condition_met", exitCtx, { matchedEventId: hit.event.id });
-    }
+    if (hit !== null) return reportHit(hit);
     const remaining = deadlineMs - Date.now();
     if (remaining <= 0) break;
     await sleep(Math.min(pollIntervalMs, remaining));
@@ -414,13 +450,7 @@ export async function runWait(args: ParsedArgs): Promise<number> {
 
   // One last check at the deadline boundary before declaring TIMEOUT.
   const last = await findFirstHit(store, role, cursor, cond);
-  if (last !== null) {
-    await store.clearWaitState(role);
-    if (cond.kind === "attention") {
-      return emit("attention", exitCtx, { newEventCount: last.count });
-    }
-    return emit("condition_met", exitCtx, { matchedEventId: last.event.id });
-  }
+  if (last !== null) return reportHit(last);
   await store.clearWaitState(role);
   return emit("timeout", exitCtx, {});
 }

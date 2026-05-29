@@ -291,8 +291,8 @@ Shared-state editing (ownership-gated; --file must live under state/):
 Keepalive (agent, requires GOJAJA_SESSION):
   wait [<role>] [--until <ISO> | --in <duration>]
                 [--for <condition>] [--poll-interval <duration>] [--json]
-      Parks the agent in ONE blocking call (no token cost) until new
-      attention arrives, the named condition fires, or the deadline
+      Parks the agent in ONE blocking call (no token cost) until ANY
+      event the role would see in its manifest arrives, or the deadline
       passes. It polls the event stream internally every --poll-interval
       (default 30s) — that is an in-process check cadence, NOT a
       re-invocation interval. Before blocking it prints a start line
@@ -303,13 +303,24 @@ Keepalive (agent, requires GOJAJA_SESSION):
         --until 2026-05-28T15:00:00Z
         --in 30s | 10m | 4h | 1d
 
+      --for <condition> is NOT an event filter. wait always wakes on
+      any visible event (same projection plan uses to build the
+      manifest). --for is (a) a verdict tag — if a visible wake event
+      satisfies the predicate the verdict upgrades from ATTENTION to
+      CONDITION_MET; otherwise the verdict is still ATTENTION and the
+      wait still ends — and (b) for '--for task-assigned', an idle
+      worklog broadcast at session open. Picking the wrong --for
+      cannot mute unrelated attention.
+
       Conditions (pick one; default is attention):
-        attention                 any event addressed to you or "*"
+        attention                 verdict is always ATTENTION (no
+                                  upgrade)
         rfc-decided:RFC-NNNN      that RFC closes (accepted or rejected)
         rfc-acked:RFC-NNNN        anyone posts an ack or object on that RFC
-        task-assigned             a task lands with you as the new owner
-                                  (also auto-emits an idle worklog so
-                                  task-board owners can find you)
+        task-assigned             a task lands with you as the new owner;
+                                  also auto-emits a one-shot idle worklog
+                                  at session open so task-board owners
+                                  can find you
         report-from:<role>        that role sends you a directed report
         event-ref:<id>            any event with that ref
 

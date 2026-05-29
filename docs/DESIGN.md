@@ -214,10 +214,25 @@ invocation:
    on disk, it instead resumes that session's deadline.
 2. **Blocks**, re-checking the event stream every `--poll-interval`
    (default 30 s, an in-process cadence) and sleeping in between, until
-   it can return a verdict.
-3. Returns ATTENTION (a new event for the role) or CONDITION_MET (the
-   `--for` thing fired); a finite wait also returns TIMEOUT at its
+   it can return a verdict. The check is the same projection `plan`
+   uses (`Store.filterVisibleEventsForRole`): wait wakes on any event
+   the role would actually see in its manifest, never anything else,
+   never less.
+3. Returns ATTENTION (a new event for the role landed) or
+   CONDITION_MET (a new event landed AND it satisfies the named
+   `--for` predicate); a finite wait also returns TIMEOUT at its
    deadline. An indefinite wait never times out.
+
+**`--for` is not a filter.** It is (a) a verdict tag — when a visible
+wake event also satisfies the predicate, the verdict upgrades from
+`ATTENTION` to `CONDITION_MET` so the agent can tell "what I was
+specifically waiting for arrived" from "something else woke me, now
+go plan" — and (b) for `--for task-assigned`, a side-effect that
+emits a one-shot idle WORKLOG at session open. Treating `--for` as a
+filter would have a designed-in correctness bug: a developer parked
+on `--for task-assigned` could miss a CTO-led, all-hands RFC because
+the event "didn't match". Both verdicts mean "run plan next"; the
+distinction is informational, not a gate.
 
 The key property: **one `wait` is one tool call for the entire wait**,
 so a parked agent burns no LLM turns / tokens while idle — that was the
