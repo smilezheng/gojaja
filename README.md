@@ -74,19 +74,19 @@ gojaja role create QA      "Quality Assurance"
 
 Each `role create` writes a `.gojaja/roles/<id>.md` template with two placeholder sections: **Role description** and **Responsibilities**, both marked `TBD`. **Open each file and fill them in** — they are the agent's primary self-introduction. `gojaja role list` flags rows that still contain TBD; `gojaja activate` refuses to proceed until they are filled.
 
-The `--owns` flag controls which files the role may write. Entries are either specific file paths or directory prefixes — `--owns "docs/architecture/"` matches every file under `docs/architecture/` recursively, so a CTO/TL role can take a whole subtree without listing files one by one. Agents using `gojaja` cannot write outside their `owns`; any attempt fails with exit code `9 FORBIDDEN`.
+The `--owns` flag controls which **shared state files under `.gojaja/`** the role may write (gojaja only mediates files under `.gojaja/` — repo source code is written by the agent with its own editor and scoped by the role's prose responsibilities, not by `owns`). Entries are relative to `.gojaja/` and may be specific files or directory prefixes — `--owns "state/"` matches every file under `state/` recursively, so you don't have to list them one by one. An agent that tries to `gojaja state edit` a file outside its `owns` is refused with exit code `9 FORBIDDEN`.
 
 Two more role-create flags worth knowing about:
 
 - `--reports-to PM,TL` — the role's escalation chain. The handbook tells the agent to escalate stuck work up this chain via `report`. Example: a `Backend` role created with `--reports-to TL,PM` will escalate technical questions to TL and scope/acceptance questions to PM.
-- `--must-not-edit state/architecture.md` — a hard deny list, overrides `--owns`. Use when a role has a broad `owns` grant but you want a few specific files out of bounds (e.g. `Backend --owns "src/" --must-not-edit "src/config/secrets.ts"`).
+- `--must-not-edit state/architecture.md` — a hard deny list, overrides `--owns`. Use when a role has a broad `owns` grant (e.g. all of `state/`) but you want a specific file out of bounds (e.g. `state/architecture.md`, which belongs to TL).
 
 A worked example with all three flags:
 
 ```bash
 gojaja role create PM       "Product Manager"   --owns "state/project_state.md,state/task_board.yaml"
-gojaja role create TL       "Tech Lead"         --owns "state/architecture.md,docs/architecture/" --reports-to PM
-gojaja role create Backend  "Backend Engineer"  --owns "src/" --reports-to TL,PM --must-not-edit "src/config/secrets.ts"
+gojaja role create TL       "Tech Lead"         --owns "state/architecture.md,state/decisions.md" --reports-to PM
+gojaja role create Backend  "Backend Engineer"  --owns "state/" --reports-to TL,PM --must-not-edit "state/architecture.md"
 ```
 
 ### Step 3 — Install the runtime
@@ -121,15 +121,17 @@ Re-running `prompt --write` on the same project is idempotent. If the file is by
 
 ### Step 4 — Activate one role per agent window
 
-Role binding is per-window. The `activate` command prints a chat-paste snippet — auto-copied to your clipboard when possible — and tells the agent how to claim the role, read its own contract, and skim `gojaja -h`.
+Role binding is per-window. Note: `activate` is a command **you run in your own terminal** — it is **not** something you hand to the agent. It prints (and, when possible, copies) a **snippet**; that snippet is what you paste into the agent window, and it tells the agent how to claim the role, read its own contract, and skim `gojaja -h`.
+
+Run one per window you want to staff (swap `<role>`; pick the `--target` matching that window's host):
 
 ```bash
-gojaja activate PM      --target agents   # paste into the PM window (Cursor / Codex / ...)
-gojaja activate TL      --target claude   # paste into the Claude Code window for TL
-gojaja activate Backend --target agents   # paste into the Backend window
+gojaja activate PM      --target agents
+gojaja activate TL      --target claude
+gojaja activate Backend --target agents
 ```
 
-(The activation snippet is the same across targets — `--target` only affects which install instructions it references. Use whichever matches the window's host.) The snippet appears between `═══ BEGIN PASTE TO AGENT ═══` and `═══ END PASTE TO AGENT ═══` dividers. The dividers themselves are descriptive — do not paste them.
+Each command's output is wrapped in `═══ BEGIN PASTE TO AGENT ═══` / `═══ END PASTE TO AGENT ═══` dividers — copy the part **between** them into the matching agent window (e.g. the PM command's output goes into the PM window). The dividers are descriptive; don't paste them. (The snippet is the same across targets — `--target` only changes which install instructions it references.)
 
 Two windows of the same tool can hold different roles independently because the role lives in that window's `GOJAJA_SESSION` shell variable, not in any project file.
 

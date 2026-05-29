@@ -74,19 +74,19 @@ gojaja role create QA      "Quality Assurance"
 
 每个 `role create` 都会生成一份 `.gojaja/roles/<id>.md` 模板，里面有两段占位符——**Role description** 和 **Responsibilities**，都标着 `TBD`。**打开这两个文件，按角色实际职责填进去**——这是 agent 的自我介绍。`gojaja role list` 会标出哪些角色的契约还没填完；`gojaja activate` 在契约还是 TBD 状态时会直接拒绝执行。
 
-`--owns` 控制这个角色能写哪些文件。条目可以是具体文件，也可以是目录前缀——`--owns "docs/architecture/"` 会自动匹配 `docs/architecture/` 下所有文件（递归），CTO / 技术 leader 这类整段托管子树的角色不用一个个列文件名。agent 通过 `gojaja` 写超出 `owns` 的路径会直接被拒（退出码 `9 FORBIDDEN`）。
+`--owns` 控制这个角色能写 `.gojaja/` 里的哪些**共享状态文件**（gojaja 只管 `.gojaja/` 下的文件——仓库源码是 agent 用自己的编辑器写的，由角色契约里的职责描述来界定，不归 gojaja 管）。条目都相对于 `.gojaja/`，可以是具体文件，也可以是目录前缀——`--owns "state/"` 会匹配 `state/` 下所有文件（递归），不用一个个列。agent 通过 `gojaja state edit` 写自己 `owns` 之外的文件会被拒（退出码 `9 FORBIDDEN`）。
 
 `role create` 还有两个值得了解的参数：
 
 - `--reports-to PM,TL` —— 角色的升级链。handbook 会教 agent 卡住时按这条链向上 `report`。比如 `Backend` 角色 `--reports-to TL,PM` 表示：技术问题升级给 TL，范围 / 验收问题升级给 PM。
-- `--must-not-edit state/architecture.md` —— 强黑名单，优先级高于 `--owns`。用法是：某个角色拿到了一大段 `--owns`（比如整个 `src/`），但你不希望它碰其中几个特殊文件（比如 `src/config/secrets.ts`）。
+- `--must-not-edit state/architecture.md` —— 强黑名单，优先级高于 `--owns`。用法是：某个角色 `--owns` 了一大片（比如整个 `state/`），但你不希望它碰其中某个文件（比如 `state/architecture.md` 归 TL）。
 
 一个把三个参数都用上的例子：
 
 ```bash
 gojaja role create PM       "Product Manager"   --owns "state/project_state.md,state/task_board.yaml"
-gojaja role create TL       "Tech Lead"         --owns "state/architecture.md,docs/architecture/" --reports-to PM
-gojaja role create Backend  "Backend Engineer"  --owns "src/" --reports-to TL,PM --must-not-edit "src/config/secrets.ts"
+gojaja role create TL       "Tech Lead"         --owns "state/architecture.md,state/decisions.md" --reports-to PM
+gojaja role create Backend  "Backend Engineer"  --owns "state/" --reports-to TL,PM --must-not-edit "state/architecture.md"
 ```
 
 ### 第 3 步 —— 安装 runtime
@@ -121,15 +121,19 @@ gojaja prompt --target generic          # 只打印，不落盘
 
 ### 第 4 步 —— 给每个 agent 窗口绑定一个角色
 
-角色是跟窗口绑定的，绑定信息不会写进任何项目级文件。`activate` 会打印一段提示词（条件允许时自动复制到剪贴板），里面告诉 agent 怎么认领角色、怎么读自己的契约、以及 `gojaja` 都能干些什么。
+角色是跟窗口绑定的，绑定信息不会写进任何项目级文件。注意：`activate` 命令是**你在自己的终端里运行**的——它本身**不是**发给 agent 的；它会打印（并尽量复制到剪贴板）一段**提示词**，那段提示词才是你要粘到 agent 窗口里的东西，里面告诉 agent 怎么认领角色、读自己的契约、了解 `gojaja` 能干什么。
+
+在你的终端里，每个要开的窗口跑一条（`<role>` 换成角色名，`--target` 选该窗口对应的宿主）：
 
 ```bash
-gojaja activate PM      --target agents   # 粘进 PM 的窗口（Cursor / Codex / ...）
-gojaja activate TL      --target claude   # 粘进 TL 的 Claude Code 窗口
-gojaja activate Backend --target agents   # 粘进 Backend 的窗口
+gojaja activate PM      --target agents
+gojaja activate TL      --target claude
+gojaja activate Backend --target agents
 ```
 
-（各 target 的提示词内容是一样的，`--target` 只影响里面引用的安装说明，挑跟该窗口宿主对应的就行。）提示词在 `═══ BEGIN PASTE TO AGENT ═══` 和 `═══ END PASTE TO AGENT ═══` 两条分割线之间。分割线本身是给你看的，**不要**也粘进去。
+每条命令的输出夹在 `═══ BEGIN PASTE TO AGENT ═══` 和 `═══ END PASTE TO AGENT ═══` 两条分割线之间——把**中间那段**复制，粘到对应的 agent 窗口（比如 PM 那条的输出粘到 PM 窗口）。分割线本身是给你看的，**不要**粘进去。
+
+（各 target 打印的提示词内容其实一样，`--target` 只影响里面引用的安装说明，挑跟该窗口宿主对应的就行。）
 
 同一种工具的两个窗口可以同时持有不同角色，因为角色信息只活在那个窗口 shell 的 `GOJAJA_SESSION` 环境变量里，不在项目里。
 
@@ -158,7 +162,7 @@ gojaja activate Backend --target agents   # 粘进 Backend 的窗口
   - T-0002 ...
   ```
 
-  第三段最值钱——每条任务的具体验收标准越明确，agent 越能自己判 Done，不来烦你。
+  其中第三段最关键：每条任务的验收标准写得越具体，agent 就越能自己判断任务是否完成，而不用反过来问你。
 
 - **`.gojaja/state/architecture.md`** —— 由拥有它的角色（通常是 TL）写，你审阅。
 

@@ -38,15 +38,17 @@ Setup (you, in your shell — runs once per project unless noted):
       Register a role. Writes roles/<id>.md (with TBD sections you must
       fill in) and adds the role to config.yaml. Re-run to add more.
 
-      --owns entries are either specific files or directory prefixes;
-        a trailing slash (or any path that exists as a directory)
-        matches every file underneath, recursively. Example:
-        --owns "docs/architecture/,state/project_state.md".
+      --owns gates which shared state files UNDER .gojaja/ the role may
+        write via gojaja (repo source is the agent's own job, not gated
+        here). Entries are relative to .gojaja/ — specific files or a
+        directory prefix (trailing slash matches the subtree). Example:
+        --owns "state/project_state.md,state/task_board.yaml" or
+        --owns "state/".
       --reports-to PM,TL    escalation chain; the handbook tells the
         agent to escalate via reports up this chain when stuck.
       --must-not-edit state/architecture.md    hard deny list; overrides
-        --owns. Use to carve specific files out of a broad ownership
-        grant.
+        --owns. Carves a specific file out of a broad grant (e.g. a role
+        owns all of state/ but not state/architecture.md).
   role list
       List configured roles. Rows with "(TBD: fill role markdown)" still
       have unfilled placeholder sections in their contract.
