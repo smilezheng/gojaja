@@ -126,3 +126,210 @@ describe("watch buildSnapshot — healthStatus derivation", () => {
     expect(snap.config.stalledThresholdMs).toBe(12_345);
   });
 });
+
+// ---- HTTP endpoints (write surface, loopback-only) ------------------
+
+describe("watch HTTP server — Actions endpoints (loopback-gated)", () => {
+  let ctx: { root: string; store: LocalFsStore };
+  let envOrig: string | undefined;
+  beforeEach(async () => {
+    ctx = await freshStore();
+    // The Actions endpoints write as `actor: "SYSTEM"`; that path is
+    // gated by `resolveActor` returning SYSTEM iff GOJAJA_SESSION is
+    // unset. Start each test with a clean env so a stray session from
+    // some other suite cannot accidentally promote our calls.
+    envOrig = process.env.GOJAJA_SESSION;
+    delete process.env.GOJAJA_SESSION;
+  });
+  afterEach(async () => {
+    if (envOrig === undefined) delete process.env.GOJAJA_SESSION;
+    else process.env.GOJAJA_SESSION = envOrig;
+    await fsp.rm(ctx.root, { recursive: true, force: true });
+  });
+
+  /**
+   * Spin up the real HTTP server bound to a fresh ephemeral port on
+   * 127.0.0.1, run the test against it, then close. Keeping
+   * end-to-end so the loopback gate / JSON parsing / error mapping
+   * actually run as wired in `runWatch`.
+   */
+  async function withServer<T>(
+    host: "127.0.0.1" | "0.0.0.0",
+    body: (origin: string) => Promise<T>,
+  ): Promise<T> {
+    // Re-import the server-bootstrapping helpers via runWatch's
+    // private surface would be brittle; instead spin a tiny inline
+    // server using the same handler. We import handleRequest by
+    // exporting it as part of the buildSnapshot surface — but it is
+    // module-private. So we exercise the full runWatch wiring is
+    // overkill here; we use createServer with a thin shim that
+    // matches the real wiring 1:1 (kept identical to runWatch).
+    const http = await import("node:http");
+    const watch = await import("../src/cli/commands/watch");
+    // The exported buildSnapshot proves the module loads; we only
+    // need handleRequest's behaviour. Instead of exporting the
+    // private handler we ship a minimal server here that mirrors
+    // the production switch on method+path. In practice the
+    // production handler IS what we want to exercise; export it for
+    // testability.
+    const handleRequest = (
+      watch as unknown as {
+        __test_handleRequest: (
+          req: import("node:http").IncomingMessage,
+          res: import("node:http").ServerResponse,
+          store: LocalFsStore,
+          root: string,
+          host: string,
+        ) => Promise<void>;
+      }
+    ).__test_handleRequest;
+    if (!handleRequest) {
+      throw new Error(
+        "watch.ts must export `__test_handleRequest` for the watch HTTP test " +
+          "to exercise the real server logic.",
+      );
+    }
+    const server = http.createServer((req, res) => {
+      handleRequest(req, res, ctx.store, ctx.root, host).catch((err) => {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: String((err as Error)?.message ?? err) }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, host, resolve));
+    const addr = server.address();
+    const port =
+      typeof addr === "object" && addr ? addr.port : 0;
+    const origin = `http://${host}:${port}`;
+    try {
+      return await body(origin);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }
+
+  it("GET /api/state on a loopback bind reports capabilities.writeEnabled = true", async () => {
+    await withServer("127.0.0.1", async (origin) => {
+      const r = await fetch(`${origin}/api/state`);
+      expect(r.ok).toBe(true);
+      const body = (await r.json()) as { capabilities: { writeEnabled: boolean } };
+      expect(body.capabilities.writeEnabled).toBe(true);
+    });
+  });
+
+  it("GET /api/state on a non-loopback bind reports capabilities.writeEnabled = false", async () => {
+    await withServer("0.0.0.0", async (origin) => {
+      const r = await fetch(`${origin}/api/state`);
+      expect(r.ok).toBe(true);
+      const body = (await r.json()) as { capabilities: { writeEnabled: boolean } };
+      expect(body.capabilities.writeEnabled).toBe(false);
+    });
+  });
+
+  it("POST /api/report (loopback) emits a REPORT event with from=SYSTEM", async () => {
+    await withServer("127.0.0.1", async (origin) => {
+      const r = await fetch(`${origin}/api/report`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ to: "Backend", message: "please ship" }),
+      });
+      expect(r.ok).toBe(true);
+      const body = (await r.json()) as {
+        status: string;
+        event: { type: string; from: string; to: string };
+      };
+      expect(body.status).toBe("reported");
+      expect(body.event.type).toBe("REPORT");
+      expect(body.event.from).toBe("SYSTEM");
+      expect(body.event.to).toBe("Backend");
+    });
+  });
+
+  it("POST /api/report from a non-loopback bind is refused with 403", async () => {
+    await withServer("0.0.0.0", async (origin) => {
+      const r = await fetch(`${origin}/api/report`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ to: "Backend", message: "x" }),
+      });
+      expect(r.status).toBe(403);
+      const body = (await r.json()) as { error: string };
+      expect(body.error).toMatch(/loopback/);
+    });
+  });
+
+  it("POST /api/report with missing fields returns 400 USAGE", async () => {
+    await withServer("127.0.0.1", async (origin) => {
+      const r = await fetch(`${origin}/api/report`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ to: "Backend" }),
+      });
+      expect(r.status).toBe(400);
+      const body = (await r.json()) as { error: string; errorCode: string };
+      expect(body.errorCode).toBe("USAGE");
+      expect(body.error).toMatch(/message/);
+    });
+  });
+
+  it("POST /api/report with an unregistered recipient surfaces the store's USAGE error", async () => {
+    await withServer("127.0.0.1", async (origin) => {
+      const r = await fetch(`${origin}/api/report`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ to: "Forntend", message: "x" }),
+      });
+      expect(r.status).toBe(400);
+      const body = (await r.json()) as { error: string; errorCode: string };
+      expect(body.errorCode).toBe("USAGE");
+      expect(body.error).toMatch(/Forntend/);
+    });
+  });
+
+  it("POST /api/rfc creates a SYSTEM-authored RFC", async () => {
+    await withServer("127.0.0.1", async (origin) => {
+      const r = await fetch(`${origin}/api/rfc`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          slug: "via-watch",
+          title: "From the dashboard",
+          deciders: ["PM"],
+          options: [{ id: "A", summary: "do" }],
+          description: "ctx",
+        }),
+      });
+      expect(r.ok).toBe(true);
+      const body = (await r.json()) as {
+        status: string;
+        proposal: { createdBy: string; status: string };
+      };
+      expect(body.status).toBe("created");
+      expect(body.proposal.createdBy).toBe("SYSTEM");
+      expect(body.proposal.status).toBe("open");
+    });
+  });
+
+  it("POST /api/task creates a SYSTEM-authored task", async () => {
+    await withServer("127.0.0.1", async (origin) => {
+      const r = await fetch(`${origin}/api/task`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "Spike X",
+          owner: "Backend",
+          priority: "P1",
+          acceptance: "Spike report attached.",
+        }),
+      });
+      expect(r.ok).toBe(true);
+      const body = (await r.json()) as {
+        status: string;
+        task: { creator: string; owner: string; priority: string };
+      };
+      expect(body.status).toBe("created");
+      expect(body.task.creator).toBe("SYSTEM");
+      expect(body.task.owner).toBe("Backend");
+      expect(body.task.priority).toBe("P1");
+    });
+  });
+});

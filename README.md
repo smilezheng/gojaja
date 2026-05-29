@@ -366,14 +366,15 @@ gojaja watch --port 8080     # pick a port
 gojaja watch --no-open       # don't auto-launch the browser
 ```
 
-It's a read-only dashboard (it never mutates coordination state) that auto-refreshes every couple of seconds and shows, across every window:
+It auto-refreshes every couple of seconds and shows, across every window:
 
-- **Roles** — each role's session: `live` / `stale` / no session, the pid + host holding it, last heartbeat age, and — when a role is idle — what it's `wait`-ing for and until when.
+- **Roles** — each role's session: `live` / `stale` / no session, the pid + host holding it, last heartbeat age, and — when a role is idle — what it's `wait`-ing for and until when. A role that holds a live session but has not run `gojaja wait` for a while is flagged red as `stalled` so you can spot the "agent forgot to park" failure mode at a glance.
+- **Actions** (loopback only) — a small write panel: send a `report --to <role>`, open an RFC, or create a task, all posted as `from: SYSTEM` (the project-owner channel, equivalent to running the same CLI commands in a shell with no `GOJAJA_SESSION`). Hidden when watch is bound to a non-loopback address (`--host 0.0.0.0` etc.) so the dashboard stays read-only when shared on a LAN.
 - **Task board** — all tasks laid out by status (Backlog → Done), with owner, priority, blockers, and deliverable count.
 - **RFCs** — open/revising/decided, with deciders and voters.
 - **Activity feed** — the live, newest-first event stream across all agents (reports, worklogs, task moves, RFC comments/decisions), which doubles as the project history.
 
-Use it to decide who to nudge next: a role sitting `idle (waiting for task-assigned)` wants work; a task stuck in `Blocked` needs its upstream owner; an RFC sitting `open` for a while needs its decider. Leave it running in a browser tab while you drive the team. Ctrl-C in the terminal stops it.
+Use it to decide who to nudge next: a `stalled` role wants `gojaja wait`; a role sitting `idle (waiting for task-assigned)` wants work; a task stuck in `Blocked` needs its upstream owner; an RFC sitting `open` for a while needs its decider. The Actions panel lets you push directly from this same screen instead of switching to a terminal. Leave it running in a browser tab while you drive the team. Ctrl-C in the terminal stops it.
 
 ## How decisions get made (RFCs)
 

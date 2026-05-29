@@ -81,6 +81,25 @@ export const DASHBOARD_HTML = `<!doctype html>
   .empty { color: var(--dim); font-style: italic; }
   #err { display: none; background: #3d1418; border: 1px solid #f85149; color: #ffb4ae;
     padding: 8px 12px; border-radius: 8px; margin: 0 16px; }
+  /* Actions panel: project-owner write surface. Hidden when the
+     server reports !capabilities.writeEnabled (non-loopback bind). */
+  .actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+  .action { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .action h3 { font-size: 12px; margin: 0 0 10px; font-weight: 600; color: var(--fg);
+    text-transform: uppercase; letter-spacing: .06em; }
+  .action label { display: block; font-size: 11px; color: var(--dim); margin: 8px 0 3px; }
+  .action input, .action select, .action textarea {
+    width: 100%; box-sizing: border-box; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; font: 12px ui-monospace, monospace; }
+  .action textarea { min-height: 60px; resize: vertical; }
+  .action button { margin-top: 10px; background: var(--accent); color: #0b1220; border: 0;
+    border-radius: 5px; padding: 6px 14px; font: 600 12px ui-sans-serif, system-ui;
+    cursor: pointer; }
+  .action button:disabled { opacity: .5; cursor: not-allowed; }
+  .action .feedback { margin-top: 8px; font-size: 11px; min-height: 14px; }
+  .action .feedback.ok { color: var(--live); }
+  .action .feedback.err { color: var(--p0); }
+  .action .hint { font-size: 11px; color: var(--dim); margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -98,6 +117,61 @@ export const DASHBOARD_HTML = `<!doctype html>
 <div id="err"></div>
 <main>
   <section><h2>Roles</h2><div class="roles" id="roles"></div></section>
+  <section id="sec-actions" style="display:none">
+    <h2>Actions <span style="color:var(--dim);text-transform:none;letter-spacing:0;font-weight:400">— posted as <code style="background:var(--panel2);padding:1px 5px;border-radius:3px">SYSTEM</code> (project-owner)</span></h2>
+    <div class="actions">
+      <div class="action">
+        <h3>Send report</h3>
+        <label>To role</label>
+        <select id="rep-to"></select>
+        <label>Message</label>
+        <textarea id="rep-msg" placeholder="What you need them to do next."></textarea>
+        <label>Ref (optional)</label>
+        <input id="rep-ref" placeholder="T-0001 / RFC-0007 / ..." />
+        <button id="rep-go">Send report</button>
+        <div class="feedback" id="rep-fb"></div>
+      </div>
+      <div class="action">
+        <h3>Open RFC</h3>
+        <label>Slug</label>
+        <input id="rfc-slug" placeholder="lowercase-with-dashes" />
+        <label>Title</label>
+        <input id="rfc-title" />
+        <label>Deciders (comma-separated roles)</label>
+        <input id="rfc-deciders" placeholder="CTO,CPO" />
+        <label>Voters (comma-separated, optional)</label>
+        <input id="rfc-voters" />
+        <label>Options (id:summary, comma-separated, optional)</label>
+        <input id="rfc-options" placeholder="A:do this,B:do that" />
+        <label>Description</label>
+        <textarea id="rfc-desc" placeholder="Context the voters/deciders need to weigh in."></textarea>
+        <button id="rfc-go">Open RFC</button>
+        <div class="feedback" id="rfc-fb"></div>
+      </div>
+      <div class="action">
+        <h3>Create task</h3>
+        <label>Title</label>
+        <input id="task-title" />
+        <label>Owner (optional)</label>
+        <select id="task-owner"><option value="">(unassigned)</option></select>
+        <label>Priority</label>
+        <select id="task-pri">
+          <option value="P0">P0</option>
+          <option value="P1">P1</option>
+          <option value="P2" selected>P2</option>
+          <option value="P3">P3</option>
+        </select>
+        <label>Acceptance criteria (optional)</label>
+        <textarea id="task-acc" placeholder="What 'done' looks like."></textarea>
+        <button id="task-go">Create task</button>
+        <div class="feedback" id="task-fb"></div>
+      </div>
+    </div>
+    <div class="hint" style="margin-top:10px;color:var(--dim);font-size:11px">
+      All actions emit events as <code>from: SYSTEM</code> — the same as running
+      the gojaja CLI in a shell with no <code>GOJAJA_SESSION</code>. Visible only when watch is bound to loopback.
+    </div>
+  </section>
   <section><h2>Task board</h2><div class="board" id="board"></div></section>
   <section><h2>RFCs</h2><div class="rfcs" id="rfcs"></div></section>
   <section><h2>Activity</h2><div class="feed" id="feed"></div></section>
@@ -210,6 +284,106 @@ export const DASHBOARD_HTML = `<!doctype html>
     document.getElementById("board").innerHTML = renderBoard(s.tasks);
     document.getElementById("rfcs").innerHTML = renderRfcs(s.rfcs);
     document.getElementById("feed").innerHTML = renderFeed(s.events);
+    renderActions(s);
+  }
+
+  // ---- Actions panel (loopback-only) ----------------------------
+
+  function fillRoleSelects(roles){
+    // Snapshot current selection so re-renders during typing do not
+    // wipe what the user just picked.
+    var ids = roles.map(function(r){ return r.id; });
+    [["rep-to", false], ["task-owner", true]].forEach(function(spec){
+      var sel = document.getElementById(spec[0]);
+      if(!sel) return;
+      var prev = sel.value;
+      var allowEmpty = spec[1];
+      var opts = (allowEmpty ? '<option value="">(unassigned)</option>' : "") +
+        ids.map(function(id){ return '<option value="'+esc(id)+'">'+esc(id)+'</option>'; }).join("");
+      if(sel.innerHTML !== opts){ sel.innerHTML = opts; }
+      if(prev && ids.indexOf(prev) >= 0){ sel.value = prev; }
+    });
+  }
+
+  function renderActions(s){
+    var sec = document.getElementById("sec-actions");
+    var enabled = s.capabilities && s.capabilities.writeEnabled;
+    sec.style.display = enabled ? "" : "none";
+    if(!enabled) return;
+    fillRoleSelects(s.roles || []);
+  }
+
+  function setFb(id, kind, msg){
+    var el = document.getElementById(id);
+    el.className = "feedback " + (kind || "");
+    el.textContent = msg || "";
+  }
+
+  function postJson(url, body){
+    return fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(function(r){
+      return r.json().then(function(j){ return { ok: r.ok, status: r.status, body: j }; });
+    });
+  }
+
+  function bindActionButtons(){
+    document.getElementById("rep-go").addEventListener("click", function(){
+      var btn = this; btn.disabled = true; setFb("rep-fb", "", "sending…");
+      postJson("/api/report", {
+        to: document.getElementById("rep-to").value,
+        message: document.getElementById("rep-msg").value,
+        ref: document.getElementById("rep-ref").value,
+      }).then(function(r){
+        btn.disabled = false;
+        if(!r.ok){ setFb("rep-fb", "err", r.body.error || ("HTTP "+r.status)); return; }
+        setFb("rep-fb", "ok", "Reported "+(r.body.event && r.body.event.id || "")+".");
+        document.getElementById("rep-msg").value = "";
+        document.getElementById("rep-ref").value = "";
+        tick();
+      }).catch(function(e){ btn.disabled = false; setFb("rep-fb", "err", String(e)); });
+    });
+    document.getElementById("rfc-go").addEventListener("click", function(){
+      var btn = this; btn.disabled = true; setFb("rfc-fb", "", "creating…");
+      var splitCsv = function(s){ return (s||"").split(",").map(function(x){return x.trim();}).filter(Boolean); };
+      var optsRaw = splitCsv(document.getElementById("rfc-options").value);
+      var opts = optsRaw.map(function(p){
+        var i = p.indexOf(":"); return i < 0 ? null : { id: p.slice(0,i).trim(), summary: p.slice(i+1).trim() };
+      }).filter(Boolean);
+      postJson("/api/rfc", {
+        slug: document.getElementById("rfc-slug").value.trim(),
+        title: document.getElementById("rfc-title").value.trim(),
+        deciders: splitCsv(document.getElementById("rfc-deciders").value),
+        voters: splitCsv(document.getElementById("rfc-voters").value),
+        options: opts,
+        description: document.getElementById("rfc-desc").value,
+      }).then(function(r){
+        btn.disabled = false;
+        if(!r.ok){ setFb("rfc-fb", "err", r.body.error || ("HTTP "+r.status)); return; }
+        setFb("rfc-fb", "ok", "Created "+(r.body.proposal && r.body.proposal.id || "")+".");
+        ["rfc-slug","rfc-title","rfc-deciders","rfc-voters","rfc-options","rfc-desc"].forEach(function(id){
+          document.getElementById(id).value = "";
+        });
+        tick();
+      }).catch(function(e){ btn.disabled = false; setFb("rfc-fb", "err", String(e)); });
+    });
+    document.getElementById("task-go").addEventListener("click", function(){
+      var btn = this; btn.disabled = true; setFb("task-fb", "", "creating…");
+      postJson("/api/task", {
+        title: document.getElementById("task-title").value.trim(),
+        owner: document.getElementById("task-owner").value || null,
+        priority: document.getElementById("task-pri").value,
+        acceptance: document.getElementById("task-acc").value,
+      }).then(function(r){
+        btn.disabled = false;
+        if(!r.ok){ setFb("task-fb", "err", r.body.error || ("HTTP "+r.status)); return; }
+        setFb("task-fb", "ok", "Created "+(r.body.task && r.body.task.id || "")+".");
+        ["task-title","task-acc"].forEach(function(id){ document.getElementById(id).value = ""; });
+        tick();
+      }).catch(function(e){ btn.disabled = false; setFb("task-fb", "err", String(e)); });
+    });
   }
 
   function tick(){
@@ -218,6 +392,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       .then(render)
       .catch(function(e){ showErr("Lost connection to gojaja watch ("+e.message+"). Is the server still running?"); });
   }
+  bindActionButtons();
   tick();
   setInterval(tick, 2000);
 </script>

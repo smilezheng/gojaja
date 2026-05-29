@@ -8,6 +8,55 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### `gojaja watch` adds an Actions panel (loopback-only): report / open RFC / create task
+
+The watch dashboard was previously read-only by design. In practice
+the human-as-scheduler kept watching the dashboard, spotting a role
+that needs a directive, and then context-switching to a terminal to
+run `gojaja report --to <role> ...` — three windows of friction for
+one decision. This adds the project-owner write surface directly to
+the dashboard, gated to loopback so a LAN-shared dashboard remains
+read-only.
+
+Three new POST endpoints (all 127.0.0.1-only):
+- `POST /api/report  { to, message, ref? }`
+- `POST /api/rfc     { slug, title, deciders, voters?, options?, description?, deadline?, relatedTasks? }`
+- `POST /api/task    { title, owner?, priority?, dependsOn?, acceptance?, tags?, reviewers? }`
+
+All three write events as `actor: "SYSTEM"` — equivalent to running
+the same CLI commands in a shell with no `GOJAJA_SESSION`. The
+existing SYSTEM paths (`Store.publishReport`, `Store.createRfc`,
+`Store.createTask`) back these endpoints; nothing about audit /
+manifest projection / recipient routing changes.
+
+Loopback gate: `isLoopbackBind(host)` (`127.0.0.1` / `::1` /
+`localhost`) decides both whether the front-end shows the Actions
+panel (`/api/state` returns `capabilities.writeEnabled: true`) and
+whether the POST handlers accept (non-loopback → 403 with a message
+pointing at `--host 127.0.0.1`). The server-side gate is enforced
+independently of the front-end toggle so a hand-crafted curl from a
+non-loopback origin still 403s.
+
+Dashboard UI: a new `Actions` section between Roles and Task board,
+three side-by-side cards (Report / Open RFC / Create task), inline
+error / success feedback under each form (no toast), role dropdowns
+auto-populated from the live `roles` snapshot. `--host 0.0.0.0` (or
+any non-loopback) hides the section.
+
+Tests in `tests/watch.test.ts` (8 new cases) spin a real HTTP server
+on an ephemeral port, hit it with `fetch`, and assert: loopback bind
+reports writeEnabled=true; non-loopback reports false; report happy
+path records `from: SYSTEM`; report from 0.0.0.0 returns 403;
+missing required field returns 400 USAGE; unknown recipient surfaces
+the store-layer USAGE; rfc records `createdBy: "SYSTEM"`; task
+records `creator: "SYSTEM"`. `__test_handleRequest` is exported
+from `watch.ts` so the test runs the production routing verbatim.
+
+Updated README.md / README.zh-CN.md (the watch section drops the
+"read-only" language, gains a description of the Actions panel and
+its loopback gate); `gojaja watch -h` updated in both the long-form
+CLI help and the per-command summary.
+
 ### Runtime body: "Tasks pull" — assigned task is itself the start signal
 
 Companion soft constraint to the previous "wait is the end-of-turn

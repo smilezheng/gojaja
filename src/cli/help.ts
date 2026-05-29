@@ -369,12 +369,17 @@ Keepalive (agent, requires GOJAJA_SESSION):
 
 Monitoring (you, the human scheduler):
   watch [--port <n>] [--host <addr>] [--no-open]
-      Start a local, read-only web dashboard over this project's
-      .gojaja/ state and open it in your browser. One screen shows
-      every role's session (live / stale / idle-waiting), the task
-      board, open RFCs, and a live activity feed across all agent
-      windows. Useful because on a single machine nothing can wake a
-      turn-ended agent — you are the scheduler, and this is your view.
+      Start a local web dashboard over this project's .gojaja/ state
+      and open it in your browser. One screen shows every role's
+      session (live / stale / idle-waiting / stalled-no-wait), the
+      task board, open RFCs, and a live activity feed across all
+      agent windows. Useful because on a single machine nothing can
+      wake a turn-ended agent — you are the scheduler, and this is
+      your view. On the default 127.0.0.1 bind, the dashboard also
+      exposes an Actions panel: send report, open RFC, create task,
+      posted as from=SYSTEM (project-owner channel). Non-loopback
+      binds hide the panel; the dashboard then stays purely read-only
+      so it is safe to share over the LAN.
       Serves on 127.0.0.1:7421 by default (falls back to a free port if
       busy); --no-open skips launching the browser. Read-only: never
       mutates coordination state. Ctrl-C to stop.
@@ -539,8 +544,13 @@ export const COMMAND_HELP: Record<string, string> = {
       cap at ~5 resumes, then end the turn.`,
 
   watch: `  gojaja watch [--port <n>] [--host <addr>] [--no-open]
-      Start a local, read-only web dashboard (roles, task board, RFCs,
-      live activity feed) and open it in the browser. Ctrl-C to stop.`,
+      Start a local web dashboard (roles, task board, RFCs,
+      live activity feed) and open it in the browser. Default
+      127.0.0.1 bind also exposes an Actions panel — send report,
+      open RFC, create task, all posted as from=SYSTEM (project-
+      owner channel). Non-loopback binds (e.g. --host 0.0.0.0) hide
+      the Actions panel so a LAN-shared dashboard stays read-only.
+      Ctrl-C to stop.`,
 
   reset: `  gojaja reset [--dry-run] [--confirm <basename>]
       Remove everything gojaja installed: .gojaja/, the Cursor rule, and

@@ -186,7 +186,7 @@ gojaja activate Backend --target agents
 | 在 RFC 上留普通讨论评论 | `rfc comment`（评论的 `from` 记为 SYSTEM，跟 `rfc new` 对称；结构化动作仍然要角色——见下表） |
 | 给某个角色发定向消息 | `report --to <role> --message "..."`（消息的 `from` 记为 SYSTEM；这是你作为"项目主理人"打进团队的渠道。接收方收到的是普通 report，但能从审计里看出是你发的，不是别的 agent） |
 | 改共享状态 | `state edit`（SYSTEM 越过文件归属限制） |
-| 查看一切 | 除 `plan` 外的只读命令：`task show/list`、`rfc show/list`、`role show/list`、`handbook`、`-h`，以及看板 `watch` |
+| 查看一切 | 除 `plan` 外的只读命令：`task show/list`、`rfc show/list`、`role show/list`、`handbook`、`-h`，以及看板 `watch`（默认只读；loopback 模式还会多出一个 Actions 面板，让你直接从看板里 `report` / 开 RFC / 建 task） |
 | 安装 / 卸载 / 激活 | `init`、`reset`、`prompt`、`activate`、`claim` |
 
 **必须先 `claim` 一个角色（shell 里有 `GOJAJA_SESSION`）才能做：**
@@ -365,14 +365,15 @@ gojaja watch --port 8080     # 指定端口
 gojaja watch --no-open       # 不自动开浏览器
 ```
 
-它是个只读看板（绝不改动协调状态），每两秒自动刷新一次，把所有窗口的状态汇到一屏：
+每两秒自动刷新一次，把所有窗口的状态汇到一屏：
 
-- **角色** —— 每个角色的 session 是 `live` / `stale` 还是没有；是哪个进程（pid + host）持有的；上次心跳是多久前；角色空闲时还会显示它在 `wait` 等什么、等到几点。
+- **角色** —— 每个角色的 session 是 `live` / `stale` 还是没有；是哪个进程（pid + host）持有的；上次心跳是多久前；角色空闲时还会显示它在 `wait` 等什么、等到几点。如果某个角色明明持有 live session 却长时间没跑过 `gojaja wait`，会被红色 `stalled` 标出来——这就是"agent 忘了 park"的失败模式，扫一眼就能发现。
+- **Actions（仅 loopback 可用）** —— 一个写入面板，让你直接从看板里给某个角色发 `report`、起 RFC、建 task。所有动作都以 `from: SYSTEM` 写入（项目主理人通道，等价于在没 `GOJAJA_SESSION` 的 shell 里跑相应 CLI 命令）。当 watch 绑到非 loopback 地址（比如 `--host 0.0.0.0` 在局域网共享）时，这个面板会自动隐藏，看板退化为只读，避免外人在 LAN 里乱推任务。
 - **任务板** —— 所有任务按状态（Backlog → Done）分列，带 owner、优先级、阻塞项和产出数。
 - **RFC** —— 哪些在 open / revising、哪些已决，连同 deciders 和 voters。
 - **活动流** —— 所有 agent 的实时事件（report、worklog、任务流转、RFC 评论与决定），最新的在最上面，同时也就是这个项目的历史。
 
-它帮你判断下一个该催谁：显示「空闲，等派活（task-assigned）」的角色该给它安排任务了；卡在 `Blocked` 的任务要去找它依赖的上游 owner；`open` 了很久没动的 RFC 要去戳它的 decider。带队的时候就开一个浏览器标签挂着，终端里 Ctrl-C 即可停掉。
+它帮你判断下一个该催谁：红字 `stalled` 的角色该让它跑 `wait`；显示「空闲，等派活（task-assigned）」的角色该给它安排任务了；卡在 `Blocked` 的任务要去找它依赖的上游 owner；`open` 了很久没动的 RFC 要去戳它的 decider。Actions 面板让你不用切到终端就能直接从这一屏里推动。带队的时候就开一个浏览器标签挂着，终端里 Ctrl-C 即可停掉。
 
 ## agent 之间怎么拍板（RFC）
 

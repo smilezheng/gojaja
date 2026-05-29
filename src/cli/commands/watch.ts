@@ -51,7 +51,7 @@ export async function runWatch(args: ParsedArgs): Promise<number> {
   const noOpen = boolFlag(args.flags, "no-open");
 
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, store, root).catch((err) => {
+    handleRequest(req, res, store, root, host).catch((err) => {
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: String((err as Error)?.message ?? err) }));
     });
@@ -109,19 +109,95 @@ function listenWithFallback(
   });
 }
 
+/**
+ * Loopback addresses bypass the "no write endpoints over the network"
+ * gate. Anything else (a LAN-bound `--host 0.0.0.0` mostly) returns
+ * 403 on POSTs — `gojaja watch` is a personal scheduler dashboard; a
+ * `report --to <peer>` button accessible from the LAN would let any
+ * device on the network push directives at the team. The dashboard
+ * HTML stays read-only over those binds (so users can demo it
+ * without exposing writes).
+ */
+function isLoopbackBind(host: string): boolean {
+  return (
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host === "localhost"
+  );
+}
+
+function readJsonBody(
+  req: http.IncomingMessage,
+  maxBytes = 64 * 1024,
+): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new Error(`Request body exceeds ${maxBytes} bytes.`));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (chunks.length === 0) return resolve({});
+      try {
+        resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      } catch (err) {
+        reject(new Error(`Invalid JSON body: ${(err as Error).message}`));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function sendJson(
+  res: http.ServerResponse,
+  status: number,
+  body: unknown,
+): void {
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  res.end(JSON.stringify(body));
+}
+
+/**
+ * Test-only export of the request handler. Lets the integration
+ * suite (`tests/watch.test.ts`) spin a real HTTP server bound to a
+ * fresh ephemeral port and exercise the full method-and-path
+ * routing, the loopback gate, and the error-mapping for write
+ * endpoints — all without exposing the handler as a public API
+ * (the underscore prefix is the convention).
+ */
+export const __test_handleRequest = (
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  store: LocalFsStore,
+  root: string,
+  host: string,
+): Promise<void> => handleRequest(req, res, store, root, host);
+
 async function handleRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   store: LocalFsStore,
   root: string,
+  host: string,
 ): Promise<void> {
   const url = req.url ?? "/";
-  if (url === "/" || url === "/index.html") {
+  const method = req.method ?? "GET";
+
+  if (method === "GET" && (url === "/" || url === "/index.html")) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(DASHBOARD_HTML);
     return;
   }
-  if (url.startsWith("/api/state")) {
+  if (method === "GET" && url.startsWith("/api/state")) {
     const u = new URL(url, "http://placeholder/");
     const overrideRaw = u.searchParams.get("stalledThresholdMs");
     const override = overrideRaw === null ? null : Number(overrideRaw);
@@ -130,15 +206,173 @@ async function handleRequest(
         ? override
         : STALLED_NO_WAIT_THRESHOLD_MS;
     const snapshot = await buildSnapshot(store, root, stalledThresholdMs);
-    res.writeHead(200, {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
+    // Capabilities tell the dashboard front-end whether the Actions
+    // panel should render. The server-side gate (POST handlers)
+    // re-checks the same condition, so a hand-crafted curl from the
+    // wrong host still fails — this is purely UX so users do not
+    // see a panel that would 403 on submit.
+    sendJson(res, 200, {
+      ...snapshot,
+      capabilities: { writeEnabled: isLoopbackBind(host) },
     });
-    res.end(JSON.stringify(snapshot));
     return;
   }
+
+  // Write endpoints — gated to loopback. The dashboard HTML hides
+  // the Actions panel when its capability check (GET /api/state -
+  // see `writeEnabled`) returns false, but we re-check here so a
+  // direct POST cannot bypass the UI gate.
+  if (method === "POST" && url.startsWith("/api/")) {
+    if (!isLoopbackBind(host)) {
+      sendJson(res, 403, {
+        error:
+          "Write actions are disabled when watch is bound to a non-loopback " +
+          "address (this prevents anyone on the LAN from pushing directives " +
+          "at the team via the dashboard). Re-run `gojaja watch` without " +
+          "`--host`, or with `--host 127.0.0.1`.",
+      });
+      return;
+    }
+    let body: unknown;
+    try {
+      body = await readJsonBody(req);
+    } catch (err) {
+      sendJson(res, 400, { error: (err as Error).message });
+      return;
+    }
+    try {
+      if (url === "/api/report") {
+        const out = await postReport(store, body);
+        sendJson(res, 200, out);
+        return;
+      }
+      if (url === "/api/rfc") {
+        const out = await postRfc(store, body);
+        sendJson(res, 200, out);
+        return;
+      }
+      if (url === "/api/task") {
+        const out = await postTask(store, body);
+        sendJson(res, 200, out);
+        return;
+      }
+    } catch (err) {
+      // store throws UsageError / ForbiddenError with `code`; we
+      // surface the message so the form can render it inline. 4xx
+      // for client-fixable errors, 500 for everything else.
+      const e = err as { code?: string; message?: string };
+      const code = e.code === "USAGE" ? 400 : e.code === "FORBIDDEN" ? 403 : 500;
+      sendJson(res, code, {
+        error: e.message ?? String(err),
+        errorCode: e.code ?? null,
+      });
+      return;
+    }
+  }
+
   res.writeHead(404, { "content-type": "text/plain" });
   res.end("not found");
+}
+
+// ---- write-endpoint handlers ---------------------------------------
+
+/**
+ * `gojaja watch` writes are always emitted as `actor: "SYSTEM"` —
+ * the dashboard is the project owner's window, equivalent to running
+ * the CLI in a shell with no `GOJAJA_SESSION`. The same SYSTEM-friendly
+ * paths the CLI already exposes (`report`, `rfc new`, `task new`)
+ * back these endpoints; downstream audit / manifest projection /
+ * recipient routing are unchanged.
+ */
+function asString(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+function asStringArr(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is string => typeof x === "string");
+}
+
+async function postReport(store: LocalFsStore, body: unknown) {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const to = asString(b.to).trim();
+  const message = asString(b.message);
+  const ref = asString(b.ref).trim() || undefined;
+  if (!to) throw makeUsage("`to` is required.");
+  if (!message) throw makeUsage("`message` is required.");
+  const event = await store.publishReport({ from: "SYSTEM", to, ref, message });
+  return { status: "reported", event };
+}
+
+async function postRfc(store: LocalFsStore, body: unknown) {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const slug = asString(b.slug).trim();
+  const title = asString(b.title).trim();
+  const deciders = asStringArr(b.deciders);
+  const voters = asStringArr(b.voters);
+  const description = asString(b.description);
+  const optionsRaw = b.options;
+  const options = Array.isArray(optionsRaw)
+    ? optionsRaw
+        .filter(
+          (o): o is { id: string; summary: string } =>
+            !!o &&
+            typeof (o as { id?: unknown }).id === "string" &&
+            typeof (o as { summary?: unknown }).summary === "string",
+        )
+        .map((o) => ({ id: o.id.trim(), summary: o.summary.trim() }))
+    : [];
+  const deadline = asString(b.deadline).trim() || null;
+  const relatedTasks = asStringArr(b.relatedTasks);
+  if (!slug) throw makeUsage("`slug` is required.");
+  if (!title) throw makeUsage("`title` is required.");
+  if (deciders.length === 0)
+    throw makeUsage("`deciders` is required (one or more roles).");
+  const proposal = await store.createRfc({
+    slug,
+    title,
+    voters,
+    deciders,
+    options,
+    description,
+    deadline,
+    relatedTasks,
+    createdBy: "SYSTEM",
+  });
+  return { status: "created", proposal };
+}
+
+async function postTask(store: LocalFsStore, body: unknown) {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const title = asString(b.title).trim();
+  const owner = asString(b.owner).trim() || null;
+  const priority = asString(b.priority).trim() || "P2";
+  const acceptance = asString(b.acceptance);
+  const dependsOn = asStringArr(b.dependsOn);
+  const tags = asStringArr(b.tags);
+  const reviewers = asStringArr(b.reviewers);
+  if (!title) throw makeUsage("`title` is required.");
+  const task = await store.createTask({
+    title,
+    owner,
+    priority,
+    dependsOn,
+    acceptance,
+    tags,
+    reviewers,
+    actor: "SYSTEM",
+  });
+  return { status: "created", task };
+}
+
+function makeUsage(message: string): Error & { code: string } {
+  // Mimic the `code: "USAGE"` shape the store throws so `handleRequest`
+  // routes us to a 400 with `errorCode: "USAGE"` for inline form
+  // rendering. Avoid pulling UsageError from core because that adds
+  // a tighter dependency than the CLI layer needs here.
+  const err = new Error(message) as Error & { code: string };
+  err.code = "USAGE";
+  return err;
 }
 
 /**
