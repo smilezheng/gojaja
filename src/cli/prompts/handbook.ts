@@ -39,12 +39,20 @@ source repo on GitHub (you do not need it to follow the rules).
 5. \`gojaja wait --in <duration>\` — every substantive turn must end
    with wait.
 
-wait verdicts (each prints the next command to run):
-- ATTENTION / CONDITION_MET → \`gojaja plan\`.
-- RESUME → re-run the printed wait command. Chunked polling lets long
-  waits survive host shell timeouts; loop on RESUME.
-- TIMEOUT → end the turn cleanly, or take initiative if your role
-  allows it.
+A single \`wait\` call BLOCKS this turn (polling internally — no token
+cost) until:
+- ATTENTION / CONDITION_MET → run \`gojaja plan\`.
+- TIMEOUT → only if you passed \`--in\`/\`--until\` and that deadline
+  passed; end the turn cleanly, or take initiative if your role allows.
+
+Goal: stay parked cheaply. One long block is ideal; every re-run is a
+fresh ReAct turn that costs tokens. With no \`--in\`/\`--until\`,
+\`gojaja wait\` blocks INDEFINITELY (still event-wakeable). If the host
+harness kills the call, that kill time reveals the host's per-tool-call
+timeout — re-run \`gojaja wait\` (no args) to resume the same session.
+Budget ~5 resumes, then end the turn rather than looping forever: if the
+host kills around 10 min that is ~50 min of waiting across ~5 turns;
+around 3 min, ~15 min. \`--poll-interval\` only sets detection latency.
 
 ### Which channel: worklog vs report vs RFC
 
@@ -209,11 +217,11 @@ transition refuses with \`FORBIDDEN\`; ask one of the task's
 ### Idle (no work) — \`wait --for task-assigned\`
 
 When plan returns no tasks AND no events, run
-\`gojaja wait --in <duration> --for task-assigned\`. On the FIRST
-chunk the framework auto-broadcasts an idle worklog; one-shot per
-wait session (RESUME does NOT re-broadcast). Task-board owners see it
-and can assign you work. \`TASK_ASSIGNED\` with you as new owner
-exits the wait CONDITION_MET.
+\`gojaja wait --in <duration> --for task-assigned\`. When the wait
+session opens, the framework auto-broadcasts an idle worklog once per
+session (re-running after a host kill does NOT re-broadcast).
+Task-board owners see it and can assign you work. \`TASK_ASSIGNED\`
+with you as new owner exits the wait CONDITION_MET.
 
 Do NOT use \`--for task-assigned\` while you still have an open task
 (InProgress / Blocked / Review). Finish or hand off first.

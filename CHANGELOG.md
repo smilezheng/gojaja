@@ -8,6 +8,39 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### `wait` is one blocking call again — internal polling, no RESUME loop
+
+Restores the original intent of `wait`: a single invocation parks the
+agent in ONE tool call for the whole deadline, so an idle agent burns no
+LLM turns / tokens. The previous shape exited after a single
+`--poll-interval` (a "RESUME" verdict) and made the agent re-invoke every
+interval, which reintroduced a per-poll LLM turn and defeated the whole
+point.
+
+- A `wait` call now **blocks**, re-checking the event stream every
+  `--poll-interval` (default 30s, an in-process cadence) and sleeping in
+  between, until it returns one of three terminal verdicts: `ATTENTION`,
+  `CONDITION_MET`, or `TIMEOUT`. The `RESUME` verdict is removed
+  (`WaitStatus` no longer has `"resume"`).
+- **Indefinite waits.** `--in` / `--until` are now optional; bare
+  `gojaja wait` blocks indefinitely (still event-wakeable) and never
+  TIMEOUTs. `wait.json` stores `deadline: null` for that case. The
+  runtime body / handbook advise treating a host kill's timing as the
+  host's per-tool-call timeout and capping re-runs at ~5 before ending
+  the turn, so an idle wait stays long but cheap.
+- `--poll-interval` is now purely a detection-latency knob, not a
+  re-invocation interval — so the recommended `wait` invocation is
+  uniform across hosts (no per-host `--poll-interval 30s` pin for
+  Cursor).
+- Host-kill recovery: if the host harness kills the long-blocking call,
+  the agent re-runs `gojaja wait` with **no deadline flags**, which
+  resumes the in-progress session (same deadline + condition) from
+  `comms/pending/<role>/wait.json`. Passing `--in` / `--until` starts a
+  fresh wait. The `--for task-assigned` idle worklog stays one-shot
+  across such a resume.
+- Updated prompt/runtime body, handbook, `-h`, PROTOCOL, SCHEMA, DESIGN;
+  rewrote the RESUME-based wait tests around blocking + resume.
+
 ### AGENTS.md is the single canonical runtime; other targets shrink (PR8aa)
 
 Lean into AGENTS.md as the cross-tool standard so there is essentially

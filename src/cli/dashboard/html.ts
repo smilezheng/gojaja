@@ -105,7 +105,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     var s = Math.max(0, Math.floor((Date.now()-t)/1000));
     if(s<60) return s+"s ago"; var m=Math.floor(s/60); if(m<60) return m+"m ago";
     var h=Math.floor(m/60); if(h<24) return h+"h ago"; return Math.floor(h/24)+"d ago"; }
-  function until(iso){ if(!iso) return ""; var t=Date.parse(iso); if(!isFinite(t)) return "";
+  function until(iso){ if(!iso) return "no deadline"; var t=Date.parse(iso); if(!isFinite(t)) return "";
     var s=Math.floor((t-Date.now())/1000); if(s<=0) return "deadline passed";
     if(s<60) return "in "+s+"s"; var m=Math.floor(s/60); if(m<60) return "in "+m+"m";
     return "in "+Math.floor(m/60)+"h"; }

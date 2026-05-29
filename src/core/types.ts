@@ -629,24 +629,24 @@ export interface WaitCondition {
 }
 
 /**
- * Persisted across resumes at `comms/pending/<role>/wait.json`. Written
- * on the first chunk of a wait session, kept while the agent re-invokes
- * `wait` to consume more chunks (RESUME exits), cleared on terminal
- * exits (ATTENTION / CONDITION_MET / TIMEOUT).
+ * Persisted at `comms/pending/<role>/wait.json`. Written when a wait
+ * session opens; cleared on a terminal verdict (ATTENTION /
+ * CONDITION_MET / TIMEOUT).
  *
  * Two purposes:
- *   1. De-duplicate the idle worklog broadcast for `--for task-assigned`
- *      across chunked invocations.
+ *   1. Let a `wait` re-invoked with no deadline flags resume the SAME
+ *      deadline + condition after the host harness killed the prior
+ *      blocking call, and de-duplicate the `--for task-assigned` idle
+ *      worklog broadcast across such a resume.
  *   2. Make "who is waiting for what until when" externally observable
- *      (PR9 `gojaja doctor`). Correctness does not rely on this file:
- *      if it goes missing the worst-case is a duplicated idle worklog.
+ *      (PR9 `gojaja doctor`).
  */
 export interface WaitState {
   role: RoleId;
-  /** ISO-8601 UTC. */
-  deadline: string;
+  /** ISO-8601 UTC deadline, or `null` for an indefinite wait. */
+  deadline: string | null;
   for: WaitCondition;
-  /** ISO-8601 UTC; recorded on the first chunk. */
+  /** ISO-8601 UTC; recorded when the session opened. */
   startedAt: string;
   /** Cursor value at session start, used by the doctor for diagnostics. */
   ackedThroughAtStart: string;
@@ -655,8 +655,9 @@ export interface WaitState {
 }
 
 /**
- * Terminal verdicts produced by `gojaja wait`. RESUME is the only
- * non-terminal outcome: it tells the agent to invoke `wait` again with
- * the same `--until` / `--for`.
+ * Terminal verdicts produced by `gojaja wait`. A single `wait` call
+ * blocks (polling internally) until one of these fires — there is no
+ * voluntary "resume" exit; the call only ends early if the host harness
+ * kills it, in which case the agent re-runs `gojaja wait` to continue.
  */
-export type WaitStatus = "attention" | "condition_met" | "resume" | "timeout";
+export type WaitStatus = "attention" | "condition_met" | "timeout";

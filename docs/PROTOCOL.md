@@ -585,23 +585,26 @@ An agent window that has nothing to do should stay alive — discussions,
 reviews, blocker messages may arrive from other agents — but should not
 consume tokens while idle. `wait` is the cheap-keepalive primitive.
 
-`wait` is a single deadline-driven, chunked, resumable primitive. A
-session record lives at `comms/pending/<role>/wait.json`
-(see [SCHEMA](./SCHEMA.md)).
+`wait` is a single blocking call: it parks the agent in one tool call
+(no token cost) and polls the event stream internally until a verdict.
+A session record lives at `comms/pending/<role>/wait.json`
+(see [SCHEMA](./SCHEMA.md)) so a host-killed call can be resumed.
 
 ### `gojaja wait [<role>] [--until <iso> | --in <dur>] [--for <condition>] [--poll-interval <dur>] [--json]`
 
 Role resolution follows the same rules as `plan` (GOJAJA_SESSION first;
 explicit role argument must agree).
 
-**Deadline (pick one; default `--in 10m`):**
+**Deadline (optional; omit both to wait indefinitely):**
 
 - `--until 2026-05-28T15:00:00Z` — absolute ISO instant. Must carry
   `Z` or an explicit offset; bare local times are refused.
 - `--in 30s | 10m | 4h | 1d` — relative duration. Same parser as
   `--poll-interval`.
 
-`--until` and `--in` are mutually exclusive.
+`--until` and `--in` are mutually exclusive. With neither, the wait is
+**indefinite**: it blocks until an event/condition fires or the host
+kills the call (no TIMEOUT). `wait.json` records `deadline: null`.
 
 **Condition (`--for <token>`; default `attention`):**
 
@@ -614,14 +617,14 @@ explicit role argument must agree).
 | `report-from:<role>` | `REPORT` from that role addressed to self |
 | `event-ref:<id>` | any event whose `ref === id` |
 
-`task-assigned` additionally auto-broadcasts an idle worklog the first
-time wait writes its session record. The broadcast is one-shot per
-session (RESUME re-invocations do not re-broadcast) and goes to `*`,
+`task-assigned` additionally auto-broadcasts an idle worklog when the
+wait session is first opened. The broadcast is one-shot per session
+(resuming after a host kill does not re-broadcast) and goes to `*`,
 so any role with task-board ownership can pick the role up.
 
-**Chunked polling.** Each invocation does at most one sleep of
-`min(deadline - now, --poll-interval)` (default 30 s). After the sleep
-it checks events and exits with one of four verdicts:
+**Internal polling.** A single invocation blocks, re-checking the event
+stream every `--poll-interval` (default 30 s, an in-process cadence) and
+sleeping in between, until it can return one of three terminal verdicts:
 
 ```
 ATTENTION       role=<r> newEvents=<n> deadline=<iso>
@@ -630,21 +633,27 @@ ATTENTION       role=<r> newEvents=<n> deadline=<iso>
 CONDITION_MET   condition=<token> role=<r>
                 Next: gojaja plan
 
-RESUME          deadline=<iso> chunkSleptMs=<ms>
-                Next: gojaja wait --until <iso> [--for <token>]
-
 TIMEOUT         role=<r> deadline=<iso>
                 Next: end the turn cleanly, or take initiative.
 ```
 
-RESUME is the only non-terminal outcome. It tells the agent to re-invoke
-wait with the same deadline; the verdict line literally echoes the
-command. This is how a long wait survives a host shell timeout: each
-chunk is one process, the next process resumes from disk.
+TIMEOUT only fires for a finite deadline; an indefinite wait returns
+only ATTENTION / CONDITION_MET (or is killed by the host).
 
-Exit code is `0` for all four verdicts. Use `--json` to get
-`{ status: "attention" | "condition_met" | "resume" | "timeout", ... }`
-when machine-parsing.
+There is no voluntary "resume" exit — the call blocks for the whole
+deadline. If the host harness kills the call first, the agent re-runs
+`gojaja wait` with NO deadline flags; that resumes the in-progress
+session (same deadline + condition) read from `wait.json`. (`--in` /
+`--until` start a fresh wait instead.)
+
+The host kill is itself a signal: its timing is the host's per-tool-call
+timeout, so the agent can size its patience and cap re-runs (a practical
+ceiling of ~5 resumes) instead of looping forever. This is advice, not
+enforced by the CLI.
+
+Exit code is `0` for all three verdicts. Use `--json` to get
+`{ status: "attention" | "condition_met" | "timeout", ... }` when
+machine-parsing.
 
 Two cardinal rules:
 
@@ -660,7 +669,7 @@ ack token. Otherwise every event in the pending manifest would
 re-trigger ATTENTION, looping the agent.
 
 **User-cancel is a host concern.** If the user wants to interrupt a
-chunked wait early, they end the chat / kill the shell themselves;
+blocking wait early, they end the chat / kill the shell themselves;
 the framework does not provide a separate cancel verb.
 
 ## Activation in different agent hosts

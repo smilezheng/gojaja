@@ -12,27 +12,31 @@ import type {
   RoleId,
   WaitCondition,
   WaitConditionKind,
+  WaitState,
   WaitStatus,
 } from "../../core/types";
 import type { Store } from "../../core/store";
 
 /**
- * Default deadline when neither `--until` nor `--in` is supplied:
- * bare `gojaja wait` buys ~10 minutes of patience for new attention.
- */
-const DEFAULT_WAIT_MS = 10 * 60 * 1000;
-
-/**
- * Default cadence between event re-checks. Tuned to be small enough to
- * fit comfortably inside Cursor's host-side shell timeout while large
- * enough to keep CPU and stdout noise negligible on long Codex/Claude
- * waits. Tests pass a shorter `--poll-interval` to keep the wall clock
- * cost low.
+ * How often `wait` re-checks the event stream WHILE it is blocked. This
+ * is an in-process cadence, not a re-invocation interval: a single
+ * `wait` call parks the agent and loops internally every poll-interval
+ * until the condition fires or the deadline passes. So it costs no agent
+ * tokens (one tool call for the whole wait); a smaller value only means
+ * snappier detection at negligible CPU. Tests pass a shorter value to
+ * keep wall-clock cost low.
  */
 const DEFAULT_POLL_INTERVAL_MS = 30 * 1000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolvePollIntervalMs(args: ParsedArgs): number {
+  const pollRaw = optionalString(args.flags, "poll-interval");
+  const ms = pollRaw !== undefined ? parseDuration(pollRaw) : DEFAULT_POLL_INTERVAL_MS;
+  if (ms <= 0) throw new UsageError("--poll-interval must be > 0.");
+  return ms;
 }
 
 /**
@@ -95,7 +99,7 @@ function parseConditionToken(raw: string | undefined): WaitCondition {
 
 /**
  * Format a `WaitCondition` back to its CLI token form. Echoed in the
- * RESUME exit so the agent can literally copy/paste the next command.
+ * CONDITION_MET verdict so the agent sees what fired.
  */
 function formatConditionToken(cond: WaitCondition): string {
   if (cond.ref) return `${cond.kind}:${cond.ref}`;
@@ -173,7 +177,6 @@ async function findFirstHit(
 interface WaitTimes {
   deadlineIso: string;
   deadlineMs: number;
-  pollIntervalMs: number;
   startedAtIso: string;
 }
 
@@ -182,12 +185,6 @@ function resolveDeadline(args: ParsedArgs, nowMs: number): WaitTimes {
   const inFlag = optionalString(args.flags, "in");
   if (until !== undefined && inFlag !== undefined) {
     throw new UsageError("Pass --until or --in, not both.");
-  }
-  const pollRaw = optionalString(args.flags, "poll-interval");
-  const pollIntervalMs =
-    pollRaw !== undefined ? parseDuration(pollRaw) : DEFAULT_POLL_INTERVAL_MS;
-  if (pollIntervalMs <= 0) {
-    throw new UsageError("--poll-interval must be > 0.");
   }
   let deadlineMs: number;
   let deadlineIso: string;
@@ -209,13 +206,13 @@ function resolveDeadline(args: ParsedArgs, nowMs: number): WaitTimes {
     deadlineMs = nowMs + dur;
     deadlineIso = new Date(deadlineMs).toISOString();
   } else {
-    deadlineMs = nowMs + DEFAULT_WAIT_MS;
-    deadlineIso = new Date(deadlineMs).toISOString();
+    // Only called when --until or --in is present; the no-flag case is
+    // handled by the caller (indefinite / resume).
+    throw new UsageError("resolveDeadline requires --until or --in.");
   }
   return {
     deadlineIso,
     deadlineMs,
-    pollIntervalMs,
     startedAtIso: new Date(nowMs).toISOString(),
   };
 }
@@ -261,18 +258,6 @@ function emit(
           `Next: gojaja plan\n`,
       );
       return 0;
-    case "resume": {
-      const forSuffix =
-        ctx.cond.kind === "attention"
-          ? ""
-          : ` --for ${formatConditionToken(ctx.cond)}`;
-      process.stdout.write(
-        `RESUME deadline=${ctx.deadlineIso} ` +
-          `chunkSleptMs=${extra.chunkSleptMs ?? 0}\n` +
-          `Next: gojaja wait --until ${ctx.deadlineIso}${forSuffix}\n`,
-      );
-      return 0;
-    }
     case "timeout":
       process.stdout.write(
         `TIMEOUT role=${ctx.role} deadline=${ctx.deadlineIso}\n` +
@@ -295,11 +280,11 @@ export async function runWait(args: ParsedArgs): Promise<number> {
     requireSession: true,
   });
 
-  const condition = parseConditionToken(optionalString(args.flags, "for"));
+  const requestedCondition = parseConditionToken(optionalString(args.flags, "for"));
 
   // Refuse to wait while a plan manifest is outstanding — without this
-  // guard every event in the pending manifest would re-trigger ATTENTION,
-  // looping the agent.
+  // guard every event in the pending manifest would re-trigger ATTENTION
+  // the moment we poll.
   const cursorState = await store.readCursor(role);
   if (cursorState.pendingManifest !== null) {
     throw new UsageError(
@@ -311,85 +296,119 @@ export async function runWait(args: ParsedArgs): Promise<number> {
   }
 
   const nowMs = Date.now();
-  const times = resolveDeadline(args, nowMs);
+  const pollIntervalMs = resolvePollIntervalMs(args);
+  const existing = await store.readWaitState(role);
 
-  // Find or open a wait session. The session record is what makes the
-  // `--for task-assigned` idle broadcast a one-shot rather than a
-  // per-chunk spam: subsequent chunks find idleBroadcastSent=true and
-  // skip publishing.
-  let waitState = await store.readWaitState(role);
+  // Deadline resolution. `deadlineMs === Infinity` means an indefinite
+  // wait (no `--in` / `--until`): the call blocks until an event /
+  // condition fires or the host harness kills it. `deadline` on disk is
+  // `null` for that case.
+  //
+  // With NO deadline flags AND a session already on disk, we RESUME it:
+  // this is how the agent continues the SAME wait after the host killed
+  // the previous (long-blocking) call — re-run `gojaja wait` and it
+  // picks the original deadline + condition back up. A resumed finite
+  // deadline that has already passed resolves to an immediate TIMEOUT
+  // below, NOT a surprise fresh wait.
+  const hasDeadlineFlag =
+    optionalString(args.flags, "until") !== undefined ||
+    optionalString(args.flags, "in") !== undefined;
+
+  let deadlineIso: string | null;
+  let deadlineMs: number;
+  let cond: WaitCondition;
+  let startedAtIso: string;
+  let resuming = false;
+  if (hasDeadlineFlag) {
+    const times = resolveDeadline(args, nowMs);
+    deadlineIso = times.deadlineIso;
+    deadlineMs = times.deadlineMs;
+    cond = requestedCondition;
+    startedAtIso = times.startedAtIso;
+  } else if (existing) {
+    const ms = existing.deadline === null ? Infinity : Date.parse(existing.deadline);
+    deadlineMs = Number.isFinite(ms) || ms === Infinity ? ms : Infinity;
+    deadlineIso = deadlineMs === Infinity ? null : existing.deadline;
+    cond = existing.for;
+    startedAtIso = existing.startedAt;
+    resuming = true;
+  } else {
+    deadlineMs = Infinity;
+    deadlineIso = null;
+    cond = requestedCondition;
+    startedAtIso = new Date(nowMs).toISOString();
+  }
+
+  const deadlineLabel = deadlineIso ?? "indefinite";
   const exitCtx: ExitContext = {
     role,
     json,
-    cond: condition,
-    deadlineIso: times.deadlineIso,
-    startedAtIso: waitState?.startedAt ?? times.startedAtIso,
+    cond,
+    deadlineIso: deadlineLabel,
+    startedAtIso,
   };
 
-  // Immediate TIMEOUT path: deadline already in the past at entry.
-  if (times.deadlineMs <= nowMs) {
+  // Finite deadline already in the past → TIMEOUT immediately.
+  // (Infinity never satisfies this.)
+  if (deadlineMs <= nowMs) {
     await store.clearWaitState(role);
     return emit("timeout", exitCtx, {});
   }
 
-  // First chunk of a new session — record state + maybe broadcast idle.
-  if (waitState === null) {
-    waitState = {
+  // Open the session on a fresh wait: records the deadline (so a killed
+  // call can be resumed) and makes the `--for task-assigned` idle
+  // worklog a one-shot. Resuming reuses the existing session untouched.
+  if (!resuming) {
+    const waitState: WaitState = {
       role,
-      deadline: times.deadlineIso,
-      for: condition,
-      startedAt: times.startedAtIso,
+      deadline: deadlineIso,
+      for: cond,
+      startedAt: startedAtIso,
       ackedThroughAtStart: cursorState.ackedThrough,
       idleBroadcastSent: false,
     };
-    if (condition.kind === "task-assigned") {
+    if (cond.kind === "task-assigned") {
       await store.publishWorklog({
         from: role,
         message:
           `${role} is idle since ${waitState.startedAt}; ` +
-          `waiting for new task assignment until ${times.deadlineIso}.`,
+          `waiting for new task assignment ` +
+          `${deadlineIso ? `until ${deadlineIso}` : "indefinitely"}.`,
       });
       waitState.idleBroadcastSent = true;
     }
     await store.writeWaitState(waitState);
-    exitCtx.startedAtIso = waitState.startedAt;
   }
 
-  // Pre-sleep event check: if the answer is already on disk we exit
-  // before sleeping. This is what makes RESUME -> RESUME -> ... cheap
-  // when events are already piling up.
+  // Block until the condition fires or the deadline passes. We poll the
+  // event stream every poll-interval INSIDE this one process — the agent
+  // stays parked in a single tool call (no per-poll re-invocation, no
+  // token cost). An indefinite wait loops here until an event fires or
+  // the host harness kills the call; the agent then re-runs `gojaja
+  // wait` (no args) to continue.
   const cursor = cursorState.ackedThrough;
-  const pre = await findFirstHit(store, role, cursor, condition);
-  if (pre !== null) {
-    await store.clearWaitState(role);
-    if (condition.kind === "attention") {
-      return emit("attention", exitCtx, { newEventCount: pre.count });
+  while (Date.now() < deadlineMs) {
+    const hit = await findFirstHit(store, role, cursor, cond);
+    if (hit !== null) {
+      await store.clearWaitState(role);
+      if (cond.kind === "attention") {
+        return emit("attention", exitCtx, { newEventCount: hit.count });
+      }
+      return emit("condition_met", exitCtx, { matchedEventId: hit.event.id });
     }
-    return emit("condition_met", exitCtx, {
-      matchedEventId: pre.event.id,
-    });
+    const remaining = deadlineMs - Date.now();
+    if (remaining <= 0) break;
+    await sleep(Math.min(pollIntervalMs, remaining));
   }
 
-  const chunkMs = Math.min(
-    times.deadlineMs - Date.now(),
-    times.pollIntervalMs,
-  );
-  if (chunkMs > 0) await sleep(chunkMs);
-
-  const post = await findFirstHit(store, role, cursor, condition);
-  if (post !== null) {
+  // One last check at the deadline boundary before declaring TIMEOUT.
+  const last = await findFirstHit(store, role, cursor, cond);
+  if (last !== null) {
     await store.clearWaitState(role);
-    if (condition.kind === "attention") {
-      return emit("attention", exitCtx, { newEventCount: post.count });
+    if (cond.kind === "attention") {
+      return emit("attention", exitCtx, { newEventCount: last.count });
     }
-    return emit("condition_met", exitCtx, {
-      matchedEventId: post.event.id,
-    });
-  }
-
-  const remainingAfter = times.deadlineMs - Date.now();
-  if (remainingAfter > 0) {
-    return emit("resume", exitCtx, { chunkSleptMs: chunkMs });
+    return emit("condition_met", exitCtx, { matchedEventId: last.event.id });
   }
   await store.clearWaitState(role);
   return emit("timeout", exitCtx, {});

@@ -9,12 +9,9 @@ export interface RuntimeBodyOptions {
    */
   withHandbook?: boolean;
   /**
-   * Host target. The runtime body uses this only to tweak the
-   * recommended `wait` invocation: Cursor's chat-mode shell kills any
-   * shell command at its host-side timeout (seconds), so Cursor builds
-   * pin a short `--poll-interval`. Codex / Claude / generic hosts can
-   * comfortably sleep through the default poll interval, so we leave it
-   * unset there.
+   * Host target. Currently does not change the runtime body (the `wait`
+   * recommendation is uniform across hosts now that a single call blocks
+   * internally). Kept for per-host tweaks we may add later.
    */
   target?: Target;
 }
@@ -86,11 +83,14 @@ shell, or carry \`--session <id>\` on every command.
 3. Emit through gojaja, not chat: \`report\` / \`worklog\` /
    \`task status\` / \`rfc comment\` / \`rfc decide\`.
 4. \`gojaja ack --token <ackToken>\`.
-5. \`${waitCmd}\` — wait prints ATTENTION / CONDITION_MET / RESUME /
-   TIMEOUT and the exact next command. RESUME means re-run the printed
-   wait command (chunked polling lets long waits survive host shell
-   timeouts); ATTENTION / CONDITION_MET → \`gojaja plan\`; TIMEOUT →
-   end the turn or take initiative.
+5. \`${waitCmd}\` — ONE call BLOCKS this turn (no token cost) until
+   ATTENTION / CONDITION_MET (→ \`gojaja plan\`), or TIMEOUT if you set a
+   deadline. With no \`--in\`/\`--until\` it blocks indefinitely and still
+   wakes on events. Goal: spend few turns idle — one long block beats
+   many short ones (each re-run is a fresh, token-costing turn). If the
+   host kills the call, that kill time IS its per-tool-call timeout;
+   re-run \`gojaja wait\` (no args) to resume the same session, but cap
+   yourself at ~5 resumes, then end the turn. See \`gojaja handbook\`.
 
 ## Rules
 
@@ -134,22 +134,14 @@ const WHEN_TO_USE_WHICH = `## When to use which (full policy: \`gojaja handbook\
 `;
 
 /**
- * Per-target recommendation for the `wait` invocation.
- *
- * Cursor's chat-mode shell wraps each tool call with a host-side
- * timeout in the seconds range. A single long sleep is killed by the
- * host and the agent sees a broken exit code. The `wait` design
- * answers this with chunked, resumable polling: Cursor pins a short
- * `--poll-interval` so each chunk fits inside the host budget; on
- * RESUME the agent re-invokes the same command. Codex / Claude /
- * generic shells can sleep through the default chunk, so we omit the
- * flag there.
+ * The recommended `wait` invocation. Bare `gojaja wait` blocks
+ * indefinitely, polling the event stream internally, until an event /
+ * condition fires or the host kills the call — uniform across hosts (no
+ * per-host `--poll-interval` chunking). The agent may add `--in` /
+ * `--until` to bound it, or re-run after a host kill to resume.
  */
-function waitRecommendation(target: Target | undefined): string {
-  if (target === "cursor") {
-    return "gojaja wait --in 10m --poll-interval 30s";
-  }
-  return "gojaja wait --in 10m";
+function waitRecommendation(_target: Target | undefined): string {
+  return "gojaja wait";
 }
 
 /**
@@ -181,8 +173,11 @@ in order:
      # Skim what the gojaja CLI can do. You will come back to it
      # often (task, rfc, report, worklog, plan, ack, wait, ...).
 
-Then enter the runtime loop documented in the gojaja-runtime
-instructions installed in this host (Cursor rule / CLAUDE.md /
-AGENTS.md block — whichever applies to you).
+Then start your first turn: run \`gojaja plan\` to pull your manifest
+(unread events, plus tasks and RFCs that need you). Every turn follows
+the same loop: plan → do the work → emit through gojaja (report /
+worklog / task status / rfc) → ack → wait. The full protocol is
+installed in this project's AGENTS.md and read (or imported) by your
+host — re-read that block if you ever lose the thread.
 `;
 }

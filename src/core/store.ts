@@ -248,15 +248,15 @@ export interface Store {
   readWaitState(role: RoleId): Promise<WaitState | null>;
 
   /**
-   * Atomically persist a wait session. Called on the first chunk of a
-   * fresh session and again whenever `idleBroadcastSent` flips.
+   * Atomically persist a wait session. Called once when a fresh wait
+   * session opens.
    */
   writeWaitState(state: WaitState): Promise<void>;
 
   /**
    * Remove the wait session for `role`. Idempotent: a missing file is
-   * not an error. Called on terminal exits (ATTENTION / CONDITION_MET /
-   * TIMEOUT). RESUME exits intentionally do NOT call this.
+   * not an error. Called only on a terminal verdict (ATTENTION /
+   * CONDITION_MET / TIMEOUT) so a host-killed wait can be resumed.
    */
   clearWaitState(role: RoleId): Promise<void>;
 

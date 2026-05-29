@@ -66,9 +66,9 @@ In scope:
   other agents' reports).
 - Crisis paths: build broken, test failure, FORBIDDEN exit code,
   stale manifest, idle.
-- Wait verdicts (ATTENTION / CONDITION_MET / RESUME / TIMEOUT) and
-  when to use `wait --for task-assigned` (the auto-broadcast that
-  tells task-board owners "I am free, give me work").
+- Wait verdicts (ATTENTION / CONDITION_MET / TIMEOUT — one blocking
+  call, no token cost) and when to use `wait --for task-assigned` (the
+  auto-broadcast that tells task-board owners "I am free, give me work").
 - Deliverables as gates: file-kind deliverables refuse the `Done`
   transition until the path exists on disk. `--force-incomplete` is
   legitimate only when paired with an explicit waiver (worklog or

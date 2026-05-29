@@ -291,10 +291,14 @@ Shared-state editing (ownership-gated; --file must live under state/):
 Keepalive (agent, requires GOJAJA_SESSION):
   wait [<role>] [--until <ISO> | --in <duration>]
                 [--for <condition>] [--poll-interval <duration>] [--json]
-      Sleeps in chunks until either new attention arrives, the
-      condition you named fires, or the deadline passes.
+      Parks the agent in ONE blocking call (no token cost) until new
+      attention arrives, the named condition fires, or the deadline
+      passes. It polls the event stream internally every --poll-interval
+      (default 30s) — that is an in-process check cadence, NOT a
+      re-invocation interval.
 
-      Deadline (pick one; default is --in 10m):
+      Deadline (optional; omit BOTH to wait indefinitely until an event
+      or a host kill — the agent then re-runs to resume):
         --until 2026-05-28T15:00:00Z
         --in 30s | 10m | 4h | 1d
 
@@ -311,13 +315,15 @@ Keepalive (agent, requires GOJAJA_SESSION):
       Exit verdicts (each prints "Next: ..." with the command to run):
         ATTENTION       new events arrived; run plan.
         CONDITION_MET   your condition fired; run plan.
-        RESUME          chunk timed out, deadline still in the future;
-                        re-run the printed wait command.
-        TIMEOUT         deadline reached; end the turn or take initiative.
+        TIMEOUT         finite deadline reached; end the turn or take
+                        initiative. (Never fires for an indefinite wait.)
 
-      The chunked polling lets a long wait survive a short host shell
-      timeout: each chunk is one process, the next process resumes from
-      disk state.
+      If the host harness kills the blocking call before any verdict
+      prints, just re-run 'gojaja wait' with NO deadline flags — it
+      resumes the in-progress wait (same deadline + condition) from the
+      on-disk session. Prefer one long block over many short re-runs
+      (each re-run costs the agent a turn); a practical ceiling is ~5
+      resumes before ending the turn.
 
 Monitoring (you, the human scheduler):
   watch [--port <n>] [--host <addr>] [--no-open]
@@ -472,8 +478,11 @@ export const COMMAND_HELP: Record<string, string> = {
 
   wait: `  gojaja wait [<role>] [--until <iso> | --in <duration>] [--for <condition>]
               [--poll-interval <duration>] [--json]
-      Idle keepalive: sleeps in chunks until new attention, the named
-      condition, or the deadline. Each exit prints the next command.`,
+      Idle keepalive: ONE blocking call (no token cost) that polls
+      internally until new attention, the named condition, or the
+      deadline (TIMEOUT). Omit --in/--until to wait indefinitely. If the
+      host kills it, re-run 'gojaja wait' (no deadline flags) to resume;
+      cap at ~5 resumes, then end the turn.`,
 
   watch: `  gojaja watch [--port <n>] [--host <addr>] [--no-open]
       Start a local, read-only web dashboard (roles, task board, RFCs,

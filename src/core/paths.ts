@@ -57,16 +57,14 @@ export function worklogEntryPath(role: string, eventId: string): string {
 }
 
 /**
- * Wait session state. Persists across resumed `wait` invocations:
- *   - Stores deadline + condition + bookkeeping for the current session.
+ * Wait session state:
+ *   - Stores deadline + condition + bookkeeping for the current session,
+ *     so a `wait` re-invoked with no deadline flags can resume the same
+ *     deadline after the host killed the prior blocking call.
  *   - De-duplicates the idle worklog broadcast emitted by
- *     `--for task-assigned` (we want exactly one broadcast per session,
- *     not one per chunk).
+ *     `--for task-assigned` (exactly one broadcast per session).
  *
- * Cleared on terminal exits (ATTENTION / CONDITION_MET / TIMEOUT);
- * kept across RESUME exits. Correctness does not depend on this file:
- * the agent carries the deadline on the command line, so loss merely
- * causes a duplicated idle worklog.
+ * Cleared on a terminal verdict (ATTENTION / CONDITION_MET / TIMEOUT).
  */
 export function waitStatePath(role: string): string {
   return path.posix.join(Paths.pendingDir, role, "wait.json");

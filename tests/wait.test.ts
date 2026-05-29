@@ -77,7 +77,7 @@ describe("gojaja wait (PR8i)", () => {
     await fsp.rm(ctx.root, { recursive: true, force: true });
   });
 
-  // ---------- deadline / RESUME basics ----------
+  // ---------- deadline / blocking basics ----------
 
   it("--in 1s --for attention with no events → TIMEOUT, wait.json cleared", async () => {
     const cap = captureStdio();
@@ -97,7 +97,7 @@ describe("gojaja wait (PR8i)", () => {
   it("--in 2s with mid-sleep event from another role → ATTENTION, wait.json cleared", async () => {
     const cap = captureStdio();
     try {
-      const t = runWait(args("TL", { in: "2s", "poll-interval": "3s", root: ctx.root }));
+      const t = runWait(args("TL", { in: "2s", "poll-interval": "200ms", root: ctx.root }));
       setTimeout(() => {
         void ctx.store.publishReport({ from: "PM", to: "TL", message: "ping" });
       }, 200);
@@ -142,36 +142,71 @@ describe("gojaja wait (PR8i)", () => {
     }
   });
 
-  it("RESUME → RESUME → TIMEOUT across chunked invocations; wait.json persists then clears", async () => {
+  it("a single call BLOCKS to the deadline then TIMEOUT (no RESUME); wait.json cleared", async () => {
     const cap = captureStdio();
     try {
-      const deadlineMs = Date.now() + 3000;
-      const deadlineIso = new Date(deadlineMs).toISOString();
-      // First chunk — short poll interval forces RESUME.
-      let code = await runWait(
-        args("TL", { until: deadlineIso, "poll-interval": "500ms", root: ctx.root }),
+      const before = Date.now();
+      const code = await runWait(
+        args("TL", { in: "1s", "poll-interval": "200ms", root: ctx.root }),
       );
+      const elapsed = Date.now() - before;
       expect(code).toBe(0);
-      expect(cap.stdout).toContain("RESUME");
-      expect(await exists(waitJsonPath(ctx.root, "TL"))).toBe(true);
-      const stdoutAfterFirst = cap.stdout;
+      expect(cap.stdout).toContain("TIMEOUT");
+      // The wait blocks for the whole deadline in one call — it does NOT
+      // exit-and-resume after a single poll interval.
+      expect(cap.stdout).not.toContain("RESUME");
+      expect(elapsed).toBeGreaterThanOrEqual(900);
+      expect(await exists(waitJsonPath(ctx.root, "TL"))).toBe(false);
+    } finally {
+      cap.release();
+    }
+  });
 
-      // Second chunk — same deadline still in future, no events.
-      code = await runWait(
-        args("TL", { until: deadlineIso, "poll-interval": "500ms", root: ctx.root }),
-      );
+  it("no --in/--until → INDEFINITE wait: never TIMEOUTs, wakes on an event", async () => {
+    const cap = captureStdio();
+    try {
+      // Bare wait (no deadline) blocks indefinitely; only an event ends
+      // it. Inject a report mid-block and confirm ATTENTION (not TIMEOUT).
+      const t = runWait(args("TL", { "poll-interval": "200ms", root: ctx.root }));
+      // Session on disk should record deadline=null while blocked.
+      await new Promise((r) => setTimeout(r, 250));
+      const ws = JSON.parse(
+        await fsp.readFile(waitJsonPath(ctx.root, "TL"), "utf8"),
+      ) as { deadline: string | null };
+      expect(ws.deadline).toBeNull();
+      void ctx.store.publishReport({ from: "PM", to: "TL", message: "ping" });
+      const code = await t;
       expect(code).toBe(0);
-      expect(cap.stdout.slice(stdoutAfterFirst.length)).toContain("RESUME");
-      expect(await exists(waitJsonPath(ctx.root, "TL"))).toBe(true);
+      expect(cap.stdout).toContain("ATTENTION");
+      expect(cap.stdout).not.toContain("TIMEOUT");
+      expect(await exists(waitJsonPath(ctx.root, "TL"))).toBe(false);
+    } finally {
+      cap.release();
+    }
+  });
 
-      // Sleep past the deadline; next chunk should TIMEOUT.
-      await new Promise((r) => setTimeout(r, Math.max(0, deadlineMs - Date.now()) + 200));
-      const beforeThird = cap.stdout;
-      code = await runWait(
-        args("TL", { until: deadlineIso, "poll-interval": "500ms", root: ctx.root }),
-      );
+  it("re-invoking with NO deadline flags resumes the in-progress wait (host-kill recovery)", async () => {
+    const cap = captureStdio();
+    try {
+      // Simulate a wait the host killed mid-block: a live session on
+      // disk that was never cleared.
+      const deadlineIso = new Date(Date.now() + 1000).toISOString();
+      await ctx.store.writeWaitState({
+        role: "TL",
+        deadline: deadlineIso,
+        for: { kind: "attention" },
+        startedAt: new Date().toISOString(),
+        ackedThroughAtStart: "",
+        idleBroadcastSent: false,
+      });
+      const before = Date.now();
+      const code = await runWait(args("TL", { "poll-interval": "200ms", root: ctx.root }));
+      const elapsed = Date.now() - before;
       expect(code).toBe(0);
-      expect(cap.stdout.slice(beforeThird.length)).toContain("TIMEOUT");
+      expect(cap.stdout).toContain("TIMEOUT");
+      // It resumed the ~1s on-disk deadline, NOT a fresh default 10m wait
+      // (which would block far longer).
+      expect(elapsed).toBeLessThan(4000);
       expect(await exists(waitJsonPath(ctx.root, "TL"))).toBe(false);
     } finally {
       cap.release();
@@ -180,31 +215,30 @@ describe("gojaja wait (PR8i)", () => {
 
   // ---------- --for task-assigned idle broadcast ----------
 
-  it("--for task-assigned emits exactly one idle WORKLOG across RESUMEs", async () => {
+  it("--for task-assigned broadcasts the idle worklog once, and not again on resume", async () => {
     const cap = captureStdio();
     try {
-      const deadlineMs = Date.now() + 2500;
-      const deadlineIso = new Date(deadlineMs).toISOString();
-      // First chunk: writes wait.json + broadcasts idle worklog.
+      // Fresh wait: broadcasts the idle worklog once, blocks ~1s, TIMEOUT.
       await runWait(
         args("TL", {
-          until: deadlineIso,
+          in: "1s",
           for: "task-assigned",
-          "poll-interval": "300ms",
+          "poll-interval": "200ms",
           root: ctx.root,
         }),
       );
-      expect(cap.stdout).toContain("RESUME");
 
-      // Second chunk: should NOT re-broadcast.
-      await runWait(
-        args("TL", {
-          until: deadlineIso,
-          for: "task-assigned",
-          "poll-interval": "300ms",
-          root: ctx.root,
-        }),
-      );
+      // Simulate a killed-then-resumed wait: a live session already
+      // flagged idleBroadcastSent. A no-arg resume must NOT re-broadcast.
+      await ctx.store.writeWaitState({
+        role: "TL",
+        deadline: new Date(Date.now() + 800).toISOString(),
+        for: { kind: "task-assigned" },
+        startedAt: new Date().toISOString(),
+        ackedThroughAtStart: "",
+        idleBroadcastSent: true,
+      });
+      await runWait(args("TL", { "poll-interval": "200ms", root: ctx.root }));
 
       const events = (await ctx.store.listEventsAfter("")) as Event[];
       const idleWorklogs = events.filter(
@@ -229,7 +263,7 @@ describe("gojaja wait (PR8i)", () => {
         args("TL", {
           until: deadlineIso,
           for: "task-assigned",
-          "poll-interval": "3s",
+          "poll-interval": "200ms",
           root: ctx.root,
         }),
       );
@@ -286,7 +320,7 @@ describe("gojaja wait (PR8i)", () => {
         args("TL", {
           in: "3s",
           for: `rfc-decided:${rfc2.id}`,
-          "poll-interval": "3s",
+          "poll-interval": "200ms",
           root: ctx.root,
         }),
       );
@@ -365,7 +399,7 @@ describe("gojaja wait (PR8i)", () => {
         args("TL", {
           in: "2s",
           for: `rfc-acked:${rfc.id}`,
-          "poll-interval": "2s",
+          "poll-interval": "200ms",
           root: ctx.root,
         }),
       );
@@ -391,7 +425,7 @@ describe("gojaja wait (PR8i)", () => {
         args("TL", {
           in: "2s",
           for: "report-from:PM",
-          "poll-interval": "2s",
+          "poll-interval": "200ms",
           root: ctx.root,
         }),
       );
@@ -498,21 +532,24 @@ describe("gojaja wait (PR8i)", () => {
     }
   });
 
-  it("RESUME → ATTENTION across chunks does not double-clear", async () => {
+  it("a resumed wait still detects attention mid-block and clears the session", async () => {
     const cap = captureStdio();
     try {
-      const deadlineMs = Date.now() + 4000;
-      const deadlineIso = new Date(deadlineMs).toISOString();
-      // First chunk RESUME.
-      await runWait(
-        args("TL", { until: deadlineIso, "poll-interval": "300ms", root: ctx.root }),
-      );
-      expect(await exists(waitJsonPath(ctx.root, "TL"))).toBe(true);
-      // Inject before next chunk.
-      await ctx.store.publishReport({ from: "PM", to: "TL", message: "go" });
-      await runWait(
-        args("TL", { until: deadlineIso, "poll-interval": "300ms", root: ctx.root }),
-      );
+      // Live session on disk (as if the host killed the prior call).
+      await ctx.store.writeWaitState({
+        role: "TL",
+        deadline: new Date(Date.now() + 2000).toISOString(),
+        for: { kind: "attention" },
+        startedAt: new Date().toISOString(),
+        ackedThroughAtStart: "",
+        idleBroadcastSent: false,
+      });
+      const t = runWait(args("TL", { "poll-interval": "200ms", root: ctx.root }));
+      setTimeout(() => {
+        void ctx.store.publishReport({ from: "PM", to: "TL", message: "go" });
+      }, 200);
+      const code = await t;
+      expect(code).toBe(0);
       expect(cap.stdout).toContain("ATTENTION");
       expect(await exists(waitJsonPath(ctx.root, "TL"))).toBe(false);
     } finally {

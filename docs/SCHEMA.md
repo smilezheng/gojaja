@@ -431,14 +431,15 @@ via `gojaja rfc show <id>`.
 
 ## `comms/pending/<role>/wait.json`
 
-Session record for `gojaja wait`. Written atomically on the first
-chunk of a fresh wait session; kept across RESUME re-invocations;
-cleared on terminal exits (ATTENTION / CONDITION_MET / TIMEOUT).
+Session record for `gojaja wait`. Written atomically when a fresh wait
+session opens; cleared on a terminal verdict (ATTENTION /
+CONDITION_MET / TIMEOUT). It survives a host-killed call so a `wait`
+re-invoked with no deadline flags can resume the same deadline.
 
 ```jsonc
 {
   "role": "Backend",
-  "deadline": "2026-05-28T15:00:00Z",
+  "deadline": "2026-05-28T15:00:00Z", // ISO instant, or null = indefinite
   "for": { "kind": "task-assigned" },
   "startedAt": "2026-05-28T14:00:00Z",
   "ackedThroughAtStart": "01HZ...",
@@ -451,12 +452,13 @@ cleared on terminal exits (ATTENTION / CONDITION_MET / TIMEOUT).
   carries an RFC id / role id / event ref where applicable.
 - `idleBroadcastSent` is true only after the framework has emitted the
   "I am idle" worklog for a `--for task-assigned` wait. The flag exists
-  to make that broadcast one-shot across chunked invocations.
+  to make that broadcast one-shot across a host-kill resume.
 
-Correctness does not depend on this file: the deadline is also on the
-agent's command line. Losing the file at worst causes one duplicate
-idle worklog. External observers (e.g. the planned `gojaja doctor`)
-read it to list "who is waiting on what and until when".
+If the file is lost, a `wait` re-invoked with no deadline flags simply
+starts a fresh default wait instead of resuming, and `--for
+task-assigned` may broadcast one extra idle worklog. External observers
+(e.g. the planned `gojaja doctor`) read it to list "who is waiting on
+what and until when".
 
 ## `comms/heartbeats/<role>.json` (planned)
 

@@ -194,7 +194,7 @@ v2 cleanly separates:
 - **`ack`** — fast, atomic; only touches the cursor.
 - **`wait`** — pure keepalive, deadline-driven, resumable.
 
-### Why deadline-driven instead of block / exit modes
+### Why one blocking primitive instead of block / exit modes
 
 An earlier design exposed a `--mode block | exit` dichotomy: block
 slept inside the same shell process; exit dropped a `.wait` sentinel
@@ -205,37 +205,48 @@ generic shells can sleep through minutes without complaint. The agent
 had to know which mode to use, and the runtime body had to be
 target-specific.
 
-The current design collapses both into one primitive. Every `wait`
+The current design is one blocking primitive. A single `wait`
 invocation:
 
-1. Resolves a deadline (`--until <ISO>` or `--in <duration>`).
-2. Sleeps at most `min(deadline - now, --poll-interval)` (default
-   30 s) and checks for events satisfying a `--for` condition.
-3. Exits with one of four verdicts: ATTENTION (any new event for the
-   role), CONDITION_MET (the specific thing fired), RESUME (chunk
-   over but deadline still in the future), TIMEOUT (deadline reached).
+1. Resolves a deadline: `--until <ISO>`, `--in <duration>`, or — with
+   neither flag — **indefinite** (`deadline: null`; blocks until an
+   event/condition or a host kill). With no flag and a session already
+   on disk, it instead resumes that session's deadline.
+2. **Blocks**, re-checking the event stream every `--poll-interval`
+   (default 30 s, an in-process cadence) and sleeping in between, until
+   it can return a verdict.
+3. Returns ATTENTION (a new event for the role) or CONDITION_MET (the
+   `--for` thing fired); a finite wait also returns TIMEOUT at its
+   deadline. An indefinite wait never times out.
 
-RESUME is the recovery mechanism: the next chunk is just another
-`wait` invocation pointing at the same deadline. Host kills the
-shell mid-chunk? The next chunk reads the same deadline off the
-command line and continues. Disk session record at
-`comms/pending/<role>/wait.json` makes the `--for task-assigned`
-idle worklog one-shot across resumes, but the wait itself does not
-depend on the file — losing it at worst causes one duplicate worklog.
+The key property: **one `wait` is one tool call for the entire wait**,
+so a parked agent burns no LLM turns / tokens while idle — that was the
+whole point. The earlier shape mistakenly exited after a single
+poll-interval ("RESUME") and made the agent re-invoke every interval,
+which reintroduced a per-poll LLM turn and defeated the token savings.
 
-This unifies the host targets: Cursor's runtime body pins a short
-`--poll-interval 30s` so each chunk fits inside the host shell
-timeout; other hosts use the default and a 10-minute wait collapses
-into a single sleep. Same command, no per-host conditionals.
+`--poll-interval` is therefore *only* a detection-latency knob (how
+soon a parked wait notices a new event), not a re-invocation interval.
+It is uniform across hosts — no per-host `--poll-interval` tuning.
 
-**User-cancel is intentionally not framework-handled.** A host's
-SIGTERM / SIGINT looks identical to a host-timeout from inside the
-shell process, and inventing a sidechannel `wait-cancel <role>`
-verb would add a CLI surface for a problem the host already solves
-(end the chat, kill the shell). If a user wants to interrupt a
-chunked wait early, they end the chat / kill the shell themselves;
-the agent will not auto-resume because the next user message
-implicitly redirects the runtime loop.
+**Resumption is for host kills only.** If the host harness kills the
+long-blocking call (its own tool-timeout), the agent re-runs
+`gojaja wait` with no deadline flags; that reads the in-progress
+deadline + condition back off `comms/pending/<role>/wait.json` and
+continues. The session record also makes the `--for task-assigned`
+idle worklog one-shot across such a resume.
+
+**The host kill is a useful signal, not just an interruption.** Its
+timing equals the host's per-tool-call timeout, so an agent that counts
+its own re-runs can wait as long as possible while keeping idle cost
+bounded: e.g. a ~10-min host timeout × a ~5-resume ceiling ≈ 50 min of
+waiting on ~5 turns; a ~3-min timeout ≈ 15 min. The CLI does not
+enforce this — it is guidance carried in the runtime body + handbook,
+because only the agent can see and count its own turns. An agent that
+trusts this can drop `--in`/`--until` entirely and just block
+indefinitely, letting events (or the host) decide when it wakes.
+User-cancel (ending the chat / killing the shell) needs no framework
+verb — the next user message redirects the loop anyway.
 
 ## Per-role manifest is a projection, not the source of truth
 

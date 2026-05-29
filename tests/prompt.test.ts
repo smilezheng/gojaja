@@ -103,21 +103,17 @@ describe("buildRuntime (role-free)", () => {
     expect(a.files).toEqual([]);
   });
 
-  it("PR8i: cursor body pins a short --poll-interval (chunked wait survives short host shell timeout)", () => {
-    const a = buildRuntime("cursor", ctx.root);
-    expect(a.body).toContain("gojaja wait --in 10m --poll-interval 30s");
-    // Removed flags from the pre-PR8i shape must not return as cargo
-    // text in any generated artifact.
-    expect(a.body).not.toContain("--mode exit");
-    expect(a.body).not.toContain("--mode block");
-  });
-
-  it("PR8i: non-cursor bodies use the simple `wait --in 10m`", () => {
-    for (const t of ["agents", "claude", "generic"] as const) {
+  it("every target recommends the uniform blocking `gojaja wait` (no per-host --poll-interval pin)", () => {
+    // wait now blocks internally for the whole deadline, so there is no
+    // need to pin a short --poll-interval per host. The recommendation
+    // is identical everywhere, and removed legacy flags must not return.
+    for (const t of ["agents", "claude", "cursor", "generic"] as const) {
       const a = buildRuntime(t, ctx.root);
-      expect(a.body).toContain("gojaja wait --in 10m");
+      expect(a.body).toContain("gojaja wait");
       expect(a.body).not.toContain("--poll-interval");
       expect(a.body).not.toContain("--mode exit");
+      expect(a.body).not.toContain("--mode block");
+      expect(a.body).not.toContain("RESUME");
     }
   });
 

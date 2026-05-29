@@ -61,7 +61,7 @@ const KEY_TRIGGER_PHRASES: ReadonlyArray<RegExp> = [
 
   // Wait redesign + --for task-assigned
   /Idle \(no work\)[^\n]*wait --for task-assigned/,
-  /one-shot per\s+wait session/,
+  /auto-broadcasts an idle worklog once per\s+session/,
 ];
 
 describe("COLLABORATION_HANDBOOK", () => {
