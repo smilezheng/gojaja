@@ -174,7 +174,7 @@ gojaja activate Backend --target agents
 
 ## 你能直接做什么（不绑定角色）
 
-“你”指坐在终端前的人。只要当前 shell 里**没有** `GOJAJA_SESSION`，gojaja 就把你当成项目主人（内部记为 `SYSTEM`）。这个身份能做项目治理和铺垫，但**不能替任何角色发言**——发消息、评论、表决这类「说话」的动作必须先绑定角色（`claim`），否则就没有归属人。
+“你”指坐在终端前的人。只要当前 shell 里**没有** `GOJAJA_SESSION`，gojaja 就把你当成项目主人（内部记为 `SYSTEM`）。这个身份能做项目治理和铺垫，外加一些跟"开 RFC"对称的轻量动作；但**不能替任何角色站队**——`report` / `worklog` 这类发消息，以及 RFC 上的结构化表态（pre-decide / ack / object / decide）都是带立场的"说话"动作，必须先绑定角色（`claim`），否则就没有归属人。
 
 **不绑角色（你 = 项目主人 / SYSTEM）就能做：**
 
@@ -183,6 +183,7 @@ gojaja activate Backend --target agents
 | 建 / 删角色 | `role create`、`role delete`（删角色**必须**无 session） |
 | 派活、改任务 | `task new` / `task assign` / `task status`（SYSTEM 可越过归属和 creator 限制强行调整） |
 | 发起 RFC / 脑暴 | `rfc new`（`createdBy` 记为 SYSTEM，且不会被算进 voters，所以不会卡住 pre-decide 的表决） |
+| 在 RFC 上留普通讨论评论 | `rfc comment`（评论的 `from` 记为 SYSTEM，跟 `rfc new` 对称；结构化动作仍然要角色——见下表） |
 | 改共享状态 | `state edit`（SYSTEM 越过文件归属限制） |
 | 查看一切 | 除 `plan` 外的只读命令：`task show/list`、`rfc show/list`、`role show/list`、`handbook`、`-h`，以及看板 `watch` |
 | 安装 / 卸载 / 激活 | `init`、`reset`、`prompt`、`activate`、`claim` |
@@ -192,12 +193,12 @@ gojaja activate Backend --target agents
 | 要绑角色 | 命令 | 为什么 |
 | --- | --- | --- |
 | 发消息 | `report`（定向）、`worklog`（广播） | 消息要能归属到某个角色 |
-| 参与 RFC | `rfc comment` / `add-option` / `predecide` / `ack` / `object` / `decide` / `revise` / `edit` | 意见和表决必须有发言人 |
+| 在 RFC 上站队 | `add-option` / `pre-decide` / `ack` / `object` / `decide` / `revise` / `edit` | 这些都带立场，ACK 闸门统计的是角色名，不是匿名票 |
 | 跑轮次 | `plan`、`ack`、`wait`、`release` | 这些是角色 agent 的日常循环 |
 
-所以直接回答常见疑问：**没绑角色时，你不能以「人」的身份在群里发消息、评论、投票**——这些动作缺了角色就没有归属。你能做的是「项目主人」那一栏：开角色、压任务、抛 RFC / 脑暴、改状态、必要时强改任务状态。如果你确实想作为一个「人类参与者」加入讨论，给自己也建并 `claim` 一个角色（比如 `Owner` 或 `Human`），之后就能像普通 agent 一样 `report` / `comment` / `decide`。
+所以直接回答常见疑问：**没绑角色时，你不能以「人」的身份在群里发消息、不能在 RFC 上站队**——这些动作缺了角色就没有归属。普通的 RFC 讨论评论是个例外，专门留给开 RFC 的人在自己的 RFC 上补充上下文。更大的杠杆仍然在「项目主人」那一栏：开角色、压任务、抛 RFC / 脑暴、改状态、必要时强改任务状态。如果你想作为一个完整的「人类参与者」加入讨论（投票、ack / object、decide），给自己也建并 `claim` 一个角色（比如 `Owner` 或 `Human`），之后就能像普通 agent 一样什么都做。
 
-> 脑暴的「发起」可以不绑角色（SYSTEM 身份），但后续的 `comment` / `add-option` / `decide` 仍然各自需要角色 session。
+> 「发起脑暴」和「在脑暴上留普通评论」都可以不绑角色（SYSTEM 身份）。后续的结构化动作（`add-option` / `pre-decide` / `ack` / `object` / `decide` / `revise` / `edit`）仍然各自需要角色 session。
 
 ---
 

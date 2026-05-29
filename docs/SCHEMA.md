@@ -602,6 +602,15 @@ pre-decide` (kind=pre-decision; decider only), `rfc ack` (kind=ack),
 emit `RFC_COMMENT` with `payload.kind`. Comments on closed RFCs
 (`accepted` / `rejected` / `superseded`) are refused.
 
+The `role` field on a regular discussion comment may also be the
+literal `"SYSTEM"` — written when a human runs `gojaja rfc comment`
+without `GOJAJA_SESSION`, symmetric with `rfc new`'s SYSTEM path.
+Structured kinds (`pre-decision` / `ack` / `object`) reject
+`"SYSTEM"` because they carry a position and the ACK gate is computed
+over `voters ∪ deciders` (which SYSTEM is never in). SYSTEM also
+never gets a `cursors/<role>/rfc-<id>.json` read marker — it has no
+manifest to track.
+
 **ACK gate (`decideRfc`)**: when an active pre-decision exists (latest
 `kind: "pre-decision"` comment with no later `RFC_OPTION_ADDED`
 event), every role in `(voters ∪ deciders) − {pre-decider}` must have

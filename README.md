@@ -172,7 +172,7 @@ These files are project content. The CLI does not create them; you and your agen
 
 ## What you can do without a role (no session)
 
-"You" here means the human at the terminal. Whenever the current shell has **no** `GOJAJA_SESSION`, gojaja treats you as the project owner (recorded internally as `SYSTEM`). That identity can do governance and seeding, but it **cannot speak as any role** — sending messages, commenting, and voting are "speech acts" that must be attributable to a role, so they require a `claim` first.
+"You" here means the human at the terminal. Whenever the current shell has **no** `GOJAJA_SESSION`, gojaja treats you as the project owner (recorded internally as `SYSTEM`). That identity can do governance and seeding, plus a couple of light-touch RFC moves that are symmetric with opening one. What it **cannot** do is take a position on a decision: structured RFC votes (pre-decide / ack / object / decide) and direct messages (`report` / `worklog`) are speech acts attributable to a role, so they require a `claim` first.
 
 **No role needed (you = project owner / SYSTEM):**
 
@@ -181,6 +181,7 @@ These files are project content. The CLI does not create them; you and your agen
 | Create / delete roles | `role create`, `role delete` (deletion **must** have no session) |
 | Push and manage work | `task new` / `task assign` / `task status` (SYSTEM overrides ownership + creator checks) |
 | Open an RFC / brainstorm | `rfc new` (`createdBy` is recorded as SYSTEM and is **not** added to voters, so it never stalls the pre-decide ack gate) |
+| Leave plain discussion comments on an RFC | `rfc comment` (recorded as `from: SYSTEM`; symmetric with `rfc new`. Structured RFC moves still need a role — see below) |
 | Edit shared state | `state edit` (SYSTEM bypasses file-ownership checks) |
 | Read anything | every read-only command except `plan`: `task show/list`, `rfc show/list`, `role show/list`, `handbook`, `-h`, and the `watch` dashboard |
 | Install / uninstall / activate | `init`, `reset`, `prompt`, `activate`, `claim` |
@@ -190,12 +191,12 @@ These files are project content. The CLI does not create them; you and your agen
 | Needs a role | Command | Why |
 | --- | --- | --- |
 | Send messages | `report` (directed), `worklog` (broadcast) | a message must belong to a role |
-| Participate in an RFC | `rfc comment` / `add-option` / `predecide` / `ack` / `object` / `decide` / `revise` / `edit` | opinions and votes need a speaker |
+| Take a position on an RFC | `add-option` / `pre-decide` / `ack` / `object` / `decide` / `revise` / `edit` | each registers a stance; the ACK gate counts roles, not anonymous votes |
 | Run the loop | `plan`, `ack`, `wait`, `release` | these are a role agent's per-turn cycle |
 
-So, to answer the common question directly: **without a role you cannot post, comment, or vote as a "human" in the channel** — those acts have no owner without a role. Your lever is the project-owner column: create roles, push tasks, throw out an RFC/brainstorm, edit state, and force a task status when needed. If you genuinely want to join the discussion as a human participant, create and `claim` a role for yourself (e.g. `Owner` or `Human`); then you can `report` / `comment` / `decide` like any other agent.
+So, to answer the common question directly: **without a role you cannot send messages or take a position on an RFC as a "human" in the channel** — those acts have no owner without a role. Plain RFC comments are an exception so a human can leave context on an RFC they opened. Your bigger lever is still the project-owner column: create roles, push tasks, throw out an RFC/brainstorm, edit state, and force a task status when needed. If you want to participate as a full discussant (vote, ack/object, decide), create and `claim` a role for yourself (e.g. `Owner` or `Human`); then you can do everything any other agent can.
 
-> Opening a brainstorm can be done without a role (as SYSTEM), but the follow-up `comment` / `add-option` / `decide` still each need a role session.
+> Opening a brainstorm AND leaving plain comments on it can be done without a role (as SYSTEM). The structured follow-ups (`add-option` / `pre-decide` / `ack` / `object` / `decide` / `revise` / `edit`) still each need a role session.
 
 ---
 
