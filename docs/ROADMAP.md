@@ -486,8 +486,56 @@ After PR10 we tag `v2.0.0`.
 - **Multi-machine safety review.** Verify rename / lock semantics under
   the storage backends people actually use (local disk, NFSv4, Dropbox,
   iCloud). Mark unsupported configurations explicitly.
-- **Windows support.** Test rename-onto-open and PID liveness on
-  Windows; gate on green CI before claiming support.
+- **Windows support.** Not an architectural change — the `Store`
+  abstraction and one-file-per-record design are already
+  Windows-friendly. This is an adapt-and-verify effort, not a rewrite.
+  The bounded work is small; the time sink is shaking the test suite
+  out on a real Windows CI.
+
+  **Step 0 (do this before writing any code):** run the existing suite
+  on a Windows runner as-is and catalogue what actually fails. Several
+  items below may already pass; don't fix what isn't broken.
+
+  Code changes, roughly in priority order:
+  - [ ] **Atomic write robustness** (`src/core/atomic.ts`) — the
+    load-bearing item. `write-tmp + rename` can hit intermittent
+    `EPERM` / `EBUSY` on Windows when the destination is briefly held
+    open by another process (antivirus, a concurrent reader). Add a
+    short bounded retry-with-backoff around `fsp.rename` for those
+    codes. (~½–1 day.)
+  - [ ] **`claim --eval` shell variants** (`src/cli/commands/claim.ts`)
+    — it currently emits bash `export GOJAJA_SESSION=...`, and the
+    activation snippet uses `eval "$(...)"`; neither is valid in
+    PowerShell or cmd. Offer per-shell output (PowerShell
+    `$env:GOJAJA_SESSION=...`, cmd `set ...`). Largely de-risked already
+    by the `--session <id>` flag, so this is UX polish, not a blocker.
+    (~½ day.)
+  - [ ] **File-lock verification** (`src/core/file-lock.ts`) — O_EXCL,
+    the `link(2)` conditional takeover, and `process.kill(pid, 0)`
+    liveness should all work on NTFS, but confirm behaviour (especially
+    the rename-aside / link-back dance) on Windows. Likely zero code
+    change; mostly a test pass.
+  - [ ] **Path handling sweep** — relative paths are stored POSIX
+    (forward slash) and absolute paths use platform `path`; Node accepts
+    `/` on Windows and `resolveInside`'s `..` guard still holds. Audit
+    for any place that compares or splits on `/` assuming it equals the
+    OS separator.
+  - [ ] **Already handled, just confirm:** clipboard (`clip.exe`),
+    `gojaja watch` browser open (`cmd /c start`), the `init` git probe
+    (`execFile("git", ...)`), and the npm-generated `gojaja.cmd` bin
+    shim.
+
+  Gating:
+  - [ ] **Windows CI green.** Add a Windows job to CI and get all tests
+    passing there. This is where the unknowns live (temp-dir / newline /
+    file-occupancy timing assumptions); budget ~2–4 days of shakeout.
+  - [ ] Docs: drop the "macOS / Linux only" caveats in README (EN +
+    zh-CN) and DESIGN once CI is green; add any Windows-specific notes.
+
+  Rough total once Step 0 is done: ~1 week for a tested port, the CI
+  shakeout being the main variable. A "works on my machine, no
+  guarantees" local run is mostly possible today; the only real risk
+  there is the unretried `rename` above.
 - **Schema migrations engine.** Today's migrations directory is empty;
   add the runner, backup-before-migrate, and dry-run mode.
 
