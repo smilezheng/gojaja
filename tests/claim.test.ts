@@ -117,4 +117,116 @@ describe("gojaja claim — role registration gate", () => {
       cap2.release();
     }
   });
+
+  it("--session <id>: matches the live session → idempotent, re-exports the same id", async () => {
+    // First claim mints a session.
+    const s = await ctx.store.claimSession("PM", 60);
+    const captured = captureStdio();
+    try {
+      // Second claim with the matching session id — recovery path.
+      // Must NOT mint a new session, NOT emit a SESSION_CLAIMED /
+      // SESSION_TAKEOVER event, and the --eval output must export
+      // exactly the original id.
+      const code = await runClaim(
+        args("PM", { root: ctx.root, eval: true, session: s.sessionId }),
+      );
+      expect(code).toBe(0);
+      expect(captured.stdout).toBe(
+        `export GOJAJA_SESSION=${s.sessionId}\n`,
+      );
+      // Confirm no new SESSION_CLAIMED / SESSION_TAKEOVER event landed
+      // (recovery is a no-op on the audit stream).
+      const events = await ctx.store.listEventsAfter("");
+      const sessionEvents = events.filter(
+        (e) =>
+          e.type === "SESSION_CLAIMED" || e.type === "SESSION_TAKEOVER",
+      );
+      // Just the original CLAIMED, nothing else.
+      expect(sessionEvents).toHaveLength(1);
+      expect(sessionEvents[0].type).toBe("SESSION_CLAIMED");
+    } finally {
+      captured.release();
+    }
+  });
+
+  it("--session <id>: mismatch with a live session is REFUSED (does not silently take over)", async () => {
+    // Original claim mints a session.
+    await ctx.store.claimSession("PM", 60);
+    // A second window comes in with a DIFFERENT id, claiming "I'm
+    // the rightful owner". The store must refuse — this is exactly
+    // the situation where silent takeover would kill a peer.
+    const cap = captureStdio();
+    try {
+      await expect(
+        runClaim(
+          args("PM", {
+            root: ctx.root,
+            session: "01HBOGUSBOGUSBOGUSBOGUSBOG",
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "USAGE" });
+    } finally {
+      cap.release();
+    }
+  });
+
+  it("--session <id>: id pointing at an expired/missing session falls through to a fresh claim", async () => {
+    // No live session for PM. The recovery hint is harmless here —
+    // there is nothing alive to recover, so we mint a new one. This
+    // matches what an agent retrying after a long absence would
+    // naturally expect (a new id, not an error).
+    const cap = captureStdio();
+    try {
+      const code = await runClaim(
+        args("PM", {
+          root: ctx.root,
+          session: "01HBOGUSBOGUSBOGUSBOGUSBOG",
+          eval: true,
+        }),
+      );
+      expect(code).toBe(0);
+      // The exported id is NEW (not the bogus one we passed).
+      const m = cap.stdout.match(/^export GOJAJA_SESSION=([0-9A-Z]{26})\n$/);
+      expect(m).not.toBeNull();
+      expect(m![1]).not.toBe("01HBOGUSBOGUSBOGUSBOGUSBOG");
+    } finally {
+      cap.release();
+    }
+  });
+
+  it("--session and --force are mutually exclusive (USAGE)", async () => {
+    const cap = captureStdio();
+    try {
+      await expect(
+        runClaim(
+          args("PM", {
+            root: ctx.root,
+            session: "01HBOGUSBOGUSBOGUSBOGUSBOG",
+            force: true,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: "USAGE" });
+    } finally {
+      cap.release();
+    }
+  });
+
+  it("the live-peer error names the recovery path with `--session <id>` so agents see it", async () => {
+    // Empirically the most common claim failure is "agent lost
+    // GOJAJA_SESSION and tried to re-claim". The error must put the
+    // recovery path (re-export the previous id with --session) FIRST,
+    // ahead of the human-only --force path; otherwise agents collapse
+    // straight to "ask the user" and the human gets pinged for every
+    // context-loss.
+    await ctx.store.claimSession("PM", 60);
+    try {
+      await runClaim(args("PM", { root: ctx.root }));
+      throw new Error("expected to throw");
+    } catch (err) {
+      const msg = (err as Error).message;
+      expect(msg).toMatch(/--session/);
+      expect(msg).toMatch(/recover/i);
+      expect(msg).toMatch(/chat history/i);
+    }
+  });
 });

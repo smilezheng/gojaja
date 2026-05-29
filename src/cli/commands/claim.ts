@@ -13,7 +13,8 @@ export async function runClaim(args: ParsedArgs): Promise<number> {
   const role = args.positional[0];
   if (!role) {
     throw new UsageError(
-      "Usage: gojaja claim <role> [--ttl <seconds>] [--eval] [--json]",
+      "Usage: gojaja claim <role> [--ttl <seconds>] [--session <id>] " +
+        "[--force] [--eval] [--json]",
     );
   }
   const ttlRaw = optionalString(args.flags, "ttl");
@@ -24,8 +25,24 @@ export async function runClaim(args: ParsedArgs): Promise<number> {
   const force = boolFlag(args.flags, "force");
   const json = boolFlag(args.flags, "json");
   const evalMode = boolFlag(args.flags, "eval");
+  // `--session <id>` is the idempotent recovery path: an agent that
+  // lost its `GOJAJA_SESSION` env var (context-loss, fresh shell)
+  // passes the previous session id from chat history; if it matches
+  // the live session, the command refreshes that session's heartbeat
+  // and re-exports it. Mismatch with a live session refuses; expired
+  // / no-session falls through to a fresh claim.
+  const recoverSessionId = optionalString(args.flags, "session");
   if (evalMode && json) {
     throw new UsageError("--eval and --json cannot be combined.");
+  }
+  if (force && recoverSessionId !== undefined) {
+    // Surface the same invariant the store enforces, but as a
+    // friendlier USAGE at CLI level so the agent gets a clear
+    // message instead of an internal-looking one.
+    throw new UsageError(
+      "--force and --session are mutually exclusive. --force takes over " +
+        "another window; --session re-exports your own previous session.",
+    );
   }
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
 
@@ -40,7 +57,7 @@ export async function runClaim(args: ParsedArgs): Promise<number> {
       `Unknown role '${role}'. Create it first: gojaja role create ${role} "<title>"`,
     );
   }
-  const session = await store.claimSession(role, ttl, force);
+  const session = await store.claimSession(role, ttl, { force, recoverSessionId });
 
   if (evalMode) {
     // Step 4a: shell-eval-friendly output. Agent runs:

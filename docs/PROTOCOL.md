@@ -84,22 +84,38 @@ all implemented.
 
 ## Claim
 
-`gojaja claim <role> [--ttl <seconds>] [--eval] [--force]`
+`gojaja claim <role> [--ttl <seconds>] [--session <id>] [--eval] [--force]`
 
 - Refuses if an existing session for `<role>` has a heartbeat younger
-  than its `leaseTtlSeconds`. The agent should report this as a
-  configuration error, not retry blindly. The error message
-  deliberately does NOT mention `--force`; reflexively forcing
-  takeover would silently kill a peer window doing real work.
+  than its `leaseTtlSeconds`. The agent should NOT retry blindly. The
+  error message names two recovery paths in order of safety:
+  1. **Idempotent recovery via `--session <id>`** — see below.
+  2. Stop and ask the user (the previous window may still be alive).
+  The error deliberately does NOT advertise `--force`; reflexively
+  forcing takeover would silently kill a peer window doing real work.
+- **`--session <id>` is the idempotent recovery path.** If the agent
+  previously held this role's session and lost `GOJAJA_SESSION`
+  (context-loss / fresh shell / host restart), it passes the
+  previously-printed session id from chat history. If the id matches
+  the live session, the command refreshes the heartbeat and
+  re-exports the SAME id — no new session is minted, no
+  `SESSION_CLAIMED` / `SESSION_TAKEOVER` event is emitted. If the id
+  does NOT match a live session (mismatch or expired), the command
+  refuses with a clear error so an agent does not silently take over a
+  peer just by guessing an id. With no live session at all,
+  `--session <id>` falls through to a fresh claim (the id is
+  effectively a "previously-held" hint that turned out to be expired).
+  `--session` and `--force` are mutually exclusive.
 - If the existing session has missed its lease (heartbeat older than
   `leaseTtlSeconds`) the new claim takes over automatically — no
   `--force` needed.
 - `--eval` outputs a single shell line: `export GOJAJA_SESSION=<ulid>`.
   Intended use: `eval "$(gojaja claim PM --eval)"` to claim and
-  export in one step.
+  export in one step. Combined with `--session`, the same line is
+  printed but with the recovered (existing) id, not a new one.
 - With `--force`, takes over any existing session and emits a
   `SESSION_TAKEOVER` event. Use only when the previous window is known
-  dead.
+  dead. Human-only.
 - Returns JSON (with `--json`): `{ "status": "claimed", "session": {
   "role", "sessionId", "pid", "host", "startedAt", "heartbeatAt",
   "leaseTtlSeconds" } }`. With `--eval` it instead prints the single

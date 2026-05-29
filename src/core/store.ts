@@ -102,8 +102,23 @@ export interface Store {
    * Claim a role lease. Fails if a live (non-expired) session already exists.
    * If `force` is true and the existing session is stale, take it over and
    * emit SESSION_TAKEOVER.
+   *
+   * `recoverSessionId` is the idempotent-recovery path: if set, and it
+   * matches the existing live session's `sessionId`, no new session is
+   * minted — the existing record is returned as-is, heartbeat refreshed.
+   * This is what an agent that lost its `GOJAJA_SESSION` (context
+   * compaction, fresh shell, host restart) does to recover from chat
+   * history without taking over a peer. Mismatch with a live session
+   * still throws; mismatch with no live session falls through to
+   * normal claim (creates a new one). `force` and `recoverSessionId`
+   * are mutually exclusive — recovery and takeover are different
+   * actions.
    */
-  claimSession(role: string, ttlSeconds: number, force?: boolean): Promise<SessionInfo>;
+  claimSession(
+    role: string,
+    ttlSeconds: number,
+    options?: { force?: boolean; recoverSessionId?: string },
+  ): Promise<SessionInfo>;
 
   releaseSession(role: string, sessionId: string): Promise<void>;
 

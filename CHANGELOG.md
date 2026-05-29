@@ -8,6 +8,76 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### `gojaja claim --session <id>`: idempotent recovery from context-loss
+
+Empirically the second-most-common per-agent failure mode (after the
+"agent ends turn without `wait`" one): an agent loses `GOJAJA_SESSION`
+to context compaction or a fresh shell, retries `gojaja claim`,
+hits "Role 'X' is already claimed by a live session" (the live
+session is its own from earlier!), and gets stuck — it cannot use
+`--force` (red line for agents) and ends up bouncing the question
+back to the human. Hours of lease TTL get wasted on a problem the
+agent had all the information to solve, if only the CLI had given
+it a path.
+
+`gojaja claim` now accepts `--session <id>`, the idempotent
+recovery flag:
+
+- `claim <role> --session <id>` with the id matching the live
+  session → refreshes heartbeat and re-exports the SAME id; no new
+  session minted, no `SESSION_CLAIMED` / `SESSION_TAKEOVER` event
+  emitted (recovery is a no-op on the audit stream).
+- `--session <id>` with the id NOT matching the live session →
+  refuses with USAGE: `"id you supplied does NOT match — that
+  session was taken over or released. Stop and ask the user before
+  forcing anything."` Prevents an agent from silently taking over
+  a peer just by guessing.
+- `--session <id>` with no live session at all → falls through to a
+  fresh claim. The id is effectively a "previously-held hint" that
+  turned out to be expired; this matches what an agent retrying
+  after a long absence would naturally expect.
+- `--session` and `--force` are mutually exclusive (USAGE) — they
+  are different actions: recovery vs takeover.
+
+The "live peer" claim error is also rewritten to put the recovery
+path FIRST, ahead of the human-only takeover path:
+
+```
+Role 'X' is already claimed by a live session (sessionId 01..., heartbeat Ns ago).
+
+If you previously held THIS session and just lost `GOJAJA_SESSION`
+(context-loss / fresh shell), recover it without re-claiming:
+  1. Find `GOJAJA_SESSION=<ulid>` in your earlier `gojaja claim`
+     output (chat history).
+  2. Run `gojaja claim X --session <that-ulid> --eval`. If the id
+     matches the live session, this just re-exports it.
+
+If the previous window is genuinely dead AND the user has confirmed
+it, see `gojaja claim --help` for the human-only takeover path.
+
+Otherwise stop and ask the user — do NOT silently take over a peer.
+```
+
+The empirical pattern this targets: an agent reading the error and
+collapsing straight to "ask the user" because that was the only
+path the previous error spelled out. Recovery is now path #1, with
+a concrete pointer to chat history.
+
+Type changes: `Store.claimSession`'s third parameter widened from
+`force?: boolean` to `options?: { force?: boolean;
+recoverSessionId?: string }`. No existing call site passed `force:
+true` (verified — `Grep claimSession\(.*true` is empty), so the new
+shape is backward-compatible for every two-argument call.
+
+Tests in `tests/claim.test.ts` (5 new cases) cover: matching id is
+idempotent and emits no audit event; mismatch refuses; expired id
+falls through to fresh claim; `--session` + `--force` USAGE error;
+the live-peer error wording names `--session` and "recover" and
+"chat history". 385/385 pass.
+
+Updated `gojaja claim -h`, `gojaja claim --help` short summary,
+and `docs/PROTOCOL.md` Claim section.
+
 ### `gojaja report` accepts SYSTEM (no GOJAJA_SESSION) for project-owner directives
 
 The same SYSTEM-friendly path that `rfc new`, `rfc comment`,

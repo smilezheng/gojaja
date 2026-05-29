@@ -90,12 +90,19 @@ Setup (you, in your shell — runs once per project unless noted):
       markdown still has TBD sections.
 
 Session lifecycle (per agent window; agent or user runs this):
-  claim <role> [--ttl <s>] [--eval] [--force] [--json]
+  claim <role> [--ttl <s>] [--session <id>] [--eval] [--force] [--json]
       Acquire a session for <role> in this shell.
       Tip: 'eval "\$(gojaja claim <role> --eval)"' claims and exports
       GOJAJA_SESSION in a single step.
+      --session <id> is the recovery path: if you previously claimed
+      this role and lost GOJAJA_SESSION (context-loss / fresh shell),
+      pass the previous session id (visible in your earlier 'gojaja
+      claim' output). If it matches the live session, claim is
+      idempotent — same id is re-exported, no peer is taken over,
+      no new event is emitted. Mismatch with a live session refuses.
       --force is for humans only; agents seeing "already claimed by a
-      live session" should STOP and ask the user, not retry with --force.
+      live session" should try --session <id> first, otherwise STOP
+      and ask the user (do NOT retry with --force).
   release [<role>] [--json]
       Release the current session. After release, run 'unset GOJAJA_SESSION'
       in the same shell so subsequent commands don't try to authenticate
@@ -461,9 +468,12 @@ export const COMMAND_HELP: Record<string, string> = {
       Print (and auto-copy) the chat-paste snippet that binds <role> to
       one agent window. Never writes to disk.`,
 
-  claim: `  gojaja claim <role> [--ttl <seconds>] [--eval] [--force] [--json]
+  claim: `  gojaja claim <role> [--ttl <seconds>] [--session <id>] [--eval] [--force] [--json]
       Acquire a session for <role> in this shell (default lease 2h).
       'eval "$(gojaja claim <role> --eval)"' claims + exports in one step.
+      --session <id>: idempotent recovery — pass your previous session
+      id (from earlier chat output) to re-export the live session
+      without taking over a peer.
       --force is humans-only.`,
 
   release: `  gojaja release [<role>] [--json]

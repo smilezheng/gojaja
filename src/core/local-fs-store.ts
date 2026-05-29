@@ -903,11 +903,22 @@ export class LocalFsStore implements Store {
   async claimSession(
     role: string,
     ttlSeconds: number,
-    force = false,
+    options?: { force?: boolean; recoverSessionId?: string },
   ): Promise<SessionInfo> {
     validateRoleId(role);
     if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
       throw new UsageError(`Invalid TTL: ${ttlSeconds}`);
+    }
+    const force = options?.force ?? false;
+    const recoverSessionId = options?.recoverSessionId;
+    if (force && recoverSessionId !== undefined) {
+      // `force` is "I am taking over a stranger's session"; recovery
+      // is "this is MY session, I just lost the env var". They are
+      // mutually exclusive — passing both is a caller bug, not a
+      // policy choice we silently resolve.
+      throw new UsageError(
+        "claimSession: `force` and `recoverSessionId` are mutually exclusive.",
+      );
     }
     return this.withLock(`session-${role}`, async () => {
       const file = this.abs(rolePaths(role).sessionFile);
@@ -917,20 +928,66 @@ export class LocalFsStore implements Store {
         const heartbeatAge = now - Date.parse(existing.heartbeatAt);
         const stillAlive = heartbeatAge < existing.leaseTtlSeconds * 1000;
         if (stillAlive) {
-          // Step 4b: deliberately do NOT advertise `--force` here. LLM
-          // agents that see "pass --force to take over" will reflexively
-          // do so, and a live peer in another window is silently killed.
-          // The `--force` flag still works for humans who pass it
-          // explicitly (see `gojaja claim --help`).
+          // Idempotent recovery path: caller knows the live
+          // session's id (recovered from chat history after a
+          // context-loss), and just wants to re-export it without
+          // taking over a peer. We refresh the heartbeat (as any
+          // authenticated call would) and return the existing
+          // record unchanged. NO new session is minted; no
+          // SESSION_CLAIMED / SESSION_TAKEOVER event is emitted —
+          // nothing actually changed.
+          if (recoverSessionId !== undefined) {
+            if (recoverSessionId === existing.sessionId) {
+              const refreshed: SessionInfo = {
+                ...existing,
+                heartbeatAt: new Date().toISOString(),
+              };
+              await atomicWriteJson(file, refreshed);
+              return refreshed;
+            }
+            throw new UsageError(
+              `Role '${role}' is held by a different live session ` +
+                `(yours: ${recoverSessionId}; live: ${existing.sessionId}, ` +
+                `heartbeat ${Math.floor(heartbeatAge / 1000)}s ago). ` +
+                `The id you supplied does NOT match — that session was ` +
+                `taken over or released. Stop and ask the user before ` +
+                `forcing anything.`,
+            );
+          }
+          // No recovery hint and no force. Empirically agents that
+          // hit this error often DID hold the session before a
+          // context-loss; spell out the recovery path so they can
+          // try `--session <id>` first instead of escalating to
+          // --force. We still do not advertise --force itself —
+          // that escalation is a human action, gated on the user
+          // confirming the previous window is dead.
           throw new UsageError(
             `Role '${role}' is already claimed by a live session ` +
-              `(heartbeat ${Math.floor(heartbeatAge / 1000)}s ago). ` +
-              `If you believe the previous window is genuinely dead, ` +
-              `see \`gojaja claim --help\`. Otherwise stop and ask the ` +
-              `user — do NOT silently take over a peer.`,
+              `(sessionId ${existing.sessionId}, heartbeat ` +
+              `${Math.floor(heartbeatAge / 1000)}s ago).\n` +
+              `\n` +
+              `If you previously held THIS session and just lost ` +
+              `\`GOJAJA_SESSION\` (context-loss / fresh shell), recover ` +
+              `it without re-claiming:\n` +
+              `  1. Find \`GOJAJA_SESSION=<ulid>\` in your earlier ` +
+              `\`gojaja claim\` output (chat history).\n` +
+              `  2. Run \`gojaja claim ${role} --session <that-ulid> --eval\`. ` +
+              `If the id matches the live session, this just re-exports it.\n` +
+              `\n` +
+              `If the previous window is genuinely dead AND the user has ` +
+              `confirmed it, see \`gojaja claim --help\` for the ` +
+              `human-only takeover path.\n` +
+              `\n` +
+              `Otherwise stop and ask the user — do NOT silently take ` +
+              `over a peer.`,
           );
         }
       }
+      // No live session, or stale + force: mint a fresh one.
+      // recoverSessionId is silently ignored here — there is nothing
+      // alive to recover, so falling through to a new session is the
+      // friendlier outcome (matches what an agent retrying after a
+      // long absence would expect).
       const session: SessionInfo = {
         role,
         sessionId: freshId(),
