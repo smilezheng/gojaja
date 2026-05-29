@@ -8,6 +8,7 @@ import {
   buildRuntime,
   writeArtifactFile,
 } from "../src/cli/prompts";
+import { runPrompt } from "../src/cli/commands/prompt";
 import {
   CLAUDE_MARKER_BEGIN,
   CLAUDE_MARKER_END,
@@ -196,6 +197,32 @@ describe("writeArtifactFile", () => {
     const a = buildRuntime("codex", ctx.root);
     expect(await writeArtifactFile(a.files[0])).toBe("wrote");
     expect(await writeArtifactFile(a.files[0])).toBe("unchanged");
+  });
+
+  it("prompt --write reports coexisting runtime files (duplicate-injection guard)", async () => {
+    // AGENTS.md is read by Cursor too, so installing codex (AGENTS.md)
+    // and cursor (.mdc) in one project means a Cursor window injects the
+    // block twice. `prompt --json` surfaces every installed runtime file
+    // so the CLI can warn; assert the detection sees both.
+    const cap = (() => {
+      let buf = "";
+      const orig = process.stdout.write.bind(process.stdout);
+      (process.stdout as unknown as { write: (c: string) => boolean }).write = (c: string) => {
+        buf += c;
+        return true;
+      };
+      return { drain: () => buf, release: () => { (process.stdout as unknown as { write: typeof orig }).write = orig; } };
+    })();
+    try {
+      await runPrompt({ command: "prompt", positional: [], flags: { target: "codex", write: true, json: true, root: ctx.root } });
+      await runPrompt({ command: "prompt", positional: [], flags: { target: "cursor", write: true, json: true, root: ctx.root } });
+      const lines = cap.drain().trim().split("\n");
+      const last = JSON.parse(lines[lines.length - 1]);
+      expect(last.installedRuntimeFiles).toContain("AGENTS.md");
+      expect(last.installedRuntimeFiles).toContain(".cursor/rules/gojaja-runtime.mdc");
+    } finally {
+      cap.release();
+    }
   });
 
   it("cursor --write creates the .cursor/rules file inside the project", async () => {

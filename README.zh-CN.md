@@ -89,7 +89,7 @@ gojaja role create TL       "Tech Lead"         --owns "state/architecture.md,do
 gojaja role create Backend  "Backend Engineer"  --owns "src/" --reports-to TL,PM --must-not-edit "src/config/secrets.ts"
 ```
 
-### 第 3 步 —— 给每种 agent 工具装一次 runtime
+### 第 3 步 —— 给你用到的 agent 工具装 runtime
 
 ```bash
 # Cursor：写到 .cursor/rules/gojaja-runtime.mdc
@@ -98,14 +98,21 @@ gojaja prompt --target cursor --write
 # Claude Code：在 CLAUDE.md 里插入（或更新）一段受管标记块
 gojaja prompt --target claude --write
 
-# Codex CLI：在 AGENTS.md（Codex 的项目级 system prompt）里 upsert 一个受管标记块
+# Codex CLI（以及大多数其它工具）：在 AGENTS.md 里 upsert 一段受管标记块
 gojaja prompt --target codex --write
 
 # 其它任何支持 shell 调用的 agent（只打印，不落盘）
 gojaja prompt --target generic
 ```
 
-**这一步要在开 agent 窗口之前做。** Cursor / Claude Code / Codex 这类宿主只在窗口首次打开时把规则文件注入 system prompt；如果窗口已经开着，你再跑 `prompt --write`，新规则对那个窗口不生效，必须重启。CLI 每次成功写入都会打印 IMPORTANT 提示。
+**装最小集就行，别一股脑全装。** 到 2026 年，`AGENTS.md` 已经是跨工具标准：Codex、Cursor、Copilot、Windsurf、Zed 等都会读它。所以 `--target codex`（写 `AGENTS.md`）一条基本覆盖了**除 Claude Code 以外**的所有工具，Claude Code 读的是 `CLAUDE.md`。一个项目通常最多需要：
+
+- `--target codex` → `AGENTS.md`（覆盖 Cursor、Codex 及大多数 CLI agent），**外加**
+- `--target claude` → `CLAUDE.md`，**仅当**你用 Claude Code。
+
+不要在已经有 `AGENTS.md` 的情况下再装 `--target cursor`（`.cursor/rules/*.mdc`）——Cursor 两个都读，同一段 runtime 会被注入 Cursor 的 system prompt **两次**（浪费 token，但不会出错）。多个 runtime 文件同时存在时 CLI 会提示你。只有当你确实要用 Cursor `.mdc` 的特性（按 glob 生效），或者碰到某个版本的 Cursor 不自动加载 `AGENTS.md` 时，才需要 `--target cursor`。
+
+**这一步要在开 agent 窗口之前做。** 这些宿主只在窗口首次打开时把文件注入 system prompt；如果窗口已经开着，你再跑 `prompt --write`，新规则对那个窗口不生效，必须重启。CLI 每次成功写入都会打印 IMPORTANT 提示。
 
 同样的项目再跑一次 `prompt --write` 是幂等的：内容相同会显示 `UNCHANGED (already up to date)`，磁盘什么都不改。如果你想强制重写（比如升级了 CLI 想确认装的是新模板），加 `--force-rewrite`。
 

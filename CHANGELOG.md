@@ -8,6 +8,26 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### Duplicate-injection guard for overlapping runtime files (PR8z)
+
+Because AGENTS.md is now a cross-tool standard (Cursor reads both
+AGENTS.md and `.cursor/rules`; Claude Code reads CLAUDE.md and, on
+recent versions, AGENTS.md), installing several `prompt` targets in one
+project can make a single host inject the same runtime block twice —
+wasteful, though not harmful (identical content).
+
+- `gojaja prompt --write` now detects coexisting runtime files
+  (`.cursor/rules/gojaja-runtime.mdc`, the AGENTS.md block, the
+  CLAUDE.md block) and prints a note explaining the overlap and the
+  minimal-target strategy (AGENTS.md alone covers Cursor + Codex + most
+  CLI agents; add CLAUDE.md only for Claude Code; avoid stacking the
+  Cursor `.mdc` on top of AGENTS.md). `--json` adds an
+  `installedRuntimeFiles` array.
+- README (EN + zh-CN) Step 3 now documents "install the minimum set".
+- Confirmed: a marker-block target creates CLAUDE.md / AGENTS.md if
+  absent (containing just the managed block) and `reset` deletes the
+  file again if the block was all it held.
+
 ### Shrink injected prompt + Codex goes project-local (PR8y)
 
 The artifact `gojaja prompt --write` injects into each host's system

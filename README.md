@@ -89,7 +89,7 @@ gojaja role create TL       "Tech Lead"         --owns "state/architecture.md,do
 gojaja role create Backend  "Backend Engineer"  --owns "src/" --reports-to TL,PM --must-not-edit "src/config/secrets.ts"
 ```
 
-### Step 3 — Install the runtime for each agent tool you use
+### Step 3 — Install the runtime for the agent tools you use
 
 ```bash
 # Cursor: writes .cursor/rules/gojaja-runtime.mdc
@@ -98,14 +98,21 @@ gojaja prompt --target cursor --write
 # Claude Code: upserts a marker block in CLAUDE.md
 gojaja prompt --target claude --write
 
-# Codex CLI: upserts a managed block in AGENTS.md (Codex's project system prompt)
+# Codex CLI (+ most other tools): upserts a managed block in AGENTS.md
 gojaja prompt --target codex --write
 
 # Any other shell-capable agent (prints body; nothing installed)
 gojaja prompt --target generic
 ```
 
-**Run this before opening the agent window.** Cursor / Claude Code / Codex inject these rule files into the agent's system prompt only when the agent window first opens. If a window is already open when you run `prompt --write`, restart it before chatting — the new rule will not take effect in an already-running window. The CLI prints an IMPORTANT notice every time something was written.
+**Install the minimum set — don't install all of them blindly.** As of 2026, `AGENTS.md` is a cross-tool standard: it's read by Codex, Cursor, Copilot, Windsurf, Zed, and more. So `--target codex` (which writes `AGENTS.md`) alone usually covers everything **except** Claude Code, which reads `CLAUDE.md`. A typical project needs at most:
+
+- `--target codex` → `AGENTS.md` (covers Cursor, Codex, and most CLI agents), **and**
+- `--target claude` → `CLAUDE.md` **only if** you use Claude Code.
+
+Avoid installing `--target cursor` (`.cursor/rules/*.mdc`) *on top of* `AGENTS.md` — Cursor reads both, so the same runtime block would be injected into Cursor's system prompt twice (wasteful, though not harmful). The CLI warns you when multiple runtime files coexist. Use `--target cursor` only if you rely on Cursor's `.mdc` features (glob scoping) or hit a version where Cursor doesn't auto-load `AGENTS.md`.
+
+**Run this before opening the agent window.** Hosts inject these files into the agent's system prompt only when the agent window first opens. If a window is already open when you run `prompt --write`, restart it before chatting — the new rule will not take effect in an already-running window. The CLI prints an IMPORTANT notice every time something was written.
 
 Re-running `prompt --write` on the same project is idempotent. If the file is byte-identical you'll see `UNCHANGED (already up to date)` and nothing on disk changes. Pass `--force-rewrite` to overwrite from the current template anyway — useful after upgrading the CLI to confirm the install is fresh.
 

@@ -1,10 +1,42 @@
+import * as fsp from "node:fs/promises";
+import * as path from "node:path";
 import { boolFlag, optionalString, requireString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { buildRuntime, writeArtifactFile } from "../prompts";
+import { CLAUDE_MARKER_BEGIN } from "../prompts/claude";
 import type { Target } from "../prompts";
 
 const TARGETS: ReadonlySet<Target> = new Set(["codex", "claude", "cursor", "generic"]);
+
+/**
+ * Which gojaja runtime artifacts are currently installed in the project.
+ * Used to warn about duplicate system-prompt injection: a single host
+ * often reads more than one of these. As of 2026 AGENTS.md is a
+ * cross-tool standard — Cursor reads BOTH AGENTS.md and
+ * `.cursor/rules/*.mdc`, and Claude Code reads CLAUDE.md (and, on
+ * recent versions, AGENTS.md too). So if several targets are installed,
+ * one window can inject the same block twice (wasteful, not broken).
+ */
+async function installedRuntimeFiles(root: string): Promise<string[]> {
+  const out: string[] = [];
+  const cursorRule = path.join(root, ".cursor", "rules", "gojaja-runtime.mdc");
+  try {
+    await fsp.access(cursorRule);
+    out.push(".cursor/rules/gojaja-runtime.mdc");
+  } catch {
+    /* not installed */
+  }
+  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+    try {
+      const text = await fsp.readFile(path.join(root, name), "utf8");
+      if (text.includes(CLAUDE_MARKER_BEGIN)) out.push(name);
+    } catch {
+      /* absent */
+    }
+  }
+  return out;
+}
 
 /**
  * `gojaja prompt --target <host> [--write] [--no-handbook] [--json]`
@@ -63,6 +95,12 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
     }
   }
 
+  // After a write, check whether multiple runtime artifacts now coexist
+  // in the project — a single host may read more than one of them and
+  // inject the block twice (see installedRuntimeFiles).
+  const coexisting = write ? await installedRuntimeFiles(root) : [];
+  const overlap = coexisting.length > 1;
+
   if (json) {
     process.stdout.write(
       JSON.stringify({
@@ -74,6 +112,7 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
         // opens. Surface this as a structured field so scripted
         // installers don't have to scrape stdout.
         requiresWindowRestart: write && writeResults.some((r) => r.result === "wrote"),
+        installedRuntimeFiles: coexisting,
       }) + "\n",
     );
     return 0;
@@ -107,6 +146,19 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
       process.stdout.write(
         `\nTip: if a file is "UNCHANGED" but you suspect drift,\n` +
           `re-run with --write --force-rewrite to overwrite from template.\n`,
+      );
+    }
+    if (overlap) {
+      process.stdout.write(
+        `\nNote: this project now has ${coexisting.length} gojaja runtime files:\n` +
+          coexisting.map((f) => `  - ${f}`).join("\n") +
+          `\nMany hosts read more than one of these (Cursor reads AGENTS.md\n` +
+          `AND .cursor/rules; Claude Code reads CLAUDE.md and, recently,\n` +
+          `AGENTS.md), so one window may inject the same block twice —\n` +
+          `wasteful, though not harmful. AGENTS.md alone already covers\n` +
+          `Cursor + Codex (+ Copilot / Windsurf / Zed); add the Cursor or\n` +
+          `Claude target only if you need that host's native file. Use\n` +
+          `'gojaja reset' to remove a runtime file you don't want.\n`,
       );
     }
     process.stdout.write(
