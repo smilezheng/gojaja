@@ -622,6 +622,14 @@ wait session is first opened. The broadcast is one-shot per session
 (resuming after a host kill does not re-broadcast) and goes to `*`,
 so any role with task-board ownership can pick the role up.
 
+Before it starts blocking, a non-`--json` invocation prints a start
+line so the agent can see the wall clock at entry (and, if the call is
+later killed mid-block, infer how long it ran):
+
+```
+WAITING role=<r> now=<iso> deadline=<iso|indefinite> for=<token>
+```
+
 **Internal polling.** A single invocation blocks, re-checking the event
 stream every `--poll-interval` (default 30 s, an in-process cadence) and
 sleeping in between, until it can return one of three terminal verdicts:

@@ -295,7 +295,8 @@ Keepalive (agent, requires GOJAJA_SESSION):
       attention arrives, the named condition fires, or the deadline
       passes. It polls the event stream internally every --poll-interval
       (default 30s) — that is an in-process check cadence, NOT a
-      re-invocation interval.
+      re-invocation interval. Before blocking it prints a start line
+      (WAITING role=<r> now=<iso> ...) so you can see the wall clock.
 
       Deadline (optional; omit BOTH to wait indefinitely until an event
       or a host kill — the agent then re-runs to resume):

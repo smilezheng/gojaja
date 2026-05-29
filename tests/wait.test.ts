@@ -86,9 +86,27 @@ describe("gojaja wait (PR8i)", () => {
         args("TL", { in: "1s", "poll-interval": "5s", root: ctx.root }),
       );
       expect(code).toBe(0);
+      // Start line printed before blocking, with a current timestamp.
+      expect(cap.stdout).toMatch(/WAITING role=TL now=\d{4}-\d{2}-\d{2}T/);
       expect(cap.stdout).toContain("TIMEOUT");
       expect(cap.stdout).toContain("role=TL");
       expect(await exists(waitJsonPath(ctx.root, "TL"))).toBe(false);
+    } finally {
+      cap.release();
+    }
+  });
+
+  it("--json output stays a single parseable object (no WAITING start line)", async () => {
+    const cap = captureStdio();
+    try {
+      const code = await runWait(
+        args("TL", { in: "0s", json: "true", root: ctx.root }),
+      );
+      expect(code).toBe(0);
+      expect(cap.stdout).not.toContain("WAITING");
+      // Whole stdout must parse as one JSON object.
+      const parsed = JSON.parse(cap.stdout.trim());
+      expect(parsed.status).toBe("timeout");
     } finally {
       cap.release();
     }

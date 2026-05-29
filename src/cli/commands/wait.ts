@@ -380,6 +380,17 @@ export async function runWait(args: ParsedArgs): Promise<number> {
     await store.writeWaitState(waitState);
   }
 
+  // Print a start line BEFORE blocking so the agent can see the wall
+  // clock at entry (and, if the host kills the call mid-block, infer how
+  // long it ran / what the host's per-tool-call timeout is). Skipped in
+  // --json mode so stdout stays a single parseable object.
+  if (!json) {
+    process.stdout.write(
+      `WAITING role=${role} now=${new Date().toISOString()} ` +
+        `deadline=${deadlineLabel} for=${formatConditionToken(cond)}\n`,
+    );
+  }
+
   // Block until the condition fires or the deadline passes. We poll the
   // event stream every poll-interval INSIDE this one process — the agent
   // stays parked in a single tool call (no per-poll re-invocation, no
