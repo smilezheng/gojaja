@@ -2,6 +2,7 @@ import { boolFlag, optionalString, requireString, type ParsedArgs } from "../arg
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveActor, resolveIdentity } from "../identity";
+import { nextLoopHint } from "../next-hint";
 import type { RfcComment, RoleId } from "../../core/types";
 
 function splitList(raw: string | undefined): string[] {
@@ -93,6 +94,7 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
           `--description "..." --rationale "fill in context"' after 'rfc revise'.\n`,
       );
     }
+    process.stdout.write(nextLoopHint({ json, actor }));
   }
   return 0;
 }
@@ -129,7 +131,8 @@ async function runRfcComment(args: ParsedArgs): Promise<number> {
       `Recorded comment ${comment.id} from ${actor} on ${rfcId}` +
         (preferred ? ` (prefers ${preferred})` : "") +
         (replyTo ? ` (reply to ${replyTo})` : "") +
-        ".\n",
+        ".\n" +
+        nextLoopHint({ json, actor }),
     );
   }
   return 0;
@@ -162,7 +165,10 @@ async function runRfcAddOption(args: ParsedArgs): Promise<number> {
   if (json) {
     process.stdout.write(JSON.stringify({ status: "option-added", option }) + "\n");
   } else {
-    process.stdout.write(`Added option '${option.id}' to ${rfcId} by ${role}.\n`);
+    process.stdout.write(
+      `Added option '${option.id}' to ${rfcId} by ${role}.\n` +
+        nextLoopHint({ json, actor: role }),
+    );
   }
   return 0;
 }
@@ -201,7 +207,8 @@ async function runRfcPreDecide(args: ParsedArgs): Promise<number> {
         `Each role must run \`gojaja rfc ack ${rfcId}\` or \`gojaja rfc object ${rfcId} --rationale ...\`\n` +
         `before \`gojaja rfc decide ${rfcId} --option ${chosenOption} --rationale ...\` will succeed.\n` +
         `Silence does NOT count as consent. The only escape from a stalled ACK round is\n` +
-        `\`gojaja rfc reject ${rfcId}\`.\n`,
+        `\`gojaja rfc reject ${rfcId}\`.\n` +
+        nextLoopHint({ json, actor: role }),
     );
   }
   return 0;
@@ -223,7 +230,10 @@ async function runRfcAck(args: ParsedArgs): Promise<number> {
   if (json) {
     process.stdout.write(JSON.stringify({ status: "acked", comment }) + "\n");
   } else {
-    process.stdout.write(`Acked the active pre-decision on ${rfcId} as ${role} (comment ${comment.id}).\n`);
+    process.stdout.write(
+      `Acked the active pre-decision on ${rfcId} as ${role} (comment ${comment.id}).\n` +
+        nextLoopHint({ json, actor: role }),
+    );
   }
   return 0;
 }
@@ -248,7 +258,8 @@ async function runRfcObject(args: ParsedArgs): Promise<number> {
     process.stdout.write(
       `Objected to the active pre-decision on ${rfcId} as ${role} (comment ${comment.id})` +
         (preferredOption ? `, preferring option '${preferredOption}'` : "") +
-        `.\n`,
+        `.\n` +
+        nextLoopHint({ json, actor: role }),
     );
   }
   return 0;
@@ -281,6 +292,7 @@ async function runRfcDecide(args: ParsedArgs): Promise<number> {
     } else {
       process.stdout.write(`Accepted ${rfcId} (brainstorm — no option chosen) by ${role}.\n`);
     }
+    process.stdout.write(nextLoopHint({ json, actor: role }));
   }
   return 0;
 }
@@ -299,7 +311,10 @@ async function runRfcReject(args: ParsedArgs): Promise<number> {
   if (json) {
     process.stdout.write(JSON.stringify({ status: "rejected", decision }) + "\n");
   } else {
-    process.stdout.write(`Rejected ${rfcId} by ${role}.\n`);
+    process.stdout.write(
+      `Rejected ${rfcId} by ${role}.\n` +
+        nextLoopHint({ json, actor: role }),
+    );
   }
   return 0;
 }
@@ -323,7 +338,8 @@ async function runRfcRevise(args: ParsedArgs): Promise<number> {
     process.stdout.write(
       `Sent ${rfcId} back for revision by ${role}.\n` +
         `Creator (or any decider) can now run 'gojaja rfc edit ${rfcId} ...'\n` +
-        `to update the proposal; that re-opens the RFC.\n`,
+        `to update the proposal; that re-opens the RFC.\n` +
+        nextLoopHint({ json, actor: role }),
     );
   }
   return 0;
@@ -359,7 +375,8 @@ async function runRfcEdit(args: ParsedArgs): Promise<number> {
     process.stdout.write(JSON.stringify({ status: "revised", proposal }) + "\n");
   } else {
     process.stdout.write(
-      `Edited ${rfcId} by ${role}; status is now ${proposal.status}.\n`,
+      `Edited ${rfcId} by ${role}; status is now ${proposal.status}.\n` +
+        nextLoopHint({ json, actor: role }),
     );
   }
   return 0;
@@ -380,7 +397,8 @@ async function runRfcLinkTask(args: ParsedArgs): Promise<number> {
     process.stdout.write(JSON.stringify({ status: "linked", proposal }) + "\n");
   } else {
     process.stdout.write(
-      `Linked ${taskId} to ${rfcId} by ${role}. relatedTasks: ${proposal.relatedTasks.join(", ")}.\n`,
+      `Linked ${taskId} to ${rfcId} by ${role}. relatedTasks: ${proposal.relatedTasks.join(", ")}.\n` +
+        nextLoopHint({ json, actor: role }),
     );
   }
   return 0;
@@ -401,7 +419,8 @@ async function runRfcUnlinkTask(args: ParsedArgs): Promise<number> {
     process.stdout.write(JSON.stringify({ status: "unlinked", proposal }) + "\n");
   } else {
     process.stdout.write(
-      `Unlinked ${taskId} from ${rfcId} by ${role}. relatedTasks: ${proposal.relatedTasks.join(", ") || "(none)"}.\n`,
+      `Unlinked ${taskId} from ${rfcId} by ${role}. relatedTasks: ${proposal.relatedTasks.join(", ") || "(none)"}.\n` +
+        nextLoopHint({ json, actor: role }),
     );
   }
   return 0;

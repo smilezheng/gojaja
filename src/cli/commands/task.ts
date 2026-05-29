@@ -10,6 +10,7 @@ import {
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveActor } from "../identity";
+import { nextLoopHint } from "../next-hint";
 import {
   TASK_STATUSES,
   type Deliverable,
@@ -145,7 +146,8 @@ async function runTaskNew(args: ParsedArgs): Promise<number> {
       `Created ${task.id} (${task.status}, ${task.priority})` +
         (task.owner ? ` -> ${task.owner}` : "") +
         (task.parent ? ` under ${task.parent}` : "") +
-        `: ${task.title}\n`,
+        `: ${task.title}\n` +
+        nextLoopHint({ json, actor }),
     );
   }
   return 0;
@@ -164,7 +166,10 @@ async function runTaskAssign(args: ParsedArgs): Promise<number> {
   if (json) {
     process.stdout.write(JSON.stringify({ status: "assigned", task }) + "\n");
   } else {
-    process.stdout.write(`Assigned ${task.id} -> ${task.owner}\n`);
+    process.stdout.write(
+      `Assigned ${task.id} -> ${task.owner}\n` +
+        nextLoopHint({ json, actor }),
+    );
   }
   return 0;
 }
@@ -196,7 +201,10 @@ async function runTaskStatus(args: ParsedArgs): Promise<number> {
   if (json) {
     process.stdout.write(JSON.stringify({ status: "updated", task }) + "\n");
   } else {
-    process.stdout.write(`${task.id} status -> ${task.status}\n`);
+    process.stdout.write(
+      `${task.id} status -> ${task.status}\n` +
+        nextLoopHint({ json, actor }),
+    );
   }
   return 0;
 }

@@ -1,6 +1,7 @@
 import { boolFlag, optionalString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
+import { claimHint } from "../next-hint";
 
 // 2 hours. Long agent tasks (large refactors, multi-file features) can
 // keep a single window busy well past the old 30-minute lease without
@@ -55,7 +56,8 @@ export async function runClaim(args: ParsedArgs): Promise<number> {
       `Claimed role '${session.role}' (session ${session.sessionId}, lease ${session.leaseTtlSeconds}s).\n` +
         `Export this in your shell so follow-up commands authenticate as ${session.role}:\n\n` +
         `  export GOJAJA_SESSION=${session.sessionId}\n\n` +
-        `Tip: \`eval "$(gojaja claim ${session.role} --eval)"\` does this in one step.\n`,
+        `Tip: \`eval "$(gojaja claim ${session.role} --eval)"\` does this in one step.\n` +
+        claimHint({ json }),
     );
   }
   return 0;

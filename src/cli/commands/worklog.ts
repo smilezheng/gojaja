@@ -1,6 +1,7 @@
 import { boolFlag, optionalString, requireString, type ParsedArgs } from "../argv";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveIdentity } from "../identity";
+import { nextLoopHint } from "../next-hint";
 
 export async function runWorklog(args: ParsedArgs): Promise<number> {
   const message = requireString(args.flags, "message");
@@ -17,7 +18,10 @@ export async function runWorklog(args: ParsedArgs): Promise<number> {
   if (json) {
     process.stdout.write(JSON.stringify({ status: "logged", event }) + "\n");
   } else {
-    process.stdout.write(`Logged worklog entry ${event.id} for ${from}.\n`);
+    process.stdout.write(
+      `Logged worklog entry ${event.id} for ${from}.\n` +
+        nextLoopHint({ json, actor: from }),
+    );
   }
   return 0;
 }

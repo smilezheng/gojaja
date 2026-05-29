@@ -1,6 +1,7 @@
 import { boolFlag, optionalString, requireString, type ParsedArgs } from "../argv";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveIdentity } from "../identity";
+import { nextLoopHint } from "../next-hint";
 
 export async function runReport(args: ParsedArgs): Promise<number> {
   const to = requireString(args.flags, "to");
@@ -22,7 +23,8 @@ export async function runReport(args: ParsedArgs): Promise<number> {
     process.stdout.write(
       `Reported ${event.id} from ${from} to ${to}` +
         (ref ? ` (ref=${ref})` : "") +
-        `.\n`,
+        `.\n` +
+        nextLoopHint({ json, actor: from }),
     );
   }
   return 0;

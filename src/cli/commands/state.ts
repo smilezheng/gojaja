@@ -2,6 +2,7 @@ import { boolFlag, optionalString, requireString, type ParsedArgs } from "../arg
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveActor } from "../identity";
+import { nextLoopHint } from "../next-hint";
 
 /**
  * `gojaja state <subcommand>` — operations on `state/*` files.
@@ -160,5 +161,6 @@ async function runStateEdit(args: ParsedArgs): Promise<number> {
       `Replaced ${n} ${noun} in ${result.relPath} as ${actor}.\n`,
     );
   }
+  process.stdout.write(nextLoopHint({ json, actor }));
   return 0;
 }

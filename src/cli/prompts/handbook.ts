@@ -54,6 +54,9 @@ Budget ~5 resumes, then end the turn rather than looping forever: if the
 host kills around 10 min that is ~50 min of waiting across ~5 turns;
 around 3 min, ~15 min. \`--poll-interval\` only sets detection latency.
 
+Every action command (\`worklog\` / \`report\` / \`task ...\` / \`rfc ...\`)
+appends a \`Next: ...\` line repeating this rule. Heed it.
+
 ### Which channel: worklog vs report vs RFC
 
 | Tool | Use when | Don't use for |

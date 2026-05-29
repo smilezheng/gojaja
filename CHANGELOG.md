@@ -8,6 +8,41 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### Action commands print a `Next: ...` loop reminder
+
+The recurring failure mode this guards against: an agent runs a
+side-effect command (`worklog` / `report` / `task status` / `rfc
+comment` / etc.), sees the success line, and silently ends the turn —
+forgetting to either keep working or park on `gojaja wait`. Without
+one of those the role goes dark and the team stops driving forward;
+on a single-machine setup there's no external scheduler to wake it
+back up, so the human has to nudge it manually, defeating the point
+of the protocol.
+
+- Added `src/cli/next-hint.ts` exporting `nextLoopHint` (generic) and
+  `claimHint` (specialised). The generic hint reads
+  `Next: continue this turn with another action, or run \`gojaja plan\`
+  (see new events) / \`gojaja wait\` (park until attention). Ending
+  without one stalls the role.`
+- Wired into every agent-loop side-effect command: `worklog`,
+  `report`, `ack`, `task new` / `assign` / `status`, `rfc new` /
+  `comment` / `add-option` / `pre-decide` / `ack` / `object` /
+  `decide` / `reject` / `revise` / `edit` / `link-task` /
+  `unlink-task`, and `state edit`. `claim` gets the specialised
+  variant pointing at `gojaja plan` (its actual next step).
+- Skipped in `--json` mode (output must stay a single parseable
+  object) and when the actor is `SYSTEM` (a human running the CLI
+  has no per-turn loop to keep alive).
+- `wait` and `plan` are NOT decorated — they each already print
+  their own context-specific `Next: ...` lines (verdict-keyed for
+  `wait`, ack-token-keyed for `plan`).
+- Tests in `tests/next-hint.test.ts` (8 cases) pin the contract:
+  hint present in plain mode, absent in `--json`, absent for SYSTEM
+  callers, and the specialised `claim` variant.
+- Handbook gains a one-liner pointing the agent at the in-output
+  `Next:` reminder so the policy and the runtime nudge are stitched
+  together.
+
 ### `rfc comment` accepts SYSTEM (no GOJAJA_SESSION) for plain comments
 
 Symmetric with `rfc new`'s SYSTEM path: a human running the CLI without
