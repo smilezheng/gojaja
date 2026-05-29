@@ -117,6 +117,31 @@ describe("buildRuntime (role-free)", () => {
     }
   });
 
+  it("every target's runtime body forbids 'waiting for the user to push' on an assigned task (PR8x hard rule)", () => {
+    // Empirical failure mode: agent reads its plan manifest, sees an
+    // InProgress task with itself as owner, then sits in chat saying
+    // "ready when you are" / "let me know when to proceed". The user
+    // ends up driving the work that the protocol has already pushed.
+    // The rule explicitly frames tasks as the pull signal (the task
+    // being in the manifest IS the green light) and names report /
+    // rfc as the only legitimate detour for blocking ambiguities —
+    // never silent waiting.
+    for (const t of ["agents", "claude", "cursor", "generic"] as const) {
+      const a = buildRuntime(t, ctx.root);
+      expect(a.body).toMatch(/Tasks pull/);
+      expect(a.body).toMatch(/accepting the task in plan IS the start/i);
+      // Quote the literal anti-patterns so a future edit that softens
+      // the rule loses the regression check loudly.
+      expect(a.body).toMatch(/shall I begin\?/);
+      expect(a.body).toMatch(/ready when you are/);
+      // The legitimate detours must be named, otherwise an agent
+      // reading "do not wait" might paper over a real blocker by
+      // proceeding anyway.
+      expect(a.body).toMatch(/`gojaja report`/);
+      expect(a.body).toMatch(/`gojaja rfc`/);
+    }
+  });
+
   it("every target's runtime body explicitly forbids ending a turn without `wait` (PR8w hard rule)", () => {
     // The most common per-turn failure mode is "agent answers the user
     // in chat and ends the turn unparked" — the role goes deaf and no

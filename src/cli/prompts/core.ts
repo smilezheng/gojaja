@@ -107,6 +107,14 @@ See \`gojaja handbook\`.
   needed no gojaja work: answer the user, then run \`wait\` before
   letting the turn end. "I'm online, waiting for instructions" is
   not a turn end — \`wait\` is.
+- **Tasks pull. If your \`plan\` manifest shows a task you own in
+  Ready / InProgress / Blocked, start working on it immediately —
+  accepting the task in plan IS the start.** Do NOT pause to ask
+  "shall I begin?" / "ready when you are" / "let me know when to
+  proceed". The only legitimate detour is a blocking ambiguity, and
+  the response to that is \`gojaja report\` to the right party
+  (\`reportsTo\`, reviewer, or parent task owner) or \`gojaja rfc\` —
+  never silent waiting for the user to push you.
 - Never hand-edit files under \`.gojaja/\`. Use \`gojaja\`.
 - Never claim to have done something without producing an event for it.
 - Lost context or unsure of your identity? \`gojaja plan\` first.

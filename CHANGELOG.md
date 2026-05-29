@@ -8,6 +8,42 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### Runtime body: "Tasks pull" — assigned task is itself the start signal
+
+Companion soft constraint to the previous "wait is the end-of-turn
+ritual" rule. Different failure mode, same root cause: the agent
+treats user chat as the primary drive signal, so a task it already
+owns sits at "I'll start when you say so" instead of getting picked
+up. The protocol has already pushed the task — the agent reading
+"InProgress, owner: <me>" in its manifest IS the green light.
+
+`## Rules` gains a hard rule, listed second (right after the
+end-of-turn-`wait` rule):
+
+> **Tasks pull. If your `plan` manifest shows a task you own in
+> Ready / InProgress / Blocked, start working on it immediately —
+> accepting the task in plan IS the start.** Do NOT pause to ask
+> "shall I begin?" / "ready when you are" / "let me know when to
+> proceed". The only legitimate detour is a blocking ambiguity, and
+> the response to that is `gojaja report` to the right party
+> (`reportsTo`, reviewer, or parent task owner) or `gojaja rfc` —
+> never silent waiting for the user to push you.
+
+The two anti-patterns ("shall I begin?" / "ready when you are") are
+quoted verbatim from the literal phrasings users have reported
+seeing — a regression test in `tests/prompt.test.ts` greps for them
+specifically so a future softening of the rule trips loudly.
+
+The "blocking ambiguity → report or rfc" carve-out matters because
+"don't wait for the user" without an escape hatch would push agents
+to plough through a genuinely-unanswered acceptance criterion. The
+correct route — escalate via `report` or open an `rfc` — is named
+explicitly so the rule does not reduce to "just guess".
+
+Still a soft constraint (only PR8v's stop hook will mechanically
+refuse). Total runtime card grew by ~8 lines (97/102 → 105/110
+across hosts), still well under the 130-line CLAUDE.md budget.
+
 ### `gojaja claim --session <id>`: idempotent recovery from context-loss
 
 Empirically the second-most-common per-agent failure mode (after the
