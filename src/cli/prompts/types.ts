@@ -31,9 +31,9 @@ export interface RuntimeArtifact {
 
 // `agents` is the canonical target: it writes AGENTS.md, the cross-tool
 // project system-prompt standard (read by Codex, Cursor, Copilot,
-// Windsurf, Zed, ...). `codex` is kept as an alias for it. `claude`
-// additionally drops a one-line `@AGENTS.md` importer into CLAUDE.md for
-// Claude Code (which does not read AGENTS.md natively yet). `cursor` is
-// an optional fallback (a standalone .cursor/rules/*.mdc) for older
-// Cursor versions or .mdc-specific features.
-export type Target = "agents" | "codex" | "claude" | "cursor" | "generic";
+// Windsurf, Zed, ...). `claude` additionally drops a one-line
+// `@AGENTS.md` importer into CLAUDE.md for Claude Code (which does not
+// read AGENTS.md natively yet). `cursor` is an optional fallback (a
+// standalone .cursor/rules/*.mdc) for older Cursor versions or
+// .mdc-specific features. `generic` prints the body and installs nothing.
+export type Target = "agents" | "claude" | "cursor" | "generic";

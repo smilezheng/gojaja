@@ -84,7 +84,8 @@ async function runRoleCreate(args: ParsedArgs): Promise<number> {
     process.stdout.write(
       `Created role '${id}' (${roleConfig.title}).\n` +
         `Edit '.gojaja/config.yaml' under 'roles.${id}' to set owns / reportsTo / mustNotEdit.\n` +
-        `Next step: 'gojaja prompt --target <codex|claude|cursor|generic> --write' to install the runtime, ` +
+        `Next step: 'gojaja prompt --target agents --write' to install the runtime ` +
+        `(use --target claude if you use Claude Code), ` +
         `then 'gojaja activate ${id} --target <host>' for each agent window.\n`,
     );
     if (needsFill) {

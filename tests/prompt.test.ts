@@ -10,9 +10,9 @@ import {
 } from "../src/cli/prompts";
 import { runPrompt } from "../src/cli/commands/prompt";
 import {
-  CLAUDE_MARKER_BEGIN,
-  CLAUDE_MARKER_END,
-} from "../src/cli/prompts/claude";
+  RUNTIME_MARKER_BEGIN,
+  RUNTIME_MARKER_END,
+} from "../src/cli/prompts/markers";
 
 async function freshProject() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-prompt-"));
@@ -26,7 +26,7 @@ async function freshProject() {
   return { root, store };
 }
 
-const TARGETS = ["codex", "claude", "cursor", "generic"] as const;
+const TARGETS = ["agents", "claude", "cursor", "generic"] as const;
 
 describe("buildRuntime (role-free)", () => {
   let ctx: { root: string; store: LocalFsStore };
@@ -53,13 +53,13 @@ describe("buildRuntime (role-free)", () => {
     }
   });
 
-  it("codex artifact is a marker-block targeting <root>/AGENTS.md", () => {
-    const a = buildRuntime("codex", ctx.root);
+  it("agents artifact is a marker-block targeting <root>/AGENTS.md", () => {
+    const a = buildRuntime("agents", ctx.root);
     expect(a.files).toHaveLength(1);
     expect(a.files[0].path).toBe(path.join(ctx.root, "AGENTS.md"));
     expect(a.files[0].mode).toBe("marker-block");
-    expect(a.files[0].markerBegin).toBe(CLAUDE_MARKER_BEGIN);
-    expect(a.files[0].markerEnd).toBe(CLAUDE_MARKER_END);
+    expect(a.files[0].markerBegin).toBe(RUNTIME_MARKER_BEGIN);
+    expect(a.files[0].markerEnd).toBe(RUNTIME_MARKER_END);
   });
 
   it("cursor artifact targets .cursor/rules/gojaja-runtime.mdc with alwaysApply", () => {
@@ -85,17 +85,17 @@ describe("buildRuntime (role-free)", () => {
     // The importer must NOT duplicate the runtime body.
     expect(byName["CLAUDE.md"].content).not.toContain("gojaja plan");
     for (const f of a.files) {
-      expect(f.markerBegin).toBe(CLAUDE_MARKER_BEGIN);
-      expect(f.markerEnd).toBe(CLAUDE_MARKER_END);
+      expect(f.markerBegin).toBe(RUNTIME_MARKER_BEGIN);
+      expect(f.markerEnd).toBe(RUNTIME_MARKER_END);
     }
   });
 
-  it("agents target is the canonical AGENTS.md (codex is an alias of it)", () => {
+  it("agents target writes a single canonical AGENTS.md marker block", () => {
     const ag = buildRuntime("agents", ctx.root);
-    const cx = buildRuntime("codex", ctx.root);
     expect(ag.files).toHaveLength(1);
     expect(ag.files[0].path).toBe(path.join(ctx.root, "AGENTS.md"));
-    expect(ag.files[0].content).toBe(cx.files[0].content);
+    expect(ag.files[0].mode).toBe("marker-block");
+    expect(ag.files[0].content).toContain("gojaja plan");
   });
 
   it("generic artifact writes no files", () => {
@@ -113,7 +113,7 @@ describe("buildRuntime (role-free)", () => {
   });
 
   it("PR8i: non-cursor bodies use the simple `wait --in 10m`", () => {
-    for (const t of ["codex", "claude", "generic"] as const) {
+    for (const t of ["agents", "claude", "generic"] as const) {
       const a = buildRuntime(t, ctx.root);
       expect(a.body).toContain("gojaja wait --in 10m");
       expect(a.body).not.toContain("--poll-interval");
@@ -121,13 +121,13 @@ describe("buildRuntime (role-free)", () => {
     }
   });
 
-  it("codex AGENTS.md block is project-path-agnostic — same bytes for any projectRoot", async () => {
+  it("agents AGENTS.md block is project-path-agnostic — same bytes for any projectRoot", async () => {
     // The block goes into <root>/AGENTS.md (project-local), but its
     // CONTENT bakes no absolute path: gojaja discovers the root from cwd
     // at runtime. So the block bytes are identical regardless of root,
     // and never leak a machine-specific path into a committed file.
-    const a1 = buildRuntime("codex", "/tmp/project-A");
-    const b1 = buildRuntime("codex", "/Users/someone/code/project-B");
+    const a1 = buildRuntime("agents", "/tmp/project-A");
+    const b1 = buildRuntime("agents", "/Users/someone/code/project-B");
     expect(a1.files[0].content).toBe(b1.files[0].content);
     expect(a1.files[0].content).not.toContain("/tmp/project-A");
     expect(a1.files[0].content).not.toContain("/Users/someone/code/project-B");
@@ -147,8 +147,8 @@ describe("buildActivation (role-bound, never persisted)", () => {
     }
   });
 
-  it("codex activation is the standard snippet (runtime lives in AGENTS.md, not a skill)", () => {
-    const s = buildActivation("codex", "PM", ctx.root);
+  it("agents activation is the standard snippet (runtime lives in AGENTS.md, not a skill)", () => {
+    const s = buildActivation("agents", "PM", ctx.root);
     expect(s).toContain("You are the PM agent");
     expect(s).toContain('eval "$(gojaja claim PM --eval)"');
     // No skill-invocation trigger phrase anymore.
@@ -198,8 +198,8 @@ describe("writeArtifactFile", () => {
     await fsp.rm(ctx.root, { recursive: true, force: true });
   });
 
-  it("codex --write upserts a marker block in <root>/AGENTS.md, preserving prior content", async () => {
-    const a = buildRuntime("codex", ctx.root);
+  it("agents --write upserts a marker block in <root>/AGENTS.md, preserving prior content", async () => {
+    const a = buildRuntime("agents", ctx.root);
     const target = a.files[0].path;
     expect(target).toBe(path.join(ctx.root, "AGENTS.md"));
     await fsp.writeFile(target, "# My project\n\nHand-written agent notes.\n");
@@ -207,18 +207,18 @@ describe("writeArtifactFile", () => {
     expect(first).toBe("wrote");
     const after = await fsp.readFile(target, "utf8");
     expect(after).toContain("Hand-written agent notes");
-    expect(after).toContain(CLAUDE_MARKER_BEGIN);
+    expect(after).toContain(RUNTIME_MARKER_BEGIN);
     expect(after).toContain("gojaja plan");
   });
 
-  it("codex --write is idempotent across re-runs", async () => {
-    const a = buildRuntime("codex", ctx.root);
+  it("agents --write is idempotent across re-runs", async () => {
+    const a = buildRuntime("agents", ctx.root);
     expect(await writeArtifactFile(a.files[0])).toBe("wrote");
     expect(await writeArtifactFile(a.files[0])).toBe("unchanged");
   });
 
   it("prompt --write reports coexisting runtime files (duplicate-injection guard)", async () => {
-    // AGENTS.md is read by Cursor too, so installing codex (AGENTS.md)
+    // AGENTS.md is read by Cursor too, so installing agents (AGENTS.md)
     // and cursor (.mdc) in one project means a Cursor window injects the
     // block twice. `prompt --json` surfaces every installed runtime file
     // so the CLI can warn; assert the detection sees both.
@@ -232,7 +232,7 @@ describe("writeArtifactFile", () => {
       return { drain: () => buf, release: () => { (process.stdout as unknown as { write: typeof orig }).write = orig; } };
     })();
     try {
-      await runPrompt({ command: "prompt", positional: [], flags: { target: "codex", write: true, json: true, root: ctx.root } });
+      await runPrompt({ command: "prompt", positional: [], flags: { target: "agents", write: true, json: true, root: ctx.root } });
       await runPrompt({ command: "prompt", positional: [], flags: { target: "cursor", write: true, json: true, root: ctx.root } });
       const lines = cap.drain().trim().split("\n");
       const last = JSON.parse(lines[lines.length - 1]);
@@ -262,8 +262,8 @@ describe("writeArtifactFile", () => {
     expect(first).toBe("wrote");
     const after1 = await fsp.readFile(target, "utf8");
     expect(after1).toContain("Hand-written notes");
-    expect(after1).toContain(CLAUDE_MARKER_BEGIN);
-    expect(after1).toContain(CLAUDE_MARKER_END);
+    expect(after1).toContain(RUNTIME_MARKER_BEGIN);
+    expect(after1).toContain(RUNTIME_MARKER_END);
 
     const second = await writeArtifactFile(a.files[0]);
     expect(second).toBe("unchanged");

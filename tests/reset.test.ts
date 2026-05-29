@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runReset, __test__ } from "../src/cli/commands/reset";
 import { LocalFsStore } from "../src/core/local-fs-store";
 import {
-  CLAUDE_MARKER_BEGIN,
-  CLAUDE_MARKER_END,
-} from "../src/cli/prompts/claude";
+  RUNTIME_MARKER_BEGIN as CLAUDE_MARKER_BEGIN,
+  RUNTIME_MARKER_END as CLAUDE_MARKER_END,
+} from "../src/cli/prompts/markers";
 import type { ParsedArgs } from "../src/cli/argv";
 
 const { stripClaudeMarkerBlock } = __test__;

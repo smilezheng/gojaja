@@ -3,8 +3,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { atomicWriteFile, exists } from "../../core/atomic";
 import { UsageError } from "../../core/errors";
+import { buildAgentsActivation, buildAgentsRuntime } from "./agents";
 import { buildClaudeActivation, buildClaudeRuntime } from "./claude";
-import { buildCodexActivation, buildCodexRuntime } from "./codex";
 import type { RuntimeBodyOptions } from "./core";
 import { buildCursorActivation, buildCursorRuntime } from "./cursor";
 import { buildGenericActivation, buildGenericRuntime } from "./generic";
@@ -28,8 +28,7 @@ export function buildRuntime(
   opts: RuntimeBodyOptions = {},
 ): RuntimeArtifact {
   switch (target) {
-    case "agents":  return buildCodexRuntime(projectRoot, opts);
-    case "codex":   return buildCodexRuntime(projectRoot, opts);
+    case "agents":  return buildAgentsRuntime(projectRoot, opts);
     case "claude":  return buildClaudeRuntime(projectRoot, opts);
     case "cursor":  return buildCursorRuntime(projectRoot, opts);
     case "generic": return buildGenericRuntime(projectRoot, opts);
@@ -53,8 +52,7 @@ export function buildActivation(
   opts: RuntimeBodyOptions = {},
 ): string {
   switch (target) {
-    case "agents":  return buildCodexActivation(role, projectRoot);
-    case "codex":   return buildCodexActivation(role, projectRoot);
+    case "agents":  return buildAgentsActivation(role, projectRoot);
     case "claude":  return buildClaudeActivation(role, projectRoot);
     case "cursor":  return buildCursorActivation(role, projectRoot);
     case "generic": return buildGenericActivation(role, projectRoot, opts);
@@ -67,18 +65,14 @@ function expandHome(p: string): string {
   return p;
 }
 
-// Substrings that mark a file as one gojaja wrote, so re-running
-// `prompt --write` can safely overwrite it. We must recognise EVERY
-// generated artifact: the runtime bodies (Cursor rule, Codex SKILL.md)
-// contain "gojaja plan", but the Codex `agents/openai.yaml` does not —
-// it carries "gojaja-runtime" instead. Without the second marker the
-// SECOND project to run `prompt --target codex --write` (or any re-run
-// after openai.yaml exists) is wrongly refused, breaking multi-project
-// Codex setups.
-const RUNTIME_MARKERS = ["gojaja plan", "gojaja-runtime"] as const;
+// A file is recognised as one gojaja wrote (so `prompt --write` may
+// overwrite it) if it contains the runtime body phrase. Only used for
+// `replace`-mode artifacts (the Cursor .mdc); marker-block files
+// (AGENTS.md / CLAUDE.md) are matched by their BEGIN/END markers.
+const RUNTIME_MARKER_PHRASE = "gojaja plan";
 
 function looksLikeGojajaArtifact(content: string): boolean {
-  return RUNTIME_MARKERS.some((m) => content.includes(m));
+  return content.includes(RUNTIME_MARKER_PHRASE);
 }
 
 export async function writeArtifactFile(

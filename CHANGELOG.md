@@ -13,10 +13,11 @@ Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 Lean into AGENTS.md as the cross-tool standard so there is essentially
 one runtime file to maintain.
 
-- **`--target agents`** (new canonical name; `codex` kept as an alias)
-  writes the managed block into `AGENTS.md` — read by Codex, Cursor,
-  Copilot, Windsurf, Zed, and more. For most projects this is the only
-  install needed.
+- **`--target agents`** writes the managed block into `AGENTS.md` — the
+  cross-tool standard read by Codex, Cursor, Copilot, Windsurf, Zed, and
+  more. For most projects this is the only install needed. (The old
+  `codex` target — and the user-level Codex skill it used to install —
+  are gone; pre-release, no compatibility shim kept.)
 - **`--target claude`** now writes `AGENTS.md` (the canonical block)
   **plus** a thin `CLAUDE.md` whose managed block only imports it
   (`@AGENTS.md`). Claude Code doesn't read AGENTS.md natively yet, so

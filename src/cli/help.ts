@@ -58,7 +58,7 @@ Setup (you, in your shell — runs once per project unless noted):
       Removes the role from config.yaml, deletes roles/<id>.md, and
       invalidates any live session. Open task assignments are left in
       place; recreating the same id reinherits them.
-  prompt --target agents|codex|claude|cursor|generic [--write]
+  prompt --target agents|claude|cursor|generic [--write]
                        [--force-rewrite] [--no-handbook] [--json]
       Print (and with --write, install) the project's runtime rule.
       ROLE-FREE: same artifact for every role; the role is bound
@@ -66,7 +66,6 @@ Setup (you, in your shell — runs once per project unless noted):
       AGENTS.md is the canonical runtime file (the cross-tool standard):
         agents  -> a managed block in AGENTS.md. Read by Codex, Cursor,
                    Copilot, Windsurf, Zed, ... — usually all you need.
-        codex   -> alias for agents.
         claude  -> AGENTS.md (canonical) PLUS a managed block in
                    CLAUDE.md that just imports it (@AGENTS.md), since
                    Claude Code doesn't read AGENTS.md natively yet. One
@@ -81,7 +80,7 @@ Setup (you, in your shell — runs once per project unless noted):
       --force-rewrite overrides the byte-equal short-circuit (useful
       after an upgrade to confirm the install came from the current
       template).
-  activate <role> --target agents|codex|claude|cursor|generic
+  activate <role> --target agents|claude|cursor|generic
                                               [--no-handbook] [--no-copy] [--json]
       Print (and auto-copy to clipboard) the chat-paste snippet that
       binds <role> to one agent window. Never writes to disk; role

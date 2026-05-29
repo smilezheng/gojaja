@@ -6,7 +6,7 @@ import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { buildRuntime, writeArtifactFile } from "../prompts";
 import type { Target } from "../prompts";
 
-const TARGETS: ReadonlySet<Target> = new Set(["agents", "codex", "claude", "cursor", "generic"]);
+const TARGETS: ReadonlySet<Target> = new Set(["agents", "claude", "cursor", "generic"]);
 
 // A file "carries the full runtime" if it contains the loop body, not
 // just our marker. The CLAUDE.md importer only holds a one-line
@@ -68,7 +68,7 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
   }
   const target = requireString(args.flags, "target") as Target;
   if (!TARGETS.has(target)) {
-    throw new UsageError(`Unknown --target '${target}'. Use agents, codex, claude, cursor, or generic.`);
+    throw new UsageError(`Unknown --target '${target}'. Use agents, claude, cursor, or generic.`);
   }
   const write = boolFlag(args.flags, "write");
   const forceRewrite = boolFlag(args.flags, "force-rewrite");
@@ -185,7 +185,7 @@ function describeHost(target: Target): string {
   switch (target) {
     case "cursor": return "Cursor";
     case "claude": return "Claude Code";
-    case "codex":  return "Codex CLI";
+    case "agents": return "Your agent host";
     default:       return "The agent host";
   }
 }

@@ -2,9 +2,9 @@
  * Collaboration handbook — heuristics for "when to use which tool".
  *
  * PROTOCOL.md is mechanism (how to talk to gojaja). This is policy
- * (when to pick which tool). Loaded into the host's persistent area
- * (.cursor/rules/, ~/.codex/skills/, CLAUDE.md block), paid once per
- * session, not per turn.
+ * (when to pick which tool). Served on demand by `gojaja handbook`
+ * (it is NOT embedded in the injected runtime card, to keep that card
+ * inside CLAUDE.md's ~200-line budget).
  *
  * Design choices:
  *   - Role-neutral. Refers to `reportsTo` / `deciders` / `owns`,

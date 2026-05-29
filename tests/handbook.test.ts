@@ -148,7 +148,7 @@ describe("buildRuntime handbook integration", () => {
     // body was compressed in PR8q.
     const GATE_RE = /ONLY when this window is bound to a role/i;
     const FORBID_RE = /do NOT speculatively run/i;
-    for (const t of ["codex", "claude", "cursor", "generic"] as const) {
+    for (const t of ["agents", "claude", "cursor", "generic"] as const) {
       const a = buildRuntime(t, PROJ);
       expect(a.body).toMatch(GATE_RE);
       expect(a.body).toMatch(FORBID_RE);
@@ -163,7 +163,7 @@ describe("buildRuntime handbook integration", () => {
     // The full policy is fetched on demand via `gojaja handbook`, so the
     // card carries only a compact cheatsheet + a pointer, never the
     // ~250-line handbook body.
-    for (const t of ["codex", "claude", "cursor", "generic"] as const) {
+    for (const t of ["agents", "claude", "cursor", "generic"] as const) {
       const a = buildRuntime(t, PROJ);
       expect(a.body).toContain("gojaja plan");
       expect(a.body).toContain("gojaja handbook"); // the pointer
@@ -178,7 +178,7 @@ describe("buildRuntime handbook integration", () => {
   });
 
   it("the injected card stays well under CLAUDE.md's ~200-line budget", () => {
-    for (const t of ["codex", "claude", "cursor"] as const) {
+    for (const t of ["agents", "claude", "cursor"] as const) {
       const content = buildRuntime(t, PROJ).files[0].content;
       const lines = content.split("\n").length;
       expect(lines).toBeLessThan(130);
@@ -186,7 +186,7 @@ describe("buildRuntime handbook integration", () => {
   });
 
   it("--no-handbook (withHandbook: false) omits the cheatsheet but keeps the loop + pointer", () => {
-    for (const t of ["codex", "claude", "cursor", "generic"] as const) {
+    for (const t of ["agents", "claude", "cursor", "generic"] as const) {
       const a = buildRuntime(t, PROJ, { withHandbook: false });
       expect(a.body).not.toContain("When to use which");
       expect(a.body).toContain("gojaja plan");

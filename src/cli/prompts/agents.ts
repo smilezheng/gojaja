@@ -5,14 +5,14 @@ import type { RuntimeArtifact } from "./types";
 
 // AGENTS.md is the canonical runtime file: the cross-tool project
 // system-prompt standard, injected at session start and surviving
-// compaction. It is PROJECT-LOCAL (no user-level footprint, no
-// reference-counting). We upsert a managed marker block, preserving any
-// content the user already has in AGENTS.md. The `claude` target reuses
-// `agentsFile()` so AGENTS.md stays the single source of truth.
+// compaction. It is PROJECT-LOCAL (no user-level footprint). We upsert a
+// managed marker block, preserving any content the user already has in
+// AGENTS.md. The `claude` target reuses `agentsFile()` so AGENTS.md
+// stays the single source of truth.
 
 /** The managed marker-block content for AGENTS.md. */
 export function agentsBlock(projectRoot: string, opts: RuntimeBodyOptions): string {
-  const effectiveOpts: RuntimeBodyOptions = { ...opts, target: "codex" };
+  const effectiveOpts: RuntimeBodyOptions = { ...opts, target: "agents" };
   return [
     RUNTIME_MARKER_BEGIN,
     "<!-- managed by gojaja; edit the surrounding file freely, but do not edit the contents of this block -->",
@@ -38,7 +38,7 @@ export function agentsFile(
   };
 }
 
-export function buildCodexRuntime(
+export function buildAgentsRuntime(
   projectRoot: string,
   opts: RuntimeBodyOptions = {},
 ): RuntimeArtifact {
@@ -62,6 +62,6 @@ export function buildCodexRuntime(
   return { body, files: [file] };
 }
 
-export function buildCodexActivation(role: string, projectRoot: string): string {
+export function buildAgentsActivation(role: string, projectRoot: string): string {
   return activationSnippet(role, projectRoot);
 }

@@ -3,7 +3,10 @@ import * as path from "node:path";
 import { boolFlag, optionalString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, LAYER_DIRNAME } from "../runtime";
-import { CLAUDE_MARKER_BEGIN, CLAUDE_MARKER_END } from "../prompts/claude";
+import {
+  RUNTIME_MARKER_BEGIN as CLAUDE_MARKER_BEGIN,
+  RUNTIME_MARKER_END as CLAUDE_MARKER_END,
+} from "../prompts/markers";
 
 const CURSOR_RULE_REL = path.join(".cursor", "rules", "gojaja-runtime.mdc");
 // Files that may carry a managed `gojaja-runtime` marker block. CLAUDE.md

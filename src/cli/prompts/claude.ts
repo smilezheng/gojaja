@@ -1,14 +1,8 @@
 import * as path from "node:path";
 import { activationSnippet, type RuntimeBodyOptions } from "./core";
-import { agentsFile } from "./codex";
+import { agentsFile } from "./agents";
 import { RUNTIME_MARKER_BEGIN, RUNTIME_MARKER_END } from "./markers";
 import type { RuntimeArtifact } from "./types";
-
-// Re-exported under the historical names so existing imports
-// (reset.ts, tests) keep working. The block is shared across CLAUDE.md
-// and AGENTS.md, so the marker is not really Claude-specific.
-export const CLAUDE_MARKER_BEGIN = RUNTIME_MARKER_BEGIN;
-export const CLAUDE_MARKER_END = RUNTIME_MARKER_END;
 
 // Claude Code does not read AGENTS.md natively yet (it reads CLAUDE.md
 // + nested imports). To keep AGENTS.md the single source of truth, the
