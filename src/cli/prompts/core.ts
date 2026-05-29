@@ -79,21 +79,34 @@ shell, or carry \`--session <id>\` on every command.
 ## Every turn
 
 1. \`gojaja plan\` → JSON Manifest (role, ackToken, events, tasks, rfcs).
-2. Do the work in the project working tree.
+2. Do the work in the project working tree (including answering the
+   user in chat if they sent a conversational message — that is also
+   "the work").
 3. Emit through gojaja, not chat: \`report\` / \`worklog\` /
    \`task status\` / \`rfc comment\` / \`rfc decide\`.
 4. \`gojaja ack --token <ackToken>\`.
-5. \`${waitCmd}\` — ONE call BLOCKS this turn (no token cost) until
-   ATTENTION / CONDITION_MET (→ \`gojaja plan\`), or TIMEOUT if you set a
-   deadline. With no \`--in\`/\`--until\` it blocks indefinitely and still
-   wakes on events. Goal: spend few turns idle — one long block beats
-   many short ones (each re-run is a fresh, token-costing turn). If the
-   host kills the call, that kill time IS its per-tool-call timeout;
-   re-run \`gojaja wait\` (no args) to resume the same session, but cap
-   yourself at ~5 resumes, then end the turn. See \`gojaja handbook\`.
+
+**End-of-turn ritual: \`${waitCmd}\`.** wait is the ONLY way to
+properly end a turn — a turn that ends without it leaves your role
+deaf and the team cannot reach you. ONE call BLOCKS this turn (no
+token cost) until ATTENTION / CONDITION_MET (→ \`gojaja plan\`), or
+TIMEOUT if you set a deadline. With no \`--in\`/\`--until\` it blocks
+indefinitely and still wakes on events. Goal: spend few turns idle —
+one long block beats many short ones (each re-run is a fresh,
+token-costing turn). If the host kills the call, that kill time IS
+its per-tool-call timeout; re-run \`gojaja wait\` (no args) to resume
+the same session, but cap yourself at ~5 resumes, then end the turn.
+See \`gojaja handbook\`.
 
 ## Rules
 
+- **NEVER end a turn without \`gojaja wait\` as the final tool call.**
+  \`wait\` is what keeps your role reachable — without it no event can
+  wake you and the team's coordination loop breaks silently. This
+  applies EVEN when the user sent a conversational message that
+  needed no gojaja work: answer the user, then run \`wait\` before
+  letting the turn end. "I'm online, waiting for instructions" is
+  not a turn end — \`wait\` is.
 - Never hand-edit files under \`.gojaja/\`. Use \`gojaja\`.
 - Never claim to have done something without producing an event for it.
 - Lost context or unsure of your identity? \`gojaja plan\` first.

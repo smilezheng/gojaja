@@ -8,6 +8,52 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### Runtime body: `wait` is the end-of-turn ritual + hard rule against ending unparked
+
+Direct follow-up to the previous "stalled-no-wait" PR: that one
+made the failure visible (stronger ack warning + watch dashboard
+red flag), this one makes the rule against it explicit at the spot
+agents check most often — the runtime card injected into AGENTS.md /
+CLAUDE.md / cursor rules.
+
+Two coordinated changes to the runtime body:
+
+- **`## Every turn` rewritten.** Steps 1–4 are unchanged
+  (`plan` → work → emit → `ack`); step 5 is replaced by an
+  explicit "**End-of-turn ritual: `gojaja wait`**" paragraph
+  framed as the one legitimate way to end a turn. The previous
+  step-5-among-many shape read as a disjunctive checklist where
+  `wait` was just one option to skip; the new framing positions it
+  as a ritual the turn cannot end without. Step 2 also adds a
+  small carve-out — answering the user in chat is "the work" of
+  that turn — so agents do not interpret a chat-only response as
+  outside the loop.
+- **`## Rules` gains a hard rule, listed first.** Verbatim:
+  > **NEVER end a turn without `gojaja wait` as the final tool
+  > call.** wait is what keeps your role reachable — without it
+  > no event can wake you and the team's coordination loop breaks
+  > silently. This applies EVEN when the user sent a
+  > conversational message that needed no gojaja work: answer the
+  > user, then run wait before letting the turn end. "I'm online,
+  > waiting for instructions" is not a turn end — wait is.
+
+  The "EVEN when the user sent a conversational message" carve-out
+  directly targets the empirically observed failure mode: agents
+  reading a user chat message as "no gojaja work needed" and
+  ending the turn unparked. The "I'm online, waiting for
+  instructions" sentence quotes the literal pattern users have
+  reported seeing.
+
+These are still soft constraints — only the planned PR8v host stop-
+hook can mechanically refuse a turn that ends without `wait` — but
+they raise the floor of the soft layer at the spot agents read most
+often. Total runtime card grew by ~13 lines (84/89 → 97/102 across
+hosts), still well under the 130-line CLAUDE.md budget.
+
+`tests/prompt.test.ts` gains a regression that asserts every host's
+runtime body contains the hard rule, the conversational-message
+carve-out, and the end-of-turn-ritual framing.
+
 ### Stronger ack warning + dashboard "stalled-no-wait" red flag
 
 Empirically the most common per-turn failure mode is "agent runs

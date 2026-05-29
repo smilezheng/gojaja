@@ -117,6 +117,25 @@ describe("buildRuntime (role-free)", () => {
     }
   });
 
+  it("every target's runtime body explicitly forbids ending a turn without `wait` (PR8w hard rule)", () => {
+    // The most common per-turn failure mode is "agent answers the user
+    // in chat and ends the turn unparked" — the role goes deaf and no
+    // event can wake it. The runtime body must call this out as a
+    // rule, not just as step 5 of "Every turn", because step 5 reads
+    // as one of N choices. Two phrasings here:
+    //   - the imperative rule in `## Rules`
+    //   - the explicit carve-out for conversational-only turns
+    // Both must be present in every host's body, and the
+    // "End-of-turn ritual" framing must position `wait` as the only
+    // legitimate end of turn (not just "another step").
+    for (const t of ["agents", "claude", "cursor", "generic"] as const) {
+      const a = buildRuntime(t, ctx.root);
+      expect(a.body).toMatch(/NEVER end a turn without `gojaja wait`/);
+      expect(a.body).toMatch(/conversational message/i);
+      expect(a.body).toMatch(/End-of-turn ritual/);
+    }
+  });
+
   it("agents AGENTS.md block is project-path-agnostic — same bytes for any projectRoot", async () => {
     // The block goes into <root>/AGENTS.md (project-local), but its
     // CONTENT bakes no absolute path: gojaja discovers the root from cwd
