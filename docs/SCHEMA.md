@@ -255,7 +255,8 @@ Event types currently emitted:
 | `TASK_STATUS_CHANGED` | `gojaja task status`           | Broadcast; `ref` = task id.                    |
 | `TASK_DELIVERABLE_BYPASSED` | `gojaja task status ... Done --force-incomplete` | Broadcast; `ref` = task id; `payload.missing` lists the file refs that were not on disk; `payload.by` records the actor who approved the bypass. Always emitted before the corresponding `TASK_STATUS_CHANGED`. |
 | `RFC_CREATED`         | `gojaja rfc new`               | Broadcast; `ref` = RFC id.                     |
-| `RFC_COMMENT`         | `gojaja rfc comment` / `ack` / `object` / `pre-decide` | Broadcast; `ref` = RFC id. `payload.kind` distinguishes regular discussion (undefined) from structured `"pre-decision"` / `"ack"` / `"object"` posts. |
+| `RFC_COMMENT`         | `gojaja rfc comment` / `ack` / `object` / `pre-decide` / `withdraw-pre-decision` | Broadcast; `ref` = RFC id. `payload.kind` distinguishes regular discussion (undefined) from structured `"pre-decision"` / `"ack"` / `"object"` / `"withdraw"` posts. |
+| `RFC_READY_TO_DECIDE` | framework (auto, on comment-coverage gate flip) | Broadcast; `ref` = RFC id; `from: "SYSTEM"`. Tells deciders the comment-coverage gate is satisfied so a `pre-decide` is allowed; re-emitted on late comments before any pre-decide; suppressed once a pre-decision is active. |
 | `RFC_DECIDED`         | `gojaja rfc decide` / `reject` | Broadcast; `ref` = RFC id; final.              |
 | `RFC_REPAIRED`        | `Store.readRfc` self-heal        | Broadcast; `ref` = RFC id. Emitted when a half-written `finaliseRfc` is observed (decision.json exists but proposal.yaml still `open`) and the proposal status is forward-completed from the decision. |
 | `RFC_OPTION_ADDED`    | `gojaja rfc add-option`        | Broadcast; `ref` = RFC id; payload carries new option id + summary + rationale. Also implicitly invalidates any pending pre-decision via the read-time computation. |
@@ -597,10 +598,11 @@ Status state machine (enforced):
 
 Multiple comments per role are preserved (ULIDs ensure order). Normal
 mutation goes through `gojaja rfc comment` (regular), `rfc
-pre-decide` (kind=pre-decision; decider only), `rfc ack` (kind=ack),
-`rfc object` (kind=object), all of which append to the ledger and
-emit `RFC_COMMENT` with `payload.kind`. Comments on closed RFCs
-(`accepted` / `rejected` / `superseded`) are refused.
+pre-decide` (kind=pre-decision; decider only), `rfc
+withdraw-pre-decision` (kind=withdraw; original pre-decider only),
+`rfc ack` (kind=ack), `rfc object` (kind=object), all of which append
+to the ledger and emit `RFC_COMMENT` with `payload.kind`. Comments on
+closed RFCs (`accepted` / `rejected` / `superseded`) are refused.
 
 The `role` field on a regular discussion comment may also be the
 literal `"SYSTEM"` — written when a human runs `gojaja rfc comment`

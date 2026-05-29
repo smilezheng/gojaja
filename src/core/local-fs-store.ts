@@ -273,15 +273,20 @@ function splitJoin(haystack: string, oldText: string, newText: string): string {
  * the timestamps of all RFC_OPTION_ADDED events for the same RFC,
  * compute whether there is currently an "active pre-decision".
  *
- * Rule: the latest `kind === "pre-decision"` comment in the ledger
- * is active IF AND ONLY IF there is no RFC_OPTION_ADDED event with
- * `ts > pre-decision.ts`. add-option after a pre-decision silently
- * invalidates that pre-decision because voters were ACKing an
- * outdated option set; the decider must issue a fresh pre-decision
- * if they want a new ACK round.
+ * Rules: the latest `kind === "pre-decision"` comment in the ledger
+ * is active UNLESS one of the following invalidates it:
+ *
+ *   1. **add-option after the pre-decision**: any RFC_OPTION_ADDED
+ *      with `ts > pre-decision.ts` invalidates — voters were ACKing
+ *      an outdated option set; the decider must issue a fresh
+ *      pre-decision if they want a new ACK round.
+ *   2. **withdraw by the original pre-decider**: any later
+ *      `kind === "withdraw"` comment from `pre-decision.role` is an
+ *      explicit self-revoke. The pre-decide lock is released and the
+ *      RFC is back to open discussion.
  *
  * Returns null if no pre-decision exists yet, or if the latest one
- * has been invalidated by a subsequent add-option event.
+ * has been invalidated by either rule above.
  */
 function computeActivePreDecisionInLedger(
   comments: RfcComment[],
@@ -306,12 +311,66 @@ function computeActivePreDecisionInLedger(
   }
   if (latest === null) return null;
   if (addOptionAddedTimestamps.some((ts) => ts > latest!.ts)) return null;
+  const withdrawnByAuthor = comments.some(
+    (c) =>
+      c.kind === "withdraw" &&
+      c.role === latest!.role &&
+      c.ts > latest!.ts,
+  );
+  if (withdrawnByAuthor) return null;
   return {
     decidedBy: latest.role,
     chosenOption: latest.preferred,
     ts: latest.ts,
     rationale: latest.rationale,
   };
+}
+
+/**
+ * Compute the "required commenter set" for an RFC: the roles whose
+ * plain `rfc comment` participation must be present before any
+ * `pre-decide` is allowed.
+ *
+ * The set is `(voters ∪ deciders) − {createdBy if not SYSTEM}`. The
+ * creator is excluded by design — they already framed the question
+ * (the proposal's `description`); requiring them to also post a
+ * regular comment would either be ceremony (duplicating the
+ * description) or create a self-anchoring effect that biases the
+ * discussion toward whatever the creator's first comment says.
+ * SYSTEM-created RFCs (`createdBy === "SYSTEM"`) have no creator to
+ * exclude, and SYSTEM is never in voters/deciders anyway.
+ */
+function requiredCommenterSet(proposal: RfcProposal): Set<RoleId> {
+  const set = new Set<RoleId>([...proposal.voters, ...proposal.deciders]);
+  if (proposal.createdBy !== "SYSTEM") set.delete(proposal.createdBy);
+  return set;
+}
+
+/**
+ * Has every role in the required-commenter set posted at least one
+ * regular discussion comment (`kind === undefined`) on this RFC?
+ *
+ * Structured kinds (`pre-decision` / `ack` / `object` / `withdraw`)
+ * deliberately do NOT count: they are flow-control posts, not
+ * substantive engagement. Otherwise an ack would silently satisfy
+ * the comment gate and the gate would lose its point.
+ */
+function isRfcPreDecideAble(
+  proposal: RfcProposal,
+  comments: RfcComment[],
+): boolean {
+  const required = requiredCommenterSet(proposal);
+  if (required.size === 0) return true; // edge case: nothing to wait on.
+  const commented = new Set<RoleId>();
+  for (const c of comments) {
+    if (c.kind !== undefined) continue;
+    if (c.role === "SYSTEM") continue; // SYSTEM is never in required.
+    if (required.has(c.role)) commented.add(c.role);
+  }
+  for (const r of required) {
+    if (!commented.has(r)) return false;
+  }
+  return true;
 }
 
 /**
@@ -640,6 +699,7 @@ export class LocalFsStore implements Store {
         case "RFC_OPTION_ADDED":
         case "RFC_REVISION_REQUESTED":
         case "RFC_REVISED":
+        case "RFC_READY_TO_DECIDE":
           if (e.ref) rfcIdsTouched.add(e.ref);
           break;
         case "RFC_TASK_LINKED":
@@ -744,7 +804,8 @@ export class LocalFsStore implements Store {
       case "RFC_COMMENT":
       case "RFC_OPTION_ADDED":
       case "RFC_REVISION_REQUESTED":
-      case "RFC_REVISED": {
+      case "RFC_REVISED":
+      case "RFC_READY_TO_DECIDE": {
         if (!e.ref) return true; // malformed; surface defensively
         const set = rfcParticipants.get(e.ref);
         return set ? set.has(role) : true;
@@ -2357,6 +2418,12 @@ export class LocalFsStore implements Store {
 
       // kind-specific validation.
       if (kind === "pre-decision") {
+        // Order matters: structural gates (authority, RFC state,
+        // option-set sanity) come before discussion gates (active
+        // pre-decision, comment-coverage). The structural gates
+        // produce the most actionable error messages — "you're not
+        // a decider" / "this is brainstorm-mode" — and gating them
+        // behind "wait for X to comment" would feel wrong.
         if (!proposal.deciders.includes(input.role)) {
           throw new ForbiddenError(
             `Role '${input.role}' is not in deciders for ${input.rfcId} (deciders: ${proposal.deciders.join(", ") || "(none)"}). ` +
@@ -2386,6 +2453,56 @@ export class LocalFsStore implements Store {
         if (!proposal.options.find((o) => o.id === preferred)) {
           throw new UsageError(
             `Option '${preferred}' is not in RFC ${input.rfcId}. Options: ${proposal.options.map((o) => o.id).join(", ")}.`,
+          );
+        }
+        // Refuse a second pre-decide while one is already active.
+        // Without this gate two deciders could rapidly post competing
+        // pre-decisions and silently overwrite one another (the old
+        // "latest wins" behaviour); the resulting ACK round would be
+        // a coin flip on whoever wrote last. To re-propose, the
+        // original pre-decider runs `rfc withdraw-pre-decision`
+        // first, OR add-option silently invalidates the existing
+        // pre-decision (option set has changed; ACK round was
+        // against an outdated set).
+        const activeAlready = computeActivePreDecisionInLedger(
+          comments,
+          proposal.id,
+          await this.rfcOptionAddedEventTimestamps(proposal.id),
+        );
+        if (activeAlready !== null) {
+          throw new UsageError(
+            `RFC ${input.rfcId} already has an active pre-decision (option ` +
+              `'${activeAlready.chosenOption}' by ${activeAlready.decidedBy}). ` +
+              `To re-propose, ${activeAlready.decidedBy} must run ` +
+              `\`gojaja rfc withdraw-pre-decision ${input.rfcId} --rationale ...\` first; ` +
+              `or any voter/decider can run \`gojaja rfc add-option ${input.rfcId} ...\` ` +
+              `(which silently invalidates the active pre-decision).`,
+          );
+        }
+        // Comment-coverage gate. Every required commenter — `(voters
+        // ∪ deciders) − {createdBy if not SYSTEM}` — must have posted
+        // at least one regular discussion comment before any decider
+        // is allowed to pre-decide. Without this, a decider could
+        // rush a pre-decision before the rest of the team had
+        // weighed in. The framework auto-emits
+        // `RFC_READY_TO_DECIDE` exactly when this gate flips green
+        // (see commentRfc), so deciders do not have to poll.
+        if (!isRfcPreDecideAble(proposal, comments)) {
+          const required = requiredCommenterSet(proposal);
+          const commented = new Set<RoleId>();
+          for (const c of comments) {
+            if (c.kind === undefined && c.role !== "SYSTEM" && required.has(c.role)) {
+              commented.add(c.role);
+            }
+          }
+          const missing = [...required].filter((r) => !commented.has(r));
+          throw new UsageError(
+            `Cannot pre-decide ${input.rfcId} yet: still waiting on a regular ` +
+              `\`rfc comment\` from ${missing.join(", ")}. ` +
+              `Every required commenter (voters + deciders, excluding the creator) ` +
+              `must weigh in at least once before a pre-decision is allowed. ` +
+              `If a role is unreachable, run \`gojaja rfc reject ${input.rfcId} ` +
+              `--rationale ...\` and open a new RFC without that role.`,
           );
         }
       } else if (kind === "ack" || kind === "object") {
@@ -2469,6 +2586,43 @@ export class LocalFsStore implements Store {
         await fsp.mkdir(path.dirname(cursorTarget), { recursive: true });
         await atomicWriteJson(cursorTarget, { lastSeenCommentId: comment.id });
       }
+
+      // Pre-decide-able autoprompt: if this comment was a regular
+      // discussion comment (not a structured kind), the RFC is `open`,
+      // and there is currently no active pre-decision, check whether
+      // the just-updated ledger now satisfies the comment-coverage
+      // gate. If so, emit `RFC_READY_TO_DECIDE` to nudge the deciders.
+      //
+      // We deliberately re-emit if a fresh comment lands after a
+      // previous READY (a late voter still gets to be heard before
+      // pre-decide); the alternative — gating on "no prior READY
+      // event for this RFC" — would silently lose the late voter's
+      // signal. Over the lifetime of a single RFC the worst case is
+      // one READY per qualifying late comment, which is fine.
+      // Suppressed once a pre-decision is active (the flow has moved
+      // on to ACK; READY is no longer the right prompt).
+      if (kind === undefined && proposal.status === "open") {
+        const optionAddedTs = await this.rfcOptionAddedEventTimestamps(proposal.id);
+        const activeAfter = computeActivePreDecisionInLedger(
+          nextLedger,
+          proposal.id,
+          optionAddedTs,
+        );
+        if (activeAfter === null && isRfcPreDecideAble(proposal, nextLedger)) {
+          const required = [...requiredCommenterSet(proposal)];
+          await this.recordEventInternal({
+            type: "RFC_READY_TO_DECIDE",
+            from: "SYSTEM",
+            to: "*",
+            ref: proposal.id,
+            payload: {
+              rfcId: proposal.id,
+              requiredCommenters: required,
+            },
+          });
+        }
+      }
+
       return comment;
     });
   }
@@ -2780,6 +2934,93 @@ export class LocalFsStore implements Store {
       rationale: input.rationale,
       replyTo: null,
       kind: "object",
+    });
+  }
+
+  async withdrawRfcPreDecision(input: {
+    rfcId: string;
+    role: RoleId;
+    rationale: string;
+  }): Promise<RfcComment> {
+    validateRoleId(input.role);
+    const rationale = String(input.rationale ?? "").trim();
+    if (rationale.length === 0) {
+      throw new UsageError(
+        "Withdraw rationale must be non-empty (tells the team why you " +
+          "are revoking your pre-decision).",
+      );
+    }
+
+    return this.withLock(`rfc-${input.rfcId}`, async () => {
+      const { proposal, comments } = await this.readRfcUnchecked(input.rfcId, {
+        lockHeld: true,
+      });
+      if (proposal.status !== "open" && proposal.status !== "revising") {
+        throw new UsageError(
+          `RFC ${input.rfcId} is ${proposal.status}; cannot withdraw on a ` +
+            `closed RFC.`,
+        );
+      }
+      const optionAddedTs = await this.rfcOptionAddedEventTimestamps(proposal.id);
+      const active = computeActivePreDecisionInLedger(
+        comments,
+        proposal.id,
+        optionAddedTs,
+      );
+      if (active === null) {
+        throw new UsageError(
+          `RFC ${input.rfcId} has no active pre-decision to withdraw.`,
+        );
+      }
+      if (input.role !== active.decidedBy) {
+        throw new ForbiddenError(
+          `Role '${input.role}' did not post the active pre-decision on ` +
+            `${input.rfcId} (it was posted by '${active.decidedBy}'). ` +
+            `Only the original pre-decider can withdraw.`,
+        );
+      }
+
+      const comment: RfcComment = {
+        id: newId(),
+        rfcId: proposal.id,
+        role: input.role,
+        ts: new Date().toISOString(),
+        preferred: "",
+        replyTo: null,
+        rationale,
+        kind: "withdraw",
+      };
+      const nextLedger = [...comments, comment];
+      await atomicWriteFile(
+        this.abs(rfcCommentsFile(proposal.id, proposal.slug)),
+        yaml.dump(nextLedger, { lineWidth: 100, noRefs: true }),
+      );
+      // Emitted as a regular RFC_COMMENT (with payload.kind = "withdraw")
+      // so existing event consumers (manifest projection, history,
+      // dashboards) need no new branches; the withdraw is just another
+      // structured comment, same shape as ack / object / pre-decision.
+      await this.recordEventInternal({
+        type: "RFC_COMMENT",
+        from: input.role,
+        to: "*",
+        ref: proposal.id,
+        payload: {
+          rfcId: proposal.id,
+          role: input.role,
+          preferred: "",
+          rationale,
+          commentId: comment.id,
+          replyTo: null,
+          kind: "withdraw",
+        },
+      });
+      // Advance commenter's per-RFC read cursor (they just authored
+      // the latest comment, so by definition have read everything up
+      // to and including it).
+      const cursorTarget = this.abs(rfcReadCursorPath(input.role, proposal.id));
+      await fsp.mkdir(path.dirname(cursorTarget), { recursive: true });
+      await atomicWriteJson(cursorTarget, { lastSeenCommentId: comment.id });
+      return comment;
     });
   }
 

@@ -153,7 +153,7 @@ each agent's per-turn attention small. Two filters apply in order:
    | `WORKLOG` (default) | every role (manual team-status channel) |
    | `WORKLOG` with `payload.kind: "idle"` | task-board owners only (the auto-broadcast that `wait --for task-assigned` emits at session open; peer idle roles must NOT be woken by it, see Wait/lifecycle for the mutual-wakeup-loop rationale) |
    | `RFC_DECIDED` | every role (decisions are team-wide knowledge) |
-   | `RFC_CREATED`, `RFC_COMMENT`, `RFC_OPTION_ADDED`, `RFC_REVISION_REQUESTED`, `RFC_REVISED` | the RFC's `voters ∪ deciders ∪ {createdBy}` |
+   | `RFC_CREATED`, `RFC_COMMENT`, `RFC_OPTION_ADDED`, `RFC_REVISION_REQUESTED`, `RFC_REVISED`, `RFC_READY_TO_DECIDE` | the RFC's `voters ∪ deciders ∪ {createdBy}` |
    | `RFC_TASK_LINKED`, `RFC_TASK_UNLINKED` | RFC participants OR the linked task's stakeholders |
    | `TASK_CREATED` | roles that own `state/task_board.yaml` (triage set) |
    | `TASK_STATUS_CHANGED`, `TASK_DELIVERABLE_BYPASSED` | task stakeholders (owner, parent owner, dependants) |
@@ -497,9 +497,61 @@ superseded), worked example, and rationale live in
 - Required-ACK set: `(voters ∪ deciders) − {pre-decider}`.
 - Surface in `manifest.rfcs[*].pendingPreDecision` with
   `awaitingAckFrom` and per-role `myAckOwed`.
-- Re-issuing pre-decide invalidates all prior `ack` / `object`
-  responses — every required role must respond again.
+- **Comment-coverage gate (PR8u).** Refused with USAGE if any member
+  of the required-commenter set — `(voters ∪ deciders) −
+  {createdBy if not SYSTEM}` — has not yet posted a regular `rfc
+  comment` on this RFC. The error names the missing roles. Without
+  this, a decider could rush a pre-decision before the rest of the
+  team had weighed in. The framework auto-emits
+  `RFC_READY_TO_DECIDE` (broadcast, `from: "SYSTEM"`) the moment the
+  gate flips green so deciders do not have to poll. Only regular
+  comments (no `kind`) count; `ack` / `object` / `pre-decision` /
+  `withdraw` are flow-control posts and deliberately do not satisfy
+  the gate. The creator is excluded by design — `description` is
+  their initial framing, and forcing them to also comment would
+  either be ceremony or self-anchor the discussion.
+- **Active-pre-decision gate (PR8u).** Refused with USAGE if an
+  active pre-decision already exists. The two ways out:
+  - the original pre-decider runs `rfc withdraw-pre-decision`
+    (explicit self-revoke; see below), then any decider can
+    pre-decide afresh;
+  - any voter/decider runs `rfc add-option`, which silently
+    invalidates the active pre-decision (the option set has changed;
+    the prior ACK round was against an outdated set anyway).
+  Without this gate two deciders could rapidly post competing
+  pre-decisions and silently overwrite one another (the old
+  "latest-wins" race).
 - Emits `RFC_COMMENT` with `payload.kind = "pre-decision"`.
+
+### `gojaja rfc withdraw-pre-decision <rfc-id> --rationale <text>`
+
+- Author gate: only the role that posted the active pre-decision can
+  withdraw it. Anyone else → FORBIDDEN. No active pre-decision →
+  USAGE.
+- Posts a `kind: "withdraw"` comment; the active state is cleared.
+  Existing `ack` / `object` posts stay in the ledger but are no
+  longer counted (their `ts` predates any future pre-decision's
+  `ts`, and the standard `c.ts > active.ts` gate already invalidates
+  them).
+- Emits `RFC_COMMENT` with `payload.kind = "withdraw"`.
+- There is no "undo a withdraw" — to re-propose, post a fresh
+  `rfc pre-decide`.
+
+### `RFC_READY_TO_DECIDE` (auto-emitted)
+
+- Auto-emitted by the framework — not by any role — the moment the
+  comment-coverage gate flips green for an RFC and there is no
+  active pre-decision. Tells deciders "discussion has covered the
+  room; you can now `rfc pre-decide`".
+- `from: "SYSTEM"`, `to: "*"`, `ref: <rfcId>`. Payload:
+  `{ rfcId, requiredCommenters: RoleId[] }`.
+- Visibility (`filterVisibleEventsForRole`): same rule as other
+  RFC_* events — `voters ∪ deciders ∪ {createdBy if not SYSTEM}`.
+- Re-emitted if a fresh regular comment lands after a previous
+  READY (and before any pre-decide), so a late voter still gets
+  heard before the discussion is locked.
+- Suppressed once a pre-decision is active (the flow has moved on
+  to ACK; READY is no longer the right prompt).
 
 ### `gojaja rfc ack <rfc-id> [--rationale <text>]`
 

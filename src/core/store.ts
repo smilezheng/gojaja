@@ -479,6 +479,25 @@ export interface Store {
   }): Promise<RfcComment>;
 
   /**
+   * Withdraw the active pre-decision. Caller must be the role that
+   * posted that pre-decision (decider self-revoke); appends a
+   * `kind: "withdraw"` comment which `computeActivePreDecisionInLedger`
+   * reads back to clear the active state. Existing ack / object
+   * comments stay in the ledger but are no longer counted (they
+   * predate any future pre-decision's `ts`, so the standard
+   * `c.ts > active.ts` gate naturally invalidates them).
+   *
+   * Refuses with USAGE if there is no active pre-decision or with
+   * ForbiddenError if the caller is not its author. There is no
+   * "undo a withdraw" — to re-propose, post a fresh `pre-decide`.
+   */
+  withdrawRfcPreDecision(input: {
+    rfcId: string;
+    role: RoleId;
+    rationale: string;
+  }): Promise<RfcComment>;
+
+  /**
    * Decide an RFC (accept with a chosen option). The caller's role must
    * be in the proposal's `deciders` list (ForbiddenError otherwise; that
    * class arrives in PR7, but we already throw UsageError today).

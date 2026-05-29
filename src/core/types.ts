@@ -23,6 +23,18 @@ export type EventType =
   | "RFC_REVISED"
   | "RFC_TASK_LINKED"
   | "RFC_TASK_UNLINKED"
+  /**
+   * Auto-emitted by the framework when an RFC has accumulated a
+   * regular discussion comment from every required commenter
+   * (`(voters ∪ deciders) − {createdBy if not SYSTEM}`) and has no
+   * active pre-decision yet. Tells deciders "discussion has covered
+   * the room; you can now `rfc pre-decide`". Re-emitted if a fresh
+   * comment lands after the previous READY-event (and before any
+   * pre-decision is posted), so a late voter still gets the chance
+   * to be heard. Suppressed once a pre-decision is active. See
+   * PROTOCOL.md → RFC v2 for the full state machine.
+   */
+  | "RFC_READY_TO_DECIDE"
   | "TASK_DELIVERABLE_BYPASSED"
   | "SESSION_CLAIMED"
   | "SESSION_RELEASED"
@@ -455,7 +467,7 @@ export interface RfcProposal {
  * A comment carries one of three structured "kinds" that drive the
  * ACK gate, or no kind at all (regular discussion).
  */
-export type RfcCommentKind = "pre-decision" | "ack" | "object";
+export type RfcCommentKind = "pre-decision" | "ack" | "object" | "withdraw";
 
 export interface RfcComment {
   /**
@@ -535,6 +547,24 @@ export interface RfcDecidedPayload {
   outcome: "accepted" | "rejected";
   chosenOption: string | null;
   rationale: string;
+}
+
+/**
+ * Payload shape for RFC_READY_TO_DECIDE events.
+ *
+ * Carries the snapshot of who satisfied the comment-coverage gate so
+ * downstream consumers (dashboards, audit, future `gojaja doctor`)
+ * can render "this RFC reached pre-decide-able after roles X, Y, Z
+ * had all weighed in" without re-reading the whole comments ledger.
+ */
+export interface RfcReadyToDecidePayload {
+  rfcId: string;
+  /**
+   * Roles whose plain `rfc comment` participation made this RFC
+   * pre-decide-able. Equals `(voters ∪ deciders) − {createdBy if not
+   * SYSTEM}` at the moment the event was emitted.
+   */
+  requiredCommenters: RoleId[];
 }
 
 // ---- RFC event payloads ------------------------------------------------

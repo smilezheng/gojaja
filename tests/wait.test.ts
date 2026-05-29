@@ -365,6 +365,11 @@ describe("gojaja wait (PR8i)", () => {
         createdBy: "TL",
         description: "ctx",
       });
+      // Comment-coverage gate (PR8u): TL is the creator (excluded);
+      // PM is the only required commenter.
+      await ctx.store.commentRfc({
+        rfcId: rfc.id, role: "PM", preferred: "", rationale: "in",
+      });
       await ctx.store.preDecideRfc({
         rfcId: rfc.id,
         decidedBy: "PM",
@@ -454,6 +459,13 @@ describe("gojaja wait (PR8i)", () => {
         createdBy: "TL",
         description: "ctx",
       });
+      // Comment-coverage gate (PR8u): TL is the creator (excluded);
+      // PM and Backend must comment before pre-decide is allowed.
+      for (const role of ["PM", "Backend"] as const) {
+        await ctx.store.commentRfc({
+          rfcId: rfc.id, role, preferred: "", rationale: "in",
+        });
+      }
       const m = await ctx.store.openOrCreatePlan("TL");
       await ctx.store.ackManifest("TL", m.ackToken);
 

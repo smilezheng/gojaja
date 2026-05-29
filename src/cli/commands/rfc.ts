@@ -265,6 +265,32 @@ async function runRfcObject(args: ParsedArgs): Promise<number> {
   return 0;
 }
 
+async function runRfcWithdrawPreDecision(args: ParsedArgs): Promise<number> {
+  const rfcId = args.positional[1];
+  if (!rfcId) {
+    throw new UsageError(
+      "Usage: gojaja rfc withdraw-pre-decision <rfc-id> --rationale <text>",
+    );
+  }
+  const rationale = requireString(args.flags, "rationale");
+  const json = boolFlag(args.flags, "json");
+  const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
+  const store = await openStoreOrThrow(root);
+  const { role } = await resolveIdentity(store, { requireSession: true });
+  const comment = await store.withdrawRfcPreDecision({ rfcId, role, rationale });
+  if (json) {
+    process.stdout.write(JSON.stringify({ status: "withdrawn", comment }) + "\n");
+  } else {
+    process.stdout.write(
+      `Withdrew the active pre-decision on ${rfcId} as ${role} (comment ${comment.id}).\n` +
+        `Other deciders may now pre-decide; existing ack/object posts no longer count and ` +
+        `are superseded by the next pre-decision's ACK round.\n` +
+        nextLoopHint({ json, actor: role }),
+    );
+  }
+  return 0;
+}
+
 async function runRfcDecide(args: ParsedArgs): Promise<number> {
   const rfcId = args.positional[1];
   if (!rfcId) {
@@ -614,6 +640,7 @@ export async function runRfc(args: ParsedArgs): Promise<number> {
     case "comment":       return runRfcComment(args);
     case "add-option":    return runRfcAddOption(args);
     case "pre-decide":    return runRfcPreDecide(args);
+    case "withdraw-pre-decision": return runRfcWithdrawPreDecision(args);
     case "ack":           return runRfcAck(args);
     case "object":        return runRfcObject(args);
     case "decide":        return runRfcDecide(args);
@@ -626,11 +653,12 @@ export async function runRfc(args: ParsedArgs): Promise<number> {
     case "show":          return runRfcShow(args);
     default:
       throw new UsageError(
-        "Usage: gojaja rfc <new|comment|add-option|pre-decide|ack|object|decide|reject|revise|edit|link-task|unlink-task|list|show> [args]\n" +
+        "Usage: gojaja rfc <new|comment|add-option|pre-decide|withdraw-pre-decision|ack|object|decide|reject|revise|edit|link-task|unlink-task|list|show> [args]\n" +
           "  gojaja rfc new <slug> --title <text> --deciders <r1,r2> [--description <text>] [--voters <...>] [--options A:summary,B:summary] [--task T-NNNN[,T-NNNN]] [--deadline <iso>]\n" +
           "  gojaja rfc comment <rfc-id> --rationale <text> [--option <opt>] [--reply-to <comment-id>]\n" +
           "  gojaja rfc add-option <rfc-id> --option <id>:<summary> --rationale <text>\n" +
           "  gojaja rfc pre-decide <rfc-id> --option <opt> --rationale <text>\n" +
+          "  gojaja rfc withdraw-pre-decision <rfc-id> --rationale <text>\n" +
           "  gojaja rfc ack <rfc-id> [--rationale <text>]\n" +
           "  gojaja rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]\n" +
           "  gojaja rfc decide <rfc-id> --option <opt> --rationale <text>\n" +

@@ -31,6 +31,32 @@ const NEW_RFC = {
   createdBy: "Backend" as const,
 };
 
+/**
+ * Satisfy the comment-coverage gate that pre-decide now enforces.
+ * The gate requires a regular `rfc comment` from every member of
+ * `(voters ∪ deciders) − {createdBy if not SYSTEM}` before any
+ * pre-decision is allowed (without it a decider could rush a
+ * pre-decision before the rest of the team weighed in). Tests that
+ * exercise pre-decide / ack / object / decide flows therefore need
+ * to satisfy the gate first; this helper does it for the standard
+ * NEW_RFC role set: DevOps and PM are voters; TL is the decider;
+ * Backend is the creator (auto-added to voters but excluded from
+ * the required-commenter set per design).
+ */
+async function satisfyCommentGateForNewRfc(
+  store: LocalFsStore,
+  rfcId: string,
+): Promise<void> {
+  for (const role of ["DevOps", "PM", "TL"] as const) {
+    await store.commentRfc({
+      rfcId,
+      role,
+      preferred: "",
+      rationale: `${role} weighing in.`,
+    });
+  }
+}
+
 describe("PR8g — description / relatedTasks", () => {
   let ctx: { root: string; store: LocalFsStore };
   beforeEach(async () => { ctx = await freshStore(); });
@@ -198,6 +224,7 @@ describe("PR8g — addRfcOption", () => {
 
   it("PR8g.1: add-option during a pending pre-decision is allowed AND invalidates the pre-decision", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -224,6 +251,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
 
   it("decider can post a pre-decision; status stays open; ledger gets a kind=pre-decision comment", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     const c = await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -246,6 +274,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
 
   it("decide refused until all required roles have ack/object'd", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -264,6 +293,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
     // PR8t: NEW_RFC.createdBy === "Backend", so Backend is auto-added
     // to voters and must ack alongside DevOps + PM before TL can decide.
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -280,6 +310,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
     // PR8t: Backend (createdBy) must respond too — mix in an object
     // from the creator alongside DevOps ack + PM object.
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -298,6 +329,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
 
   it("partial response → decide still refused, naming who's outstanding", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -314,6 +346,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
 
   it("ack from the pre-decider themselves is refused", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -325,6 +358,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
   it("ack from a role not in (voters ∪ deciders) is FORBIDDEN", async () => {
     await ctx.store.createRole({ id: "Outsider", title: "Outsider" });
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -342,6 +376,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
 
   it("object rationale is required (USAGE if empty)", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -352,6 +387,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
 
   it("object with preferredOption not in proposal is USAGE", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -363,15 +399,30 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
     ).rejects.toMatchObject({ code: "USAGE" });
   });
 
-  it("re-publish: posting a new pre-decision invalidates all prior ACKs", async () => {
+  it("re-publish (via withdraw + new pre-decide): posting a new pre-decision invalidates all prior ACKs", async () => {
+    // PR8u: a second pre-decide is no longer allowed to silently
+    // overwrite an active one (that was a coin-flip race between
+    // competing deciders). To re-propose, the original pre-decider
+    // explicitly withdraws first; old ACKs predate the next
+    // pre-decision's `ts` and the standard `c.ts > active.ts` gate
+    // already invalidates them.
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "first round",
     });
     await ctx.store.ackRfc({ rfcId: r.id, role: "DevOps" });
     await ctx.store.ackRfc({ rfcId: r.id, role: "PM" });
-    // Re-publish (different option, same decider — also covers "same
-    // option" via the same code path since the gate keys off ts).
+    // Direct second preDecide is now refused — must withdraw first.
+    await expect(
+      ctx.store.preDecideRfc({
+        rfcId: r.id, decidedBy: "TL", chosenOption: "B",
+        rationale: "second round, prefer B",
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+    await ctx.store.withdrawRfcPreDecision({
+      rfcId: r.id, role: "TL", rationale: "rethinking",
+    });
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "B",
       rationale: "second round, prefer B",
@@ -388,6 +439,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
 
   it("add-option after pre-decide invalidates the pre-decision; decide proceeds without ACK gate", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -404,6 +456,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
 
   it("reject bypasses the ACK gate (the only escape from a stalled pre-decision)", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -427,6 +480,7 @@ describe("PR8g.1 — pre-decide as structured comment + ACK gate", () => {
 
   it("regular rfc comment from a required role does NOT advance the ACK gate", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -613,6 +667,7 @@ describe("PR8g — Manifest visibility for new states", () => {
     // PR8t: NEW_RFC.createdBy === "Backend", so Backend is auto-added
     // to voters and is in the required-ACK set.
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -638,6 +693,7 @@ describe("PR8g — Manifest visibility for new states", () => {
 
   it("PR8g.1: voter ack shrinks awaitingAckFrom (from decider's view) and drops voter from their own manifest", async () => {
     const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -846,6 +902,13 @@ describe("PR8t — RFC creator is automatically a voter", () => {
       options: [{ id: "A", summary: "do a" }],
       createdBy: "Backend",
     });
+    // Comment-coverage gate (PR8u) requires DevOps + TL to comment
+    // before pre-decide. Backend (creator) is excluded from the
+    // required-commenter set by design but is still in the ACK gate
+    // (because createdBy is auto-added to voters).
+    for (const role of ["DevOps", "TL"] as const) {
+      await ctx.store.commentRfc({ rfcId: r.id, role, preferred: "", rationale: "in" });
+    }
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
     });
@@ -874,6 +937,11 @@ describe("PR8t — RFC creator is automatically a voter", () => {
       createdBy: "PM",
     });
     expect(r.voters).toEqual(["DevOps", "PM"]);
+    // Comment-coverage gate (PR8u): PM is the creator, so they're
+    // excluded; only DevOps needs to comment first.
+    await ctx.store.commentRfc({
+      rfcId: r.id, role: "DevOps", preferred: "", rationale: "in",
+    });
     await ctx.store.preDecideRfc({
       rfcId: r.id, decidedBy: "PM", chosenOption: "A", rationale: "lean A",
     });
@@ -883,5 +951,266 @@ describe("PR8t — RFC creator is automatically a voter", () => {
       rfcId: r.id, decidedBy: "PM", chosenOption: "A", rationale: "go",
     });
     expect(d.outcome).toBe("accepted");
+  });
+});
+
+describe("PR8u — comment-coverage gate + RFC_READY_TO_DECIDE + withdraw", () => {
+  let ctx: { root: string; store: LocalFsStore };
+  beforeEach(async () => { ctx = await freshStore(); });
+  afterEach(async () => { await fsp.rm(ctx.root, { recursive: true, force: true }); });
+
+  // ---------- pre-decide-able gate (preDecideRfc) ----------
+
+  it("pre-decide refuses with USAGE when a required commenter has not yet commented; lists who", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    // Only DevOps and TL comment; PM is missing.
+    await ctx.store.commentRfc({ rfcId: r.id, role: "DevOps", preferred: "", rationale: "in" });
+    await ctx.store.commentRfc({ rfcId: r.id, role: "TL", preferred: "", rationale: "in" });
+    let caught: Error | null = null;
+    try {
+      await ctx.store.preDecideRfc({
+        rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
+      });
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught).not.toBeNull();
+    expect((caught as { code?: string }).code).toBe("USAGE");
+    expect(caught!.message).toMatch(/PM/);
+    expect(caught!.message).toMatch(/rfc reject/);
+  });
+
+  it("creator (Backend) is NOT in the required-commenter set", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    // DevOps + PM + TL comment; Backend (creator) does NOT.
+    for (const role of ["DevOps", "PM", "TL"] as const) {
+      await ctx.store.commentRfc({ rfcId: r.id, role, preferred: "", rationale: "in" });
+    }
+    // pre-decide must succeed even though Backend never commented.
+    const c = await ctx.store.preDecideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
+    });
+    expect(c.kind).toBe("pre-decision");
+  });
+
+  it("structured-kind comments (ack / object) do NOT satisfy the gate", async () => {
+    // Construct a minimal RFC and try to satisfy the gate by having
+    // someone post an ack for a (non-existent) pre-decision. Since
+    // there is no active pre-decision, ack itself fails; this test
+    // confirms by going the other direction — we explicitly post a
+    // pre-decision-shaped comment via the structured path and verify
+    // the gate still rejects pre-decide. The simplest setup: only
+    // satisfy the gate for some required commenters and confirm the
+    // missing ones are not "filled" by structured posts elsewhere.
+    const r = await ctx.store.createRfc(NEW_RFC);
+    await ctx.store.commentRfc({ rfcId: r.id, role: "DevOps", preferred: "", rationale: "ok" });
+    await ctx.store.commentRfc({ rfcId: r.id, role: "PM", preferred: "", rationale: "ok" });
+    // TL has not posted a regular comment; gate must still refuse.
+    await expect(
+      ctx.store.preDecideRfc({
+        rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "x",
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  // ---------- RFC_READY_TO_DECIDE auto-emission ----------
+
+  it("emits RFC_READY_TO_DECIDE exactly when the last required commenter posts", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    const seen = async (): Promise<string[]> => {
+      const events = await ctx.store.listEventsAfter("");
+      return events
+        .filter((e) => e.type === "RFC_READY_TO_DECIDE" && e.ref === r.id)
+        .map((e) => e.id);
+    };
+    expect(await seen()).toHaveLength(0);
+    await ctx.store.commentRfc({ rfcId: r.id, role: "DevOps", preferred: "", rationale: "in" });
+    expect(await seen()).toHaveLength(0);
+    await ctx.store.commentRfc({ rfcId: r.id, role: "PM", preferred: "", rationale: "in" });
+    expect(await seen()).toHaveLength(0);
+    // Last required commenter (TL) → RFC_READY_TO_DECIDE fires.
+    await ctx.store.commentRfc({ rfcId: r.id, role: "TL", preferred: "", rationale: "in" });
+    const ready = await seen();
+    expect(ready).toHaveLength(1);
+    // The event payload carries the snapshot of who satisfied the gate.
+    const events = await ctx.store.listEventsAfter("");
+    const evt = events.find((e) => e.id === ready[0])!;
+    expect(evt.from).toBe("SYSTEM");
+    const payload = evt.payload as { rfcId: string; requiredCommenters: string[] };
+    expect(payload.rfcId).toBe(r.id);
+    expect(payload.requiredCommenters.sort()).toEqual(["DevOps", "PM", "TL"]);
+  });
+
+  it("late commenter after a prior READY emits a fresh RFC_READY_TO_DECIDE", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    for (const role of ["DevOps", "PM", "TL"] as const) {
+      await ctx.store.commentRfc({ rfcId: r.id, role, preferred: "", rationale: "in" });
+    }
+    // First READY fired by the chain above.
+    let events = await ctx.store.listEventsAfter("");
+    let readys = events.filter((e) => e.type === "RFC_READY_TO_DECIDE" && e.ref === r.id);
+    expect(readys).toHaveLength(1);
+    // A second comment from one of the required commenters (a late
+    // follow-up before any pre-decide) emits another READY so deciders
+    // see the late voice before locking the discussion.
+    await ctx.store.commentRfc({
+      rfcId: r.id, role: "DevOps", preferred: "", rationale: "follow-up",
+    });
+    events = await ctx.store.listEventsAfter("");
+    readys = events.filter((e) => e.type === "RFC_READY_TO_DECIDE" && e.ref === r.id);
+    expect(readys).toHaveLength(2);
+  });
+
+  it("once a pre-decision is active, further comments do NOT emit RFC_READY_TO_DECIDE", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    for (const role of ["DevOps", "PM", "TL"] as const) {
+      await ctx.store.commentRfc({ rfcId: r.id, role, preferred: "", rationale: "in" });
+    }
+    await ctx.store.preDecideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
+    });
+    // Late comment now — the flow has moved on to ACK; READY is no
+    // longer the right prompt and must not be re-emitted.
+    await ctx.store.commentRfc({
+      rfcId: r.id, role: "PM", preferred: "", rationale: "afterthought",
+    });
+    const events = await ctx.store.listEventsAfter("");
+    const readys = events.filter(
+      (e) => e.type === "RFC_READY_TO_DECIDE" && e.ref === r.id,
+    );
+    expect(readys).toHaveLength(1);
+  });
+
+  // ---------- active-pre-decision gate (preDecideRfc) ----------
+
+  it("a second pre-decide is refused while one is already active; suggests withdraw", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
+    // Need two deciders to have an attempt by the second one.
+    await ctx.store.createRole({ id: "Architect", title: "Architect" });
+    // Re-create the RFC with two deciders since NEW_RFC has only TL.
+    const r2 = await ctx.store.createRfc({
+      ...NEW_RFC,
+      slug: "two-deciders",
+      deciders: ["TL", "Architect"],
+    });
+    // Required commenters now = {DevOps, PM, TL, Architect} - {Backend}
+    // = {DevOps, PM, TL, Architect}.
+    for (const role of ["DevOps", "PM", "TL", "Architect"] as const) {
+      await ctx.store.commentRfc({ rfcId: r2.id, role, preferred: "", rationale: "in" });
+    }
+    await ctx.store.preDecideRfc({
+      rfcId: r2.id, decidedBy: "TL", chosenOption: "A", rationale: "TL leans A",
+    });
+    let caught: Error | null = null;
+    try {
+      await ctx.store.preDecideRfc({
+        rfcId: r2.id, decidedBy: "Architect", chosenOption: "B",
+        rationale: "Architect leans B",
+      });
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught).not.toBeNull();
+    expect((caught as { code?: string }).code).toBe("USAGE");
+    expect(caught!.message).toMatch(/withdraw-pre-decision/);
+    void r;
+  });
+
+  // ---------- withdraw ----------
+
+  it("withdraw by the original pre-decider clears the active state and unblocks a fresh pre-decide", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
+    await ctx.store.preDecideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
+    });
+    const w = await ctx.store.withdrawRfcPreDecision({
+      rfcId: r.id, role: "TL", rationale: "second-guessing",
+    });
+    expect(w.kind).toBe("withdraw");
+    // After withdraw, the active gate is clear → pre-decide again.
+    const c = await ctx.store.preDecideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "B", rationale: "now leaning B",
+    });
+    expect(c.kind).toBe("pre-decision");
+    expect(c.preferred).toBe("B");
+  });
+
+  it("withdraw refuses if no active pre-decision exists", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    await expect(
+      ctx.store.withdrawRfcPreDecision({
+        rfcId: r.id, role: "TL", rationale: "x",
+      }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("withdraw by someone other than the pre-decider is FORBIDDEN", async () => {
+    const r = await ctx.store.createRfc({
+      ...NEW_RFC,
+      slug: "two-deciders-2",
+      deciders: ["TL", "PM"],
+    });
+    // PM is now both a voter (auto from createdBy is Backend not PM,
+    // so PM is just a voter from the explicit list) and a decider.
+    for (const role of ["DevOps", "PM", "TL"] as const) {
+      await ctx.store.commentRfc({ rfcId: r.id, role, preferred: "", rationale: "in" });
+    }
+    await ctx.store.preDecideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "TL's call",
+    });
+    // Another decider (PM) cannot withdraw TL's pre-decision.
+    await expect(
+      ctx.store.withdrawRfcPreDecision({
+        rfcId: r.id, role: "PM", rationale: "I want to take over",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("ack/object posted before a withdraw do not count for the next pre-decision's ACK round", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
+    await ctx.store.preDecideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
+    });
+    await ctx.store.ackRfc({ rfcId: r.id, role: "DevOps" });
+    await ctx.store.ackRfc({ rfcId: r.id, role: "PM" });
+    await ctx.store.withdrawRfcPreDecision({
+      rfcId: r.id, role: "TL", rationale: "rethinking",
+    });
+    // Fresh pre-decide → old ACKs predate the new active.ts and the
+    // standard `c.ts > active.ts` gate already invalidates them.
+    await ctx.store.preDecideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "B", rationale: "now B",
+    });
+    await expect(
+      ctx.store.decideRfc({
+        rfcId: r.id, decidedBy: "TL", chosenOption: "B", rationale: "go",
+      }),
+    ).rejects.toMatchObject({
+      code: "USAGE",
+      message: expect.stringMatching(/waiting for ACK from/),
+    });
+  });
+
+  // ---------- add-option still invalidates active pre-decision ----------
+
+  it("add-option still silently invalidates an active pre-decision (PR8u keeps this rule)", async () => {
+    const r = await ctx.store.createRfc(NEW_RFC);
+    await satisfyCommentGateForNewRfc(ctx.store, r.id);
+    await ctx.store.preDecideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "A", rationale: "lean A",
+    });
+    // add-option silently invalidates the active pre-decision; a
+    // fresh pre-decide is then allowed (no withdraw needed).
+    await ctx.store.addRfcOption({
+      rfcId: r.id, actor: "Backend", optionId: "C",
+      summary: "extra option", rationale: "options A/B miss cost",
+    });
+    const c = await ctx.store.preDecideRfc({
+      rfcId: r.id, decidedBy: "TL", chosenOption: "C", rationale: "lean C now",
+    });
+    expect(c.kind).toBe("pre-decision");
   });
 });

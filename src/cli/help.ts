@@ -229,6 +229,25 @@ RFCs (cross-role decisions; any role can open, designated decider closes):
       object' before 'rfc decide' will succeed. Silence does NOT
       count as consent — there is no override; the only escape from
       a stalled ACK round is 'rfc reject'.
+      Two structural gates on entry (PR8u):
+        - Comment-coverage gate: every required commenter
+          ((voters union deciders) minus the creator, except SYSTEM)
+          must have posted a regular 'rfc comment' first. The
+          framework auto-emits an RFC_READY_TO_DECIDE event the
+          moment this gate flips green so deciders do not have to
+          poll.
+        - Active-pre-decision gate: refused if one is already
+          active. Re-propose by either 'rfc withdraw-pre-decision'
+          (if you authored it) or 'rfc add-option' (silently
+          invalidates the active pre-decision; option set has
+          changed).
+
+  rfc withdraw-pre-decision <rfc-id> --rationale <text>
+      Author-only self-revoke of the active pre-decision. Posts a
+      kind=withdraw comment which clears the active state; existing
+      ack/object posts predate any future pre-decision's ts and are
+      naturally invalidated by the standard ts-gate. After withdraw
+      any decider can pre-decide afresh.
 
   rfc ack <rfc-id> [--rationale <text>]
       Acknowledge the active pre-decision (agree with it). Required-
@@ -481,10 +500,14 @@ export const COMMAND_HELP: Record<string, string> = {
 
   rfc: `  gojaja rfc new <slug> --title <t> --deciders <r1,...> [--options A:s,B:s]
                 [--description <t>] [--voters <r1,...>] [--task T-NNNN] [--deadline <iso>]
-  gojaja rfc comment|add-option|pre-decide|ack|object|decide|reject|revise|edit <rfc-id> ...
+  gojaja rfc comment|add-option|pre-decide|withdraw-pre-decision|ack|object|decide|reject|revise|edit <rfc-id> ...
   gojaja rfc link-task|unlink-task <rfc-id> --task T-NNNN
   gojaja rfc list [--status ...] | rfc show <rfc-id> [--no-mark-seen]
-      Cross-role decisions with a mandatory ACK gate on pre-decisions.
+      Cross-role decisions with two structural gates on pre-decide:
+      a comment-coverage gate (every required commenter must post a
+      regular 'rfc comment' first; framework auto-emits
+      RFC_READY_TO_DECIDE when this flips) and an active-pre-decision
+      gate ('withdraw-pre-decision' or 'add-option' to unblock).
       Full walkthrough: docs/RFC.md.`,
 
   state: `  gojaja state edit --file state/<path> [mode] [--json]

@@ -8,6 +8,87 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### RFC pre-decide gets two structural gates + a withdraw escape (PR8u)
+
+Multi-decider RFCs were prone to two governance failures: deciders
+sat on a fully-discussed RFC because nobody felt empowered to
+pre-decide first ("comment-coverage scenario A"), and competing
+deciders silently overwrote each other's pre-decisions, with the
+final ACK round resolved on whoever wrote last ("re-publish race").
+The fix is mechanical, not advisory: the framework now blocks the
+race conditions at the store layer.
+
+**Comment-coverage gate.** `rfc pre-decide` now refuses with a
+USAGE error (and lists the missing roles) until every required
+commenter — `(voters ∪ deciders) − {createdBy if not SYSTEM}` — has
+posted at least one regular `rfc comment`. Structured posts (ack /
+object / pre-decision / withdraw) deliberately do not satisfy the
+gate. The creator is excluded by design — the proposal's
+`description` is their initial framing, and forcing them to also
+comment would either be ceremony or self-anchor the discussion
+toward whatever their first comment says.
+
+**RFC_READY_TO_DECIDE auto-emission.** The framework emits a new
+broadcast event (`from: "SYSTEM"`, payload includes the snapshot of
+required commenters) the moment the comment-coverage gate flips
+green and there is no active pre-decision. Re-emitted on a fresh
+late comment before any pre-decide (so a late voter still gets
+heard); suppressed once a pre-decision is active. Visibility
+follows the standard RFC_* rule: voters ∪ deciders ∪ {createdBy if
+not SYSTEM}. Wired into `filterVisibleEventsForRole`'s prepass +
+broadcast switch.
+
+**Active-pre-decision gate.** `rfc pre-decide` now refuses if one
+is already active (the previous "latest-wins" behaviour was a
+silent overwrite race). The error names the active proposer and
+points at the two ways out:
+
+  - `rfc withdraw-pre-decision <rfc-id> --rationale ...`
+    (author-only self-revoke; appends a `kind: "withdraw"` comment
+    that `computeActivePreDecisionInLedger` reads back to clear
+    the active state); or
+  - `rfc add-option <rfc-id> ...` — keeps the existing rule that
+    add-option silently invalidates any active pre-decision (the
+    option set has changed; the prior ACK round was against an
+    outdated set).
+
+**Existing acks naturally invalidate after withdraw / re-propose.**
+No new code: ack/object posts predate any future pre-decision's
+`ts`, and the standard `c.ts > active.ts` gate already excludes
+them. The next ACK round restarts cleanly.
+
+**New types / commands**:
+
+  - `EventType` adds `RFC_READY_TO_DECIDE` and a matching
+    `RfcReadyToDecidePayload` carrying `{ rfcId, requiredCommenters }`.
+  - `RfcCommentKind` adds `"withdraw"`.
+  - `Store.withdrawRfcPreDecision({ rfcId, role, rationale })`.
+  - `gojaja rfc withdraw-pre-decision <rfc-id> --rationale <text>`
+    CLI command.
+
+**Tests** in `tests/rfc-v2.test.ts` (new `PR8u` describe block, 12
+cases) cover: comment-coverage error / creator exclusion /
+structured-kind comments don't satisfy / READY emission and
+re-emission / READY suppressed once active / active gate refusal /
+withdraw clears active / withdraw refused without active / withdraw
+forbidden for non-author / old acks invalidate after withdraw /
+add-option still invalidates active (keeps the existing rule).
+
+**Existing tests** that pre-decided without first satisfying
+comment coverage were updated to either call a new
+`satisfyCommentGateForNewRfc` helper or post the specific comments
+their RFC needed. The legacy "re-publish overwrites previous ACKs"
+test was rewritten around the new withdraw + fresh pre-decide flow.
+
+**Docs**: `docs/PROTOCOL.md` rewritten around the two gates plus a
+new `RFC_READY_TO_DECIDE` event section + a new
+`withdraw-pre-decision` subcommand section; visibility table adds
+`RFC_READY_TO_DECIDE`. `docs/SCHEMA.md` event table mentions
+`kind: "withdraw"` and `RFC_READY_TO_DECIDE`. `gojaja rfc -h` lists
+the new subcommand and the two gates. `gojaja handbook` rewritten
+in the multi-round-RFC section to cover both gates and the
+withdraw escape; size budget held under 12 KB.
+
 ### `wait --for task-assigned` idle worklog narrowed to task-board owners
 
 A direct fix for a mutual-wakeup loop introduced together with the

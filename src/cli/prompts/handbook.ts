@@ -74,32 +74,32 @@ ack/object on any pre-decision.
 
 ### RFC multi-round discussion
 
-Decisions don't always settle in one round. The mechanism supports it:
+Decisions don't always settle in one round:
 
-- \`rfc comment --reply-to <id>\` threads a reply to a specific point.
-  Top-level (no \`--reply-to\`) for a new angle.
-- \`rfc add-option <id>:<summary> --rationale ...\` adds a new option
-  mid-discussion. Use it when existing options are clearly all wrong.
-  add-option silently invalidates any active pre-decision.
-- \`rfc pre-decide --option X --rationale ...\` (decider only) posts a
-  structured pre-decision. Every role in
-  \`(voters ∪ deciders) − {pre-decider}\` must run \`rfc ack\` (agree)
-  or \`rfc object --rationale ...\` (disagree). Silence does NOT count
-  as consent. No override; the only escape is \`rfc reject\` + a new RFC.
+- \`rfc comment --reply-to <id>\` threads a reply; top-level for a new angle.
+- \`rfc add-option <id>:<summary>\` adds an option mid-discussion;
+  silently invalidates any active pre-decision.
+- \`rfc pre-decide --option X --rationale ...\` (decider only) has two
+  entry gates: every required commenter \`(voters ∪ deciders) −
+  {createdBy}\` must have posted a regular \`rfc comment\` (framework
+  emits \`RFC_READY_TO_DECIDE\` on flip), and no other pre-decision
+  is active. Then \`(voters ∪ deciders) − {pre-decider}\` must run
+  \`rfc ack\` or \`rfc object --rationale ...\`. Silence does NOT count
+  as consent. No override; only escape is \`rfc reject\`.
 - If your manifest shows \`rfcs[*].pendingPreDecision.myAckOwed: true\`,
   you owe a response. Your turn cannot end clean. Plain \`rfc comment\`
   does NOT advance the gate — only structured \`kind: ack\` /
   \`kind: object\`.
-- Re-posting \`rfc pre-decide\` invalidates all prior ACKs/objections.
+- Re-propose: \`rfc withdraw-pre-decision\` first (author only); old
+  ack/object naturally invalidate.
 - \`rfc revise --rationale "..."\` (decider) kicks the proposal back
   without rejecting the topic. Use revise when the topic is real but
   the writeup is too thin to act on. Use \`rfc reject\` when the topic
   itself is wrong.
 - \`rfc edit\` (in \`revising\`) re-submits; comments are preserved.
-- \`--description\` is what non-participants read to weigh in; write
-  it concrete enough they don't need chat history.
-- Link related tasks at creation (\`--task T-NNNN\`) or later
-  (\`rfc link-task\`).
+- \`--description\` is what non-participants read; write it concrete
+  enough they don't need chat history. Link tasks at creation
+  (\`--task T-NNNN\`) or later (\`rfc link-task\`).
 
 ### Brainstorm RFC (no \`--options\`)
 
