@@ -383,3 +383,116 @@ project):
 Not yet implemented (see docs/ROADMAP.md in the source repo):
 doctor, upgrade.
 `;
+
+/**
+ * Concise per-command help, shown for `gojaja <cmd> -h` / `--help`.
+ * The full reference lives in HELP_TEXT (`gojaja -h`); these are quick
+ * usage cards so a subcommand `-h` doesn't dump the whole manual.
+ * Keyed by the top-level command (groups like role/task/rfc list their
+ * subcommands).
+ */
+export const COMMAND_HELP: Record<string, string> = {
+  init: `  gojaja init [--root <path>]
+      Initialise a .gojaja/ layer in the current project. Refuses on a
+      dirty git tree; on a non-git project, asks for y/n confirmation
+      (or --force when stdin is not a TTY).`,
+
+  role: `  gojaja role create <id> [<title>] [--owns a,b] [--reports-to r1,r2] [--must-not-edit a,b]
+  gojaja role list
+  gojaja role show <id>
+  gojaja role delete <id>          (SYSTEM only — no GOJAJA_SESSION in the shell)
+      Manage roles. 'create' writes config.yaml + a roles/<id>.md
+      contract (fill its TBD sections). 'delete' also invalidates any
+      live session for the role.`,
+
+  prompt: `  gojaja prompt --target agents|claude|cursor|generic [--write]
+                [--force-rewrite] [--no-handbook] [--json]
+      Install the project's role-free runtime rule.
+        agents  -> AGENTS.md (canonical; covers Cursor, Codex, Copilot,
+                   Windsurf, Zed, ... — usually all you need)
+        claude  -> AGENTS.md PLUS a CLAUDE.md that imports it (@AGENTS.md)
+        cursor  -> optional standalone .cursor/rules/*.mdc fallback
+        generic -> printed only`,
+
+  activate: `  gojaja activate <role> --target agents|claude|cursor|generic [--no-handbook] [--no-copy] [--json]
+      Print (and auto-copy) the chat-paste snippet that binds <role> to
+      one agent window. Never writes to disk.`,
+
+  claim: `  gojaja claim <role> [--ttl <seconds>] [--eval] [--force] [--json]
+      Acquire a session for <role> in this shell (default lease 2h).
+      'eval "$(gojaja claim <role> --eval)"' claims + exports in one step.
+      --force is humans-only.`,
+
+  release: `  gojaja release [<role>] [--json]
+      Release the current session; then run 'unset GOJAJA_SESSION'.`,
+
+  plan: `  gojaja plan [<role>] [--json]
+      Fetch the manifest: unread events, active tasks, open RFCs, and an
+      ackToken. Defaults to JSON when stdout is not a TTY.`,
+
+  ack: `  gojaja ack [<role>] --token <t>
+      Confirm the manifest you just processed (advances your cursor).`,
+
+  handbook: `  gojaja handbook [--json]
+      Print the full collaboration handbook: when to worklog vs report
+      vs RFC, escalation, multi-round RFCs, deliverable gates, task
+      lifecycle. Reference material; needs no session.`,
+
+  report: `  gojaja report --to <role> --message <text> [--ref <id>]
+      Directed message to one role ("I need you to act next").`,
+
+  worklog: `  gojaja worklog --message <text>
+      Broadcast a progress note to the team.`,
+
+  task: `  gojaja task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3]
+                  [--depends-on T-NNNN,...] [--parent T-NNNN] [--acceptance <text>]
+                  [--tag <l> ...] [--reviewer <role> ...]
+                  [--asset 'kind:ref::desc' ...] [--deliverable 'kind:ref::desc' ...]
+  gojaja task assign <id> --to <role>
+  gojaja task status <id> <Backlog|Ready|InProgress|Blocked|Review|Done> [--force-incomplete]
+  gojaja task list [--owner <role>] [--status <s>] [--tag <label> ...] [--json]
+  gojaja task show <id>
+      Manage the shared task board. file-kind deliverables are
+      existence-checked on the Done transition.`,
+
+  rfc: `  gojaja rfc new <slug> --title <t> --deciders <r1,...> [--options A:s,B:s]
+                [--description <t>] [--voters <r1,...>] [--task T-NNNN] [--deadline <iso>]
+  gojaja rfc comment|add-option|pre-decide|ack|object|decide|reject|revise|edit <rfc-id> ...
+  gojaja rfc link-task|unlink-task <rfc-id> --task T-NNNN
+  gojaja rfc list [--status ...] | rfc show <rfc-id> [--no-mark-seen]
+      Cross-role decisions with a mandatory ACK gate on pre-decisions.
+      Full walkthrough: docs/RFC.md.`,
+
+  state: `  gojaja state edit --file state/<path> [mode] [--json]
+      Ownership-gated edit of a file under state/. Modes (pick one):
+      default overwrite (--content / stdin), --append <text>, or
+      --replace <old> --with <new> [--batch].`,
+
+  wait: `  gojaja wait [<role>] [--until <iso> | --in <duration>] [--for <condition>]
+              [--poll-interval <duration>] [--json]
+      Idle keepalive: sleeps in chunks until new attention, the named
+      condition, or the deadline. Each exit prints the next command.`,
+
+  watch: `  gojaja watch [--port <n>] [--host <addr>] [--no-open]
+      Start a local, read-only web dashboard (roles, task board, RFCs,
+      live activity feed) and open it in the browser. Ctrl-C to stop.`,
+
+  reset: `  gojaja reset [--dry-run] [--confirm <basename>]
+      Remove everything gojaja installed: .gojaja/, the Cursor rule, and
+      the managed block in CLAUDE.md / AGENTS.md. Preview unless
+      --confirm <project-basename>. No GOJAJA_SESSION in the shell.`,
+
+  version: `  gojaja version [--json]
+      Print the CLI and on-disk schema version.`,
+};
+
+/**
+ * Help to show for `gojaja <command> -h`. Returns the focused card when
+ * we have one (plus a pointer to the full reference), otherwise the
+ * whole manual.
+ */
+export function helpForCommand(command: string): string {
+  const card = COMMAND_HELP[command];
+  if (!card) return HELP_TEXT;
+  return `${card}\n\nFull reference: gojaja -h\n`;
+}

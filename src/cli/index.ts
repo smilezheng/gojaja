@@ -18,7 +18,7 @@ import { runWatch } from "./commands/watch";
 import { runWorklog } from "./commands/worklog";
 import { runState } from "./commands/state";
 import { runHandbook } from "./commands/handbook";
-import { HELP_TEXT } from "./help";
+import { HELP_TEXT, helpForCommand } from "./help";
 
 async function dispatch(): Promise<number> {
   const raw = process.argv.slice(2);
@@ -32,13 +32,14 @@ async function dispatch(): Promise<number> {
     raw[0] = "version";
   }
 
-  // A `--help` / `-h` anywhere in a subcommand prints help and exits
-  // WITHOUT running the command. Without this, e.g. `gojaja wait --help`
-  // would fall through to `runWait` and actually block on a wait, and
-  // `gojaja init --help` would initialise the project — both surprising
-  // and a footgun for the common `<cmd> --help` reflex.
+  // A `--help` / `-h` anywhere in a subcommand prints that command's
+  // help and exits WITHOUT running the command. Without this, e.g.
+  // `gojaja wait --help` would fall through to `runWait` and actually
+  // block on a wait, and `gojaja init --help` would initialise the
+  // project. We print the focused per-command card (falling back to the
+  // full manual for unknown commands) rather than dumping everything.
   if (raw.slice(1).some((a) => a === "--help" || a === "-h")) {
-    process.stdout.write(HELP_TEXT);
+    process.stdout.write(helpForCommand(raw[0]));
     return 0;
   }
 
