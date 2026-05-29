@@ -8,6 +8,67 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### Stronger ack warning + dashboard "stalled-no-wait" red flag
+
+Empirically the most common per-turn failure mode is "agent runs
+`gojaja ack`, sees the success line, then sits silent waiting for
+user input" — `plan -> ack` reads like a complete loop on its face,
+because the manifest came in and got acknowledged. It's not. ack is
+a housekeeping op that only advances the cursor; without a
+follow-up action OR a `gojaja wait`, no event can wake the role
+and the team's loop stops there.
+
+Two layers of fix, both shipped together so the message and the
+fallback are aligned:
+
+**Layer 1 — stronger `ack` post-output warning.** The previous
+generic `nextLoopHint` (also used by worklog/report/task/rfc) was
+too soft for ack: it read as "do any of three things, or end the
+turn", and agents collapsed it into a fourth implicit "do nothing"
+option. ack now uses a dedicated `ackHint`:
+
+  - explicit `WARNING: TURN NOT COMPLETE` framing
+  - flat list of the only acceptable continuations (another
+    action, or `gojaja wait`)
+  - no disjunctive "or end the turn" wording — the only end-of-
+    turn path is `wait`
+
+Other action commands keep the original soft hint. `--json` mode
+and SYSTEM actor both suppress the warning, same skip rules as the
+existing hint helpers.
+
+**Layer 2 — `gojaja watch` flags stalled roles in red.** When the
+warning still gets ignored (it will, sometimes), the human-as-
+scheduler needs to see it on the dashboard. The watch snapshot now
+carries a per-role `healthStatus` derived as:
+
+  - `no-session`        no claim; nothing to nudge
+  - `stale-session`     session lease expired; takeover-eligible
+  - `waiting`           wait.json present; the green path
+  - `active`            live session, no wait.json, last action
+                        recent (under threshold)
+  - `stalled-no-wait`   live session, no wait.json, last action
+                        older than threshold — **the failure mode
+                        above**, surfaced in red on the dashboard
+
+The threshold defaults to 60 s and is overridable via
+`?stalledThresholdMs=` on `/api/state`. SYSTEM-authored events
+(human running CLI as SYSTEM) deliberately do NOT count as the
+role's `lastAction` — we're tracking whether the agent itself made
+progress this turn.
+
+**Dashboard UI:** stalled roles get a red border + red 'stalled'
+badge + a clear "⚠ stalled — last action Xm ago, no `gojaja wait`
+since" warning line; the header gains a `stalled <n>` chip that
+hides at 0 and turns red when populated.
+
+**Tests:** `tests/watch.test.ts` (8 cases) pin every healthStatus
+branch including SYSTEM-authored events not counting and a
+parked-but-ancient role staying `waiting`. `tests/next-hint.test.ts`
+gains a case verifying ack uses the stronger warning (and that the
+generic soft hint is NOT also emitted) plus a JSON-mode suppression
+case. 377/377 pass.
+
 ### RFC pre-decide gets two structural gates + a withdraw escape (PR8u)
 
 Multi-decider RFCs were prone to two governance failures: deciders

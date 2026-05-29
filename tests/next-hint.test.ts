@@ -136,7 +136,7 @@ describe("nextLoopHint", () => {
     }
   });
 
-  it("ack: prints the hint in plain mode", async () => {
+  it("ack: prints the stronger ack-specific warning, NOT the soft generic loop hint", async () => {
     const s = await ctx.store.claimSession("PM", 60);
     process.env.GOJAJA_SESSION = s.sessionId;
     // Need a manifest to ack — create one via plan.
@@ -146,7 +146,31 @@ describe("nextLoopHint", () => {
       await runAck(
         args([], { token: m.ackToken, root: ctx.root }),
       );
-      expect(cap.stdout).toMatch(HINT_RE);
+      // ack uses a deliberately stronger, command-shaped variant
+      // because the most common per-turn failure mode is "agent runs
+      // ack, sees success line, sits silent". The generic
+      // disjunctive hint was too soft for this case.
+      expect(cap.stdout).toMatch(/WARNING: TURN NOT COMPLETE/);
+      expect(cap.stdout).toMatch(/ack is a housekeeping op/);
+      expect(cap.stdout).toMatch(/`gojaja wait`/);
+      expect(cap.stdout).not.toMatch(HINT_RE); // not the generic one
+    } finally {
+      cap.release();
+    }
+  });
+
+  it("ack: --json suppresses the warning (JSON output stays single object)", async () => {
+    const s = await ctx.store.claimSession("PM", 60);
+    process.env.GOJAJA_SESSION = s.sessionId;
+    const m = await ctx.store.openOrCreatePlan("PM");
+    const cap = captureStdout();
+    try {
+      await runAck(
+        args([], { token: m.ackToken, json: true, root: ctx.root }),
+      );
+      const parsed = JSON.parse(cap.stdout.trim());
+      expect(parsed.status).toBe("acked");
+      expect(cap.stdout).not.toMatch(/WARNING: TURN NOT COMPLETE/);
     } finally {
       cap.release();
     }

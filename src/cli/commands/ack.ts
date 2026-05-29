@@ -1,7 +1,7 @@
 import { boolFlag, optionalString, requireString, type ParsedArgs } from "../argv";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveIdentity } from "../identity";
-import { nextLoopHint } from "../next-hint";
+import { ackHint } from "../next-hint";
 
 export async function runAck(args: ParsedArgs): Promise<number> {
   const explicitRole = args.positional[0];
@@ -23,7 +23,7 @@ export async function runAck(args: ParsedArgs): Promise<number> {
     process.stdout.write(
       `Acked ${result.eventsAcked} event(s) for role '${role}': ` +
         `${result.previousCursor || "(start)"} -> ${result.ackedThrough || "(unchanged)"}\n` +
-        nextLoopHint({ json, actor: role }),
+        ackHint({ json, actor: role }),
     );
   }
   return 0;

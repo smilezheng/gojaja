@@ -8,6 +8,22 @@ import { DASHBOARD_HTML } from "../dashboard/html";
 
 const DEFAULT_PORT = 7421;
 const EVENT_TAIL = 300;
+/**
+ * Threshold past which a `live`-session role with no `wait` session
+ * on disk is flagged as `stalled-no-wait`. Empirically the most
+ * common per-turn failure mode is "agent runs `gojaja ack`, sees the
+ * success line, sits silent waiting for the user" — the role still
+ * holds a live session lease, but no event can wake it because
+ * nothing parked it on `wait`. The dashboard surfaces this so the
+ * human-as-scheduler can nudge.
+ *
+ * 60 s is a deliberately lenient default: a fast turn (read manifest,
+ * post one worklog, wait) finishes well under this; only a role that
+ * actually got stuck shows red. Tunable via `?stalledThresholdMs=`
+ * on the `/api/state` query string for ops that prefer tighter
+ * monitoring.
+ */
+const STALLED_NO_WAIT_THRESHOLD_MS = 60_000;
 
 /**
  * `gojaja watch [--port <n>] [--host <addr>] [--no-open] [--root <path>]`
@@ -106,7 +122,14 @@ async function handleRequest(
     return;
   }
   if (url.startsWith("/api/state")) {
-    const snapshot = await buildSnapshot(store, root);
+    const u = new URL(url, "http://placeholder/");
+    const overrideRaw = u.searchParams.get("stalledThresholdMs");
+    const override = overrideRaw === null ? null : Number(overrideRaw);
+    const stalledThresholdMs =
+      override !== null && Number.isFinite(override) && override > 0
+        ? override
+        : STALLED_NO_WAIT_THRESHOLD_MS;
+    const snapshot = await buildSnapshot(store, root, stalledThresholdMs);
     res.writeHead(200, {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
@@ -118,7 +141,17 @@ async function handleRequest(
   res.end("not found");
 }
 
-async function buildSnapshot(store: LocalFsStore, root: string) {
+/**
+ * Build the JSON snapshot served by `/api/state`. Exported for unit
+ * tests of the dashboard's derived signals (in particular the
+ * "stalled-no-wait" health status); production code path goes via
+ * `handleRequest`.
+ */
+export async function buildSnapshot(
+  store: LocalFsStore,
+  root: string,
+  stalledThresholdMs: number,
+) {
   const now = Date.now();
   const [version, config, board, rfcs, allEvents] = await Promise.all([
     store.readVersion().catch(() => "unknown"),
@@ -127,6 +160,18 @@ async function buildSnapshot(store: LocalFsStore, root: string) {
     store.listRfcs(),
     store.listEventsAfter("").catch(() => []),
   ]);
+
+  // Index the most recent event per role-as-author. Used below to
+  // detect "live session but no follow-up after ack" — the
+  // single-most-common per-turn failure mode the dashboard exists to
+  // surface (see STALLED_NO_WAIT_THRESHOLD_MS).
+  const lastActionAtMsByRole = new Map<string, number>();
+  for (const e of allEvents) {
+    if (e.from === "SYSTEM") continue;
+    const prev = lastActionAtMsByRole.get(e.from) ?? 0;
+    const ts = Date.parse(e.ts);
+    if (Number.isFinite(ts) && ts > prev) lastActionAtMsByRole.set(e.from, ts);
+  }
 
   const roleIds = Object.keys(config.roles).sort();
   const roles = await Promise.all(
@@ -142,6 +187,43 @@ async function buildSnapshot(store: LocalFsStore, root: string) {
         const expiresAt = hb + session.leaseTtlSeconds * 1000;
         sessionState = expiresAt > now ? "live" : "stale";
       }
+
+      // Health status — a derived "what should the operator do about
+      // this role right now" signal. Five states, ordered by
+      // urgency:
+      //   "no-session"        no claim; nothing to nudge
+      //   "stale-session"     session lease expired; auto-takeover-eligible
+      //   "waiting"           wait.json present — the agent is parked,
+      //                       loop is alive, no action needed
+      //   "active"            live session, no wait.json, but the
+      //                       last action was recent: still mid-turn
+      //   "stalled-no-wait"   live session, no wait.json, last action
+      //                       older than the threshold — ack-but-no-
+      //                       wait failure mode; operator should nudge
+      const lastActionAtMs = lastActionAtMsByRole.get(id) ?? null;
+      const lastActionAgeMs =
+        lastActionAtMs === null ? null : now - lastActionAtMs;
+      let healthStatus:
+        | "no-session"
+        | "stale-session"
+        | "waiting"
+        | "active"
+        | "stalled-no-wait" = "no-session";
+      if (sessionState === "none") {
+        healthStatus = "no-session";
+      } else if (sessionState === "stale") {
+        healthStatus = "stale-session";
+      } else if (wait) {
+        healthStatus = "waiting";
+      } else if (
+        lastActionAgeMs !== null &&
+        lastActionAgeMs > stalledThresholdMs
+      ) {
+        healthStatus = "stalled-no-wait";
+      } else {
+        healthStatus = "active";
+      }
+
       return {
         id,
         title: r.title ?? "",
@@ -165,6 +247,9 @@ async function buildSnapshot(store: LocalFsStore, root: string) {
               idleBroadcastSent: wait.idleBroadcastSent ?? false,
             }
           : null,
+        lastActionAt: lastActionAtMs === null ? null : new Date(lastActionAtMs).toISOString(),
+        lastActionAgeMs,
+        healthStatus,
       };
     }),
   );
@@ -223,7 +308,9 @@ async function buildSnapshot(store: LocalFsStore, root: string) {
       totalEvents: allEvents.length,
       liveRoles: roles.filter((r) => r.session.state === "live").length,
       openRfcs: rfcList.filter((r) => r.status === "open" || r.status === "revising").length,
+      stalledRoles: roles.filter((r) => r.healthStatus === "stalled-no-wait").length,
     },
+    config: { stalledThresholdMs },
   };
 }
 

@@ -16,6 +16,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a;
     --fg: #e6e8ee; --dim: #8b93a7; --accent: #6ea8fe;
     --live: #3fb950; --stale: #d29922; --none: #6b7280;
+    --stalled: #f85149; --stalled-bg: #3d1418; --stalled-border: #6e2128;
     --p0: #f85149; --p1: #d29922; --p2: #6ea8fe; --p3: #8b93a7;
   }
   * { box-sizing: border-box; }
@@ -45,10 +46,13 @@ export const DASHBOARD_HTML = `<!doctype html>
   .role .title { color: var(--dim); font-size: 12px; }
   .role .meta { color: var(--dim); font-size: 11px; margin-top: 6px; font-family: ui-monospace, monospace; }
   .role .waiting { margin-top: 6px; color: var(--accent); font-size: 11px; }
+  .role.stalled { background: var(--stalled-bg); border-color: var(--stalled-border); }
+  .role .stalled-warn { margin-top: 6px; color: var(--stalled); font-size: 11px; font-weight: 600; }
   .badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line);
     text-transform: uppercase; letter-spacing: .04em; }
   .badge.live { color: var(--live); border-color: #224a2c; } .badge.stale { color: var(--stale); }
   .badge.none { color: var(--none); }
+  .badge.stalled { color: var(--stalled); border-color: var(--stalled-border); }
   .board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
   .col h3 { font-size: 11px; color: var(--dim); margin: 0 0 8px; font-weight: 600;
     display: flex; justify-content: space-between; }
@@ -86,6 +90,7 @@ export const DASHBOARD_HTML = `<!doctype html>
   <div class="chips">
     <span class="chip"><span class="dot live pulse"></span><span id="upd">connecting…</span></span>
     <span class="chip">roles live <b id="c-live">–</b></span>
+    <span class="chip" id="chip-stalled" style="display:none">stalled <b id="c-stalled">–</b></span>
     <span class="chip">open RFCs <b id="c-rfc">–</b></span>
     <span class="chip">events <b id="c-ev">–</b></span>
   </div>
@@ -111,6 +116,10 @@ export const DASHBOARD_HTML = `<!doctype html>
     return "in "+Math.floor(m/60)+"h"; }
   function condText(c){ if(!c) return "attention"; return c.ref ? (c.kind+":"+c.ref) : c.kind; }
 
+  function fmtAge(ms){ if(ms==null||!isFinite(ms)) return "?"; var s=Math.max(0,Math.floor(ms/1000));
+    if(s<60) return s+"s"; var m=Math.floor(s/60); if(m<60) return m+"m";
+    var h=Math.floor(m/60); if(h<24) return h+"h"; return Math.floor(h/24)+"d"; }
+
   function renderRoles(roles){
     if(!roles.length) return '<div class="empty">No roles registered.</div>';
     return roles.map(function(r){
@@ -121,11 +130,24 @@ export const DASHBOARD_HTML = `<!doctype html>
       } else { meta = "no active session"; }
       var waiting = r.wait ? '<div class="waiting">⏳ waiting for '+esc(condText(r.wait.for))+" · "+esc(until(r.wait.deadline))+"</div>" : "";
       var owns = (r.owns&&r.owns.length) ? '<div class="meta">owns: '+esc(r.owns.join(", "))+"</div>" : "";
-      return '<div class="role"><div style="display:flex;justify-content:space-between;align-items:baseline">'+
+      var stalled = r.healthStatus === "stalled-no-wait";
+      // The most common per-turn failure mode: agent ran ack, saw the
+      // success line, then sat silent waiting for user input. Live
+      // session, no wait.json, no recent action — surfaced here so
+      // the operator can nudge.
+      var stalledWarn = stalled
+        ? '<div class="stalled-warn">⚠ stalled — last action '+
+          esc(fmtAge(r.lastActionAgeMs))+
+          ' ago, no <code>gojaja wait</code> since. Nudge the role to wait or end the turn.</div>'
+        : "";
+      var badge = stalled
+        ? '<span class="badge stalled">stalled</span>'
+        : '<span class="badge '+st+'">'+st+'</span>';
+      return '<div class="role'+(stalled?' stalled':'')+'"><div style="display:flex;justify-content:space-between;align-items:baseline">'+
         '<span class="name">'+esc(r.id)+'</span>'+
-        '<span class="badge '+st+'">'+st+'</span></div>'+
+        badge+'</div>'+
         '<div class="title">'+esc(r.title)+'</div>'+
-        '<div class="meta">'+meta+'</div>'+owns+waiting+'</div>';
+        '<div class="meta">'+meta+'</div>'+owns+waiting+stalledWarn+'</div>';
     }).join("");
   }
 
@@ -177,6 +199,11 @@ export const DASHBOARD_HTML = `<!doctype html>
     document.getElementById("root").textContent = s.project.root+"  ·  v"+s.project.version;
     document.getElementById("upd").textContent = "updated "+ago(s.project.generatedAt);
     document.getElementById("c-live").textContent = s.counts.liveRoles;
+    var stalledCount = s.counts.stalledRoles || 0;
+    var stalledChip = document.getElementById("chip-stalled");
+    document.getElementById("c-stalled").textContent = stalledCount;
+    stalledChip.style.display = stalledCount > 0 ? "" : "none";
+    stalledChip.style.color = stalledCount > 0 ? "var(--stalled)" : "";
     document.getElementById("c-rfc").textContent = s.counts.openRfcs;
     document.getElementById("c-ev").textContent = s.counts.totalEvents;
     document.getElementById("roles").innerHTML = renderRoles(s.roles);

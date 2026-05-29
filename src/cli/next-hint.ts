@@ -44,3 +44,40 @@ export function claimHint(opts: { json: boolean }): string {
   if (opts.json) return "";
   return "\nNext: run `gojaja plan` to read your manifest.\n";
 }
+
+/**
+ * Stronger, command-shaped variant of `nextLoopHint` for the `ack`
+ * command specifically. Empirically the most common per-turn failure
+ * mode is "agent runs `gojaja ack`, sees the success line, then sits
+ * silent waiting for user input" — because `plan -> ack` reads like a
+ * complete loop on its face: the manifest came in, the manifest got
+ * acknowledged, that feels conclusive. It is not. ack is a
+ * housekeeping op that only advances the cursor; without a follow-up
+ * action OR a `gojaja wait`, no event can wake the role and the
+ * team's loop stops at this role.
+ *
+ * The generic `nextLoopHint` was too soft for this case (read as
+ * "any of three options", easily collapsed into a fourth implicit
+ * option of "nothing"). This variant is explicitly framed as a
+ * warning + a flat "you MUST run one of these" list, with no
+ * disjunctive "or end the turn" wording.
+ *
+ * Skip rules unchanged: `--json` mode and SYSTEM actor both suppress.
+ */
+export function ackHint(opts: {
+  json: boolean;
+  actor: string | null | undefined;
+}): string {
+  if (opts.json) return "";
+  if (!opts.actor || opts.actor === "SYSTEM") return "";
+  return (
+    "\n" +
+    "WARNING: TURN NOT COMPLETE. ack is a housekeeping op — it does NOT\n" +
+    "park the role. You MUST run one of the following before this turn\n" +
+    "can end:\n" +
+    "  - another action (worklog / report / task / rfc / state edit)\n" +
+    "  - `gojaja wait`   # park until the next event arrives\n" +
+    "Without `wait`, no one can wake your role when work arrives — the\n" +
+    "team's loop stops here.\n"
+  );
+}
