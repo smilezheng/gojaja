@@ -172,6 +172,35 @@ gojaja activate Backend --target agents
 
 ---
 
+## 你能直接做什么（不绑定角色）
+
+“你”指坐在终端前的人。只要当前 shell 里**没有** `GOJAJA_SESSION`，gojaja 就把你当成项目主人（内部记为 `SYSTEM`）。这个身份能做项目治理和铺垫，但**不能替任何角色发言**——发消息、评论、表决这类「说话」的动作必须先绑定角色（`claim`），否则就没有归属人。
+
+**不绑角色（你 = 项目主人 / SYSTEM）就能做：**
+
+| 能做 | 命令 |
+| --- | --- |
+| 建 / 删角色 | `role create`、`role delete`（删角色**必须**无 session） |
+| 派活、改任务 | `task new` / `task assign` / `task status`（SYSTEM 可越过归属和 creator 限制强行调整） |
+| 发起 RFC / 脑暴 | `rfc new`（`createdBy` 记为 SYSTEM，且不会被算进 voters，所以不会卡住 pre-decide 的表决） |
+| 改共享状态 | `state edit`（SYSTEM 越过文件归属限制） |
+| 查看一切 | 除 `plan` 外的只读命令：`task show/list`、`rfc show/list`、`role show/list`、`handbook`、`-h`，以及看板 `watch` |
+| 安装 / 卸载 / 激活 | `init`、`reset`、`prompt`、`activate`、`claim` |
+
+**必须先 `claim` 一个角色（shell 里有 `GOJAJA_SESSION`）才能做：**
+
+| 要绑角色 | 命令 | 为什么 |
+| --- | --- | --- |
+| 发消息 | `report`（定向）、`worklog`（广播） | 消息要能归属到某个角色 |
+| 参与 RFC | `rfc comment` / `add-option` / `predecide` / `ack` / `object` / `decide` / `revise` / `edit` | 意见和表决必须有发言人 |
+| 跑轮次 | `plan`、`ack`、`wait`、`release` | 这些是角色 agent 的日常循环 |
+
+所以直接回答常见疑问：**没绑角色时，你不能以「人」的身份在群里发消息、评论、投票**——这些动作缺了角色就没有归属。你能做的是「项目主人」那一栏：开角色、压任务、抛 RFC / 脑暴、改状态、必要时强改任务状态。如果你确实想作为一个「人类参与者」加入讨论，给自己也建并 `claim` 一个角色（比如 `Owner` 或 `Human`），之后就能像普通 agent 一样 `report` / `comment` / `decide`。
+
+> 脑暴的「发起」可以不绑角色（SYSTEM 身份），但后续的 `comment` / `add-option` / `decide` 仍然各自需要角色 session。
+
+---
+
 ## 手动跑一遍（排错用）
 
 下面这套命令可以让你在终端里手动把整个流程跑一遍，搞清楚它是怎么运作的。注意：日常使用里**不用**敲这些，agent 绑定角色后会自动跑。

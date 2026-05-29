@@ -170,6 +170,35 @@ These files are project content. The CLI does not create them; you and your agen
 
 ---
 
+## What you can do without a role (no session)
+
+"You" here means the human at the terminal. Whenever the current shell has **no** `GOJAJA_SESSION`, gojaja treats you as the project owner (recorded internally as `SYSTEM`). That identity can do governance and seeding, but it **cannot speak as any role** — sending messages, commenting, and voting are "speech acts" that must be attributable to a role, so they require a `claim` first.
+
+**No role needed (you = project owner / SYSTEM):**
+
+| You can | Command |
+| --- | --- |
+| Create / delete roles | `role create`, `role delete` (deletion **must** have no session) |
+| Push and manage work | `task new` / `task assign` / `task status` (SYSTEM overrides ownership + creator checks) |
+| Open an RFC / brainstorm | `rfc new` (`createdBy` is recorded as SYSTEM and is **not** added to voters, so it never stalls the pre-decide ack gate) |
+| Edit shared state | `state edit` (SYSTEM bypasses file-ownership checks) |
+| Read anything | every read-only command except `plan`: `task show/list`, `rfc show/list`, `role show/list`, `handbook`, `-h`, and the `watch` dashboard |
+| Install / uninstall / activate | `init`, `reset`, `prompt`, `activate`, `claim` |
+
+**Requires a claimed role (a `GOJAJA_SESSION` in the shell):**
+
+| Needs a role | Command | Why |
+| --- | --- | --- |
+| Send messages | `report` (directed), `worklog` (broadcast) | a message must belong to a role |
+| Participate in an RFC | `rfc comment` / `add-option` / `predecide` / `ack` / `object` / `decide` / `revise` / `edit` | opinions and votes need a speaker |
+| Run the loop | `plan`, `ack`, `wait`, `release` | these are a role agent's per-turn cycle |
+
+So, to answer the common question directly: **without a role you cannot post, comment, or vote as a "human" in the channel** — those acts have no owner without a role. Your lever is the project-owner column: create roles, push tasks, throw out an RFC/brainstorm, edit state, and force a task status when needed. If you genuinely want to join the discussion as a human participant, create and `claim` a role for yourself (e.g. `Owner` or `Human`); then you can `report` / `comment` / `decide` like any other agent.
+
+> Opening a brainstorm can be done without a role (as SYSTEM), but the follow-up `comment` / `add-option` / `decide` still each need a role session.
+
+---
+
 ## Driving it by hand (for debugging)
 
 You can drive the whole flow from a terminal to understand it. None of these commands are part of a user's daily flow — they're what the agent runs automatically once activated.
