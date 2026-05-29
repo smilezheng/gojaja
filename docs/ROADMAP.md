@@ -438,6 +438,69 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     separately from PR8k because it is a security model fix rather
     than ergonomic polish.
 
+- **PR8v — host stop-hook integration (mechanism-level "must wait").**
+  - Problem: empirically the most common per-turn failure mode is
+    "agent runs `gojaja ack`, sees the success line, sits silent
+    waiting for user input" — `plan -> ack` reads like a complete
+    loop on its face but leaves the role unparked, so no event can
+    wake it. PR8t (the strong `ackHint` warning + `gojaja watch`
+    stalled-no-wait flag) is a soft mitigation; agents still
+    sometimes ignore the warning and the dashboard is only useful
+    if the human is watching it. Only a host-side hook can
+    mechanically refuse "agent stops without `wait`".
+  - Solution: ship a `stop` / `Stop` / equivalent hook for each of
+    the three first-class hosts. Hook reads `.gojaja/comms/pending/
+    <role>/wait.json`; if absent, returns a follow-up message
+    instructing the agent to run `gojaja wait` (or take initiative)
+    rather than ending the turn. Cursor's `stop` event with
+    `loop_limit` is exactly this shape; Claude Code's `Stop` hook
+    is the same; Codex has analogous lifecycle hooks.
+  - New surface (sketch):
+    - `.gojaja/hooks/stop-require-wait.sh` (project-level,
+      git-committable, fail-open by default).
+    - `gojaja hook install --target cursor|claude|codex|all`
+      (separate from `prompt --write`; hooks are host
+      *behaviour-interception*, prompts are agent *guidance* —
+      different concerns).
+    - JSON / TOML deep-merge into the host's hooks file (must
+      coexist with the user's pre-existing hooks; not a clobber).
+    - `loop_limit: 3` (or similar) so a defective agent that never
+      runs `wait` cannot trap the host in an infinite restart loop.
+    - `failClosed: false` in the host config so a hook script
+      crash never bricks the session — fail open with a logged
+      audit event.
+  - Open design questions to settle in the PR:
+    1. **Resolving "which role am I"** inside the hook. The hook
+       runs in the host process, not the agent shell, so
+       `GOJAJA_SESSION` may not be set. Candidates: stash the
+       active session in `.gojaja/comms/pending/.last-active`
+       on each authenticated CLI call; or scan
+       `comms/sessions/*.json` for the freshest live lease in
+       this project root. Single-role-per-window is the easy
+       case; multi-role-per-window needs a tiebreaker.
+    2. **Hook-loop budget**: 3 follow-ups feels right, but make it
+       configurable per project so a slow / frugal-token role can
+       lower it.
+    3. **Cross-host hook semantics divergence**: Cursor returns
+       `followup_message`, Claude returns a different shape,
+       Codex another — the install command will need a per-host
+       template, not a single universal script.
+  - Acceptance:
+    - Cursor stop hook intercepts an "agent ended turn without
+      wait" scenario and forces a follow-up `gojaja wait`. Same
+      for Claude and Codex.
+    - `gojaja hook install` is idempotent; running it again
+      replaces only the gojaja-managed block in `hooks.json` /
+      `settings.json` and leaves user hooks intact.
+    - `gojaja hook uninstall` removes the gojaja block cleanly.
+    - Hook-script crash never blocks the host (verified in tests
+      via a failing-script fixture).
+  - Sequencing: depends on PR8t being shipped (this is the
+    mechanism counterpart to PR8t's soft warning). No protocol /
+    schema changes — purely host-config wiring + a hook script
+    template per host. Estimated ~150 LOC code + ~100 LOC tests +
+    ~80 LOC docs.
+
 - **PR8h — schema-level deferments.**
   - Task `reviewers` field so a Review handoff can sign off without
     needing task-board ownership.
