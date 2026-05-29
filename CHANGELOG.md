@@ -8,6 +8,34 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### AGENTS.md is the single canonical runtime; other targets shrink (PR8aa)
+
+Lean into AGENTS.md as the cross-tool standard so there is essentially
+one runtime file to maintain.
+
+- **`--target agents`** (new canonical name; `codex` kept as an alias)
+  writes the managed block into `AGENTS.md` — read by Codex, Cursor,
+  Copilot, Windsurf, Zed, and more. For most projects this is the only
+  install needed.
+- **`--target claude`** now writes `AGENTS.md` (the canonical block)
+  **plus** a thin `CLAUDE.md` whose managed block only imports it
+  (`@AGENTS.md`). Claude Code doesn't read AGENTS.md natively yet, so
+  this keeps a single source of truth while still covering Claude Code
+  — `CLAUDE.md` is a one-line pointer, not a second copy of the runtime.
+- **`--target cursor`** is now documented as an optional fallback
+  (Cursor reads AGENTS.md; the standalone `.mdc` is only for old Cursor
+  or `.mdc`-specific features).
+- The duplicate-injection guard now keys off the runtime body phrase
+  rather than the marker, so the `CLAUDE.md` importer (a pointer) does
+  NOT count as a second full-runtime file — no false warning for the
+  normal Claude setup; it still warns on AGENTS.md + a standalone
+  Cursor `.mdc`.
+- Marker constants moved to `prompts/markers.ts` (shared by claude.ts
+  and codex.ts) to avoid a circular import; `claude.ts` re-exports the
+  historical names. `reset` already strips the block from both
+  CLAUDE.md and AGENTS.md.
+- Docs (help, README EN+zh-CN, PROTOCOL) lead with `--target agents`.
+
 ### Duplicate-injection guard for overlapping runtime files (PR8z)
 
 Because AGENTS.md is now a cross-tool standard (Cursor reads both

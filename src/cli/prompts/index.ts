@@ -28,6 +28,7 @@ export function buildRuntime(
   opts: RuntimeBodyOptions = {},
 ): RuntimeArtifact {
   switch (target) {
+    case "agents":  return buildCodexRuntime(projectRoot, opts);
     case "codex":   return buildCodexRuntime(projectRoot, opts);
     case "claude":  return buildClaudeRuntime(projectRoot, opts);
     case "cursor":  return buildCursorRuntime(projectRoot, opts);
@@ -52,6 +53,7 @@ export function buildActivation(
   opts: RuntimeBodyOptions = {},
 ): string {
   switch (target) {
+    case "agents":  return buildCodexActivation(role, projectRoot);
     case "codex":   return buildCodexActivation(role, projectRoot);
     case "claude":  return buildClaudeActivation(role, projectRoot);
     case "cursor":  return buildCursorActivation(role, projectRoot);

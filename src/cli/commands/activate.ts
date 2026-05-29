@@ -6,7 +6,7 @@ import type { Target } from "../prompts";
 import { roleMarkdownHasTbd } from "./role";
 import { copyToClipboard } from "../util/clipboard";
 
-const TARGETS: ReadonlySet<Target> = new Set(["codex", "claude", "cursor", "generic"]);
+const TARGETS: ReadonlySet<Target> = new Set(["agents", "codex", "claude", "cursor", "generic"]);
 
 const DIVIDER_TOP    = "═══════════════════════ BEGIN PASTE TO AGENT ═══════════════════════";
 const DIVIDER_BOTTOM = "════════════════════════ END PASTE TO AGENT ════════════════════════";
@@ -32,12 +32,12 @@ export async function runActivate(args: ParsedArgs): Promise<number> {
   const role = args.positional[0];
   if (!role) {
     throw new UsageError(
-      "Usage: gojaja activate <role> --target codex|claude|cursor|generic [--no-handbook] [--json]",
+      "Usage: gojaja activate <role> --target agents|codex|claude|cursor|generic [--no-handbook] [--json]",
     );
   }
   const target = requireString(args.flags, "target") as Target;
   if (!TARGETS.has(target)) {
-    throw new UsageError(`Unknown --target '${target}'. Use codex, claude, cursor, or generic.`);
+    throw new UsageError(`Unknown --target '${target}'. Use agents, codex, claude, cursor, or generic.`);
   }
   const withHandbook = !boolFlag(args.flags, "no-handbook");
   const json = boolFlag(args.flags, "json");

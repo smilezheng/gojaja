@@ -675,9 +675,10 @@ short snippet to paste into that window's chat.
 
 | Target | Persistent artifact location | Activation per window |
 | --- | --- | --- |
-| `codex` | A `<!-- gojaja-runtime:BEGIN ... :END -->` marker block inside `<project>/AGENTS.md` (Codex injects AGENTS.md into the model instructions at session start; preserves user content around it) | User pastes the activation snippet into the chat |
-| `claude` | A `<!-- gojaja-runtime:BEGIN ... :END -->` marker block inside `<project>/CLAUDE.md` (preserves user content around it) | User pastes the activation snippet into the chat |
-| `cursor` | `<project>/.cursor/rules/gojaja-runtime.mdc` with `alwaysApply: true` | User pastes the activation snippet into the chat |
+| `agents` (canonical) | A `<!-- gojaja-runtime:BEGIN ... :END -->` marker block inside `<project>/AGENTS.md` — the cross-tool standard read by Codex, Cursor, Copilot, Windsurf, Zed, ... (preserves user content around it) | User pastes the activation snippet into the chat |
+| `codex` | Alias of `agents`. | Same |
+| `claude` | `<project>/AGENTS.md` (canonical block) PLUS a marker block in `<project>/CLAUDE.md` that just imports it (`@AGENTS.md`) — Claude Code doesn't read AGENTS.md natively yet, so this keeps one source of truth | User pastes the activation snippet into the chat |
+| `cursor` | `<project>/.cursor/rules/gojaja-runtime.mdc` with `alwaysApply: true`. OPTIONAL fallback — Cursor already reads AGENTS.md; use only for old Cursor or `.mdc` features. Don't stack on top of AGENTS.md (double-inject) | User pastes the activation snippet into the chat |
 | `generic` | Nothing written | User pastes the full prompt body into the chat |
 
 Writing is idempotent: re-running `prompt --write` overwrites a prior

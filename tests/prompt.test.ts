@@ -71,13 +71,31 @@ describe("buildRuntime (role-free)", () => {
     expect(a.files[0].content).toContain("alwaysApply: true");
   });
 
-  it("claude artifact is a marker-block targeting <root>/CLAUDE.md", () => {
+  it("claude artifact writes AGENTS.md (canonical) + a CLAUDE.md @AGENTS.md importer", () => {
     const a = buildRuntime("claude", ctx.root);
-    expect(a.files).toHaveLength(1);
-    expect(a.files[0].path).toBe(path.join(ctx.root, "CLAUDE.md"));
-    expect(a.files[0].mode).toBe("marker-block");
-    expect(a.files[0].markerBegin).toBe(CLAUDE_MARKER_BEGIN);
-    expect(a.files[0].markerEnd).toBe(CLAUDE_MARKER_END);
+    expect(a.files).toHaveLength(2);
+    const byName = Object.fromEntries(a.files.map((f) => [path.basename(f.path), f]));
+    // AGENTS.md carries the real runtime; CLAUDE.md is a one-line pointer.
+    expect(byName["AGENTS.md"]).toBeDefined();
+    expect(byName["AGENTS.md"].mode).toBe("marker-block");
+    expect(byName["AGENTS.md"].content).toContain("gojaja plan");
+    expect(byName["CLAUDE.md"]).toBeDefined();
+    expect(byName["CLAUDE.md"].mode).toBe("marker-block");
+    expect(byName["CLAUDE.md"].content).toContain("@AGENTS.md");
+    // The importer must NOT duplicate the runtime body.
+    expect(byName["CLAUDE.md"].content).not.toContain("gojaja plan");
+    for (const f of a.files) {
+      expect(f.markerBegin).toBe(CLAUDE_MARKER_BEGIN);
+      expect(f.markerEnd).toBe(CLAUDE_MARKER_END);
+    }
+  });
+
+  it("agents target is the canonical AGENTS.md (codex is an alias of it)", () => {
+    const ag = buildRuntime("agents", ctx.root);
+    const cx = buildRuntime("codex", ctx.root);
+    expect(ag.files).toHaveLength(1);
+    expect(ag.files[0].path).toBe(path.join(ctx.root, "AGENTS.md"));
+    expect(ag.files[0].content).toBe(cx.files[0].content);
   });
 
   it("generic artifact writes no files", () => {

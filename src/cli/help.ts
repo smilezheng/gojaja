@@ -16,14 +16,16 @@ Quickstart (one-time setup, you in your shell):
   gojaja role create Backend "Backend Engineer"
   # ... then open roles/<id>.md and fill in TBD sections ...
 
-  gojaja prompt --target cursor --write                # repeat per agent host
-  # IMPORTANT: install before opening any agent window; hosts inject
-  # rules into the system prompt only at window-open time.
+  gojaja prompt --target agents --write                # writes AGENTS.md
+  #   AGENTS.md is the cross-tool standard (Codex, Cursor, Copilot, ...).
+  #   Add --target claude too if you use Claude Code. IMPORTANT:
+  #   install before opening any agent window; hosts inject rules into
+  #   the system prompt only at window-open time.
 
   # For each agent window you want to staff:
-  gojaja activate PM --target cursor                   # auto-copies snippet
-  #   → paste into the Cursor window for PM (snippet tells the agent
-  #     to claim the role, read its own contract, and skim gojaja -h)
+  gojaja activate PM --target agents                   # auto-copies snippet
+  #   → paste into the window for PM (snippet tells the agent to claim
+  #     the role, read its own contract, and skim gojaja -h)
 
 Usage:
   gojaja <command> [options]
@@ -56,21 +58,30 @@ Setup (you, in your shell — runs once per project unless noted):
       Removes the role from config.yaml, deletes roles/<id>.md, and
       invalidates any live session. Open task assignments are left in
       place; recreating the same id reinherits them.
-  prompt --target codex|claude|cursor|generic [--write] [--force-rewrite]
-                                              [--no-handbook] [--json]
-      Print (and with --write, install) the host-specific runtime rule
-      for this project. ROLE-FREE: same artifact for every role; the
-      role is bound per-window by 'activate', not here. All targets are
-      project-local: cursor -> .cursor/rules/gojaja-runtime.mdc;
-      claude -> a managed block in CLAUDE.md; codex -> a managed block
-      in AGENTS.md (Codex injects it into the model instructions at
-      session start); generic -> printed only.
+  prompt --target agents|codex|claude|cursor|generic [--write]
+                       [--force-rewrite] [--no-handbook] [--json]
+      Print (and with --write, install) the project's runtime rule.
+      ROLE-FREE: same artifact for every role; the role is bound
+      per-window by 'activate', not here. All targets are project-local.
+      AGENTS.md is the canonical runtime file (the cross-tool standard):
+        agents  -> a managed block in AGENTS.md. Read by Codex, Cursor,
+                   Copilot, Windsurf, Zed, ... — usually all you need.
+        codex   -> alias for agents.
+        claude  -> AGENTS.md (canonical) PLUS a managed block in
+                   CLAUDE.md that just imports it (@AGENTS.md), since
+                   Claude Code doesn't read AGENTS.md natively yet. One
+                   source of truth; CLAUDE.md is a one-line pointer.
+        cursor  -> a standalone .cursor/rules/gojaja-runtime.mdc.
+                   OPTIONAL fallback — Cursor already reads AGENTS.md;
+                   use only for old Cursor or .mdc-specific features.
+                   Don't stack it on top of AGENTS.md (double-inject).
+        generic -> printed only, nothing installed.
       --no-handbook drops the compact judgement cheatsheet from the
       card (the full policy is always available via 'gojaja handbook').
       --force-rewrite overrides the byte-equal short-circuit (useful
       after an upgrade to confirm the install came from the current
       template).
-  activate <role> --target codex|claude|cursor|generic
+  activate <role> --target agents|codex|claude|cursor|generic
                                               [--no-handbook] [--no-copy] [--json]
       Print (and auto-copy to clipboard) the chat-paste snippet that
       binds <role> to one agent window. Never writes to disk; role

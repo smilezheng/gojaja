@@ -89,28 +89,31 @@ gojaja role create TL       "Tech Lead"         --owns "state/architecture.md,do
 gojaja role create Backend  "Backend Engineer"  --owns "src/" --reports-to TL,PM --must-not-edit "src/config/secrets.ts"
 ```
 
-### Step 3 — Install the runtime for the agent tools you use
+### Step 3 — Install the runtime
+
+`AGENTS.md` is the canonical runtime file. As of 2026 it's a cross-tool standard — read by Codex, Cursor, Copilot, Windsurf, Zed, and more — so one file covers almost everything:
 
 ```bash
-# Cursor: writes .cursor/rules/gojaja-runtime.mdc
-gojaja prompt --target cursor --write
-
-# Claude Code: upserts a marker block in CLAUDE.md
-gojaja prompt --target claude --write
-
-# Codex CLI (+ most other tools): upserts a managed block in AGENTS.md
-gojaja prompt --target codex --write
-
-# Any other shell-capable agent (prints body; nothing installed)
-gojaja prompt --target generic
+# Canonical: writes a managed block in AGENTS.md. This is all most
+# projects need (covers Cursor, Codex, and most CLI agents).
+gojaja prompt --target agents --write
 ```
 
-**Install the minimum set — don't install all of them blindly.** As of 2026, `AGENTS.md` is a cross-tool standard: it's read by Codex, Cursor, Copilot, Windsurf, Zed, and more. So `--target codex` (which writes `AGENTS.md`) alone usually covers everything **except** Claude Code, which reads `CLAUDE.md`. A typical project needs at most:
+The **only** common exception is **Claude Code**, which doesn't read `AGENTS.md` natively yet (it reads `CLAUDE.md`). If you use Claude Code, use the `claude` target — it writes `AGENTS.md` (canonical) **plus** a one-line `CLAUDE.md` that just imports it, so there's still a single source of truth:
 
-- `--target codex` → `AGENTS.md` (covers Cursor, Codex, and most CLI agents), **and**
-- `--target claude` → `CLAUDE.md` **only if** you use Claude Code.
+```bash
+# Use this instead of --target agents if you use Claude Code:
+gojaja prompt --target claude --write   # writes AGENTS.md + a CLAUDE.md @AGENTS.md importer
+```
 
-Avoid installing `--target cursor` (`.cursor/rules/*.mdc`) *on top of* `AGENTS.md` — Cursor reads both, so the same runtime block would be injected into Cursor's system prompt twice (wasteful, though not harmful). The CLI warns you when multiple runtime files coexist. Use `--target cursor` only if you rely on Cursor's `.mdc` features (glob scoping) or hit a version where Cursor doesn't auto-load `AGENTS.md`.
+Other targets:
+
+```bash
+gojaja prompt --target cursor --write   # OPTIONAL standalone .cursor/rules/*.mdc
+gojaja prompt --target generic          # prints the body; installs nothing
+```
+
+`--target cursor` is a **fallback** — Cursor already reads `AGENTS.md`, so only use it for old Cursor versions or `.mdc`-specific features (glob scoping). Don't stack it on top of `AGENTS.md`, or Cursor injects the same block twice (wasteful, not harmful); the CLI warns you when multiple full-runtime files coexist.
 
 **Run this before opening the agent window.** Hosts inject these files into the agent's system prompt only when the agent window first opens. If a window is already open when you run `prompt --write`, restart it before chatting — the new rule will not take effect in an already-running window. The CLI prints an IMPORTANT notice every time something was written.
 
@@ -121,13 +124,12 @@ Re-running `prompt --write` on the same project is idempotent. If the file is by
 Role binding is per-window. The `activate` command prints a chat-paste snippet — auto-copied to your clipboard when possible — and tells the agent how to claim the role, read its own contract, and skim `gojaja -h`.
 
 ```bash
-gojaja activate PM      --target cursor   # paste into the Cursor window for PM
-gojaja activate TL      --target claude   # paste into the Claude window for TL
-gojaja activate Backend --target codex    # paste into the Codex window for Backend
-gojaja activate QA      --target cursor   # another Cursor window, this time for QA
+gojaja activate PM      --target agents   # paste into the PM window (Cursor / Codex / ...)
+gojaja activate TL      --target claude   # paste into the Claude Code window for TL
+gojaja activate Backend --target agents   # paste into the Backend window
 ```
 
-The snippet appears between `═══ BEGIN PASTE TO AGENT ═══` and `═══ END PASTE TO AGENT ═══` dividers. The dividers themselves are descriptive — do not paste them.
+(The activation snippet is the same across targets — `--target` only affects which install instructions it references. Use whichever matches the window's host.) The snippet appears between `═══ BEGIN PASTE TO AGENT ═══` and `═══ END PASTE TO AGENT ═══` dividers. The dividers themselves are descriptive — do not paste them.
 
 Two windows of the same tool can hold different roles independently because the role lives in that window's `GOJAJA_SESSION` shell variable, not in any project file.
 
@@ -251,11 +253,11 @@ gojaja rfc decide RFC-0001 --option perf --rationale "Going with perf-only."
 ```bash
 gojaja role create Frontend "Frontend Engineer"
 # fill in roles/Frontend.md
-gojaja activate Frontend --target cursor
-# open a new Cursor window and paste
+gojaja activate Frontend --target agents
+# open a new agent window and paste
 ```
 
-The Cursor / Claude / Codex runtime rule is already installed; no need to re-run `prompt --write`.
+The runtime rule is already installed; no need to re-run `prompt --write`.
 
 ### Remove a role
 
@@ -290,7 +292,7 @@ Everything gojaja installs is **project-local** — there is no user-level footp
 
 ```bash
 npm install -g gojaja@latest
-gojaja prompt --target cursor --write --force-rewrite   # repeat per host
+gojaja prompt --target agents --write --force-rewrite   # repeat for each target you installed
 # Restart every open agent window.
 ```
 

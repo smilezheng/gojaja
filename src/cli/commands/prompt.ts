@@ -4,33 +4,39 @@ import { boolFlag, optionalString, requireString, type ParsedArgs } from "../arg
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { buildRuntime, writeArtifactFile } from "../prompts";
-import { CLAUDE_MARKER_BEGIN } from "../prompts/claude";
 import type { Target } from "../prompts";
 
-const TARGETS: ReadonlySet<Target> = new Set(["codex", "claude", "cursor", "generic"]);
+const TARGETS: ReadonlySet<Target> = new Set(["agents", "codex", "claude", "cursor", "generic"]);
+
+// A file "carries the full runtime" if it contains the loop body, not
+// just our marker. The CLAUDE.md importer only holds a one-line
+// `@AGENTS.md` pointer (no "gojaja plan"), so it is NOT a second copy
+// and must not trip the duplicate-injection warning.
+const RUNTIME_BODY_PHRASE = "gojaja plan";
 
 /**
- * Which gojaja runtime artifacts are currently installed in the project.
- * Used to warn about duplicate system-prompt injection: a single host
- * often reads more than one of these. As of 2026 AGENTS.md is a
- * cross-tool standard — Cursor reads BOTH AGENTS.md and
- * `.cursor/rules/*.mdc`, and Claude Code reads CLAUDE.md (and, on
- * recent versions, AGENTS.md too). So if several targets are installed,
- * one window can inject the same block twice (wasteful, not broken).
+ * Project files that each carry the FULL runtime block. Used to warn
+ * about duplicate system-prompt injection: AGENTS.md is read by Cursor
+ * too, so if both AGENTS.md and `.cursor/rules/*.mdc` carry the runtime,
+ * a Cursor window injects it twice (wasteful, not broken). The CLAUDE.md
+ * `@AGENTS.md` importer is excluded — it points at AGENTS.md rather than
+ * duplicating it.
  */
-async function installedRuntimeFiles(root: string): Promise<string[]> {
+async function fullRuntimeFiles(root: string): Promise<string[]> {
   const out: string[] = [];
-  const cursorRule = path.join(root, ".cursor", "rules", "gojaja-runtime.mdc");
-  try {
-    await fsp.access(cursorRule);
-    out.push(".cursor/rules/gojaja-runtime.mdc");
-  } catch {
-    /* not installed */
-  }
-  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+  const candidates: Array<[string, string]> = [
+    [".cursor/rules/gojaja-runtime.mdc", path.join(root, ".cursor", "rules", "gojaja-runtime.mdc")],
+    ["AGENTS.md", path.join(root, "AGENTS.md")],
+    ["CLAUDE.md", path.join(root, "CLAUDE.md")],
+  ];
+  for (const [label, abs] of candidates) {
     try {
-      const text = await fsp.readFile(path.join(root, name), "utf8");
-      if (text.includes(CLAUDE_MARKER_BEGIN)) out.push(name);
+      const text = await fsp.readFile(abs, "utf8");
+      // The runtime body phrase is the signal — present in AGENTS.md,
+      // the Cursor .mdc (a frontmatter file, no BEGIN marker), and a
+      // full-block CLAUDE.md, but NOT in the CLAUDE.md `@AGENTS.md`
+      // importer (which is a pointer, not a copy).
+      if (text.includes(RUNTIME_BODY_PHRASE)) out.push(label);
     } catch {
       /* absent */
     }
@@ -62,7 +68,7 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
   }
   const target = requireString(args.flags, "target") as Target;
   if (!TARGETS.has(target)) {
-    throw new UsageError(`Unknown --target '${target}'. Use codex, claude, cursor, or generic.`);
+    throw new UsageError(`Unknown --target '${target}'. Use agents, codex, claude, cursor, or generic.`);
   }
   const write = boolFlag(args.flags, "write");
   const forceRewrite = boolFlag(args.flags, "force-rewrite");
@@ -95,10 +101,10 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
     }
   }
 
-  // After a write, check whether multiple runtime artifacts now coexist
-  // in the project — a single host may read more than one of them and
-  // inject the block twice (see installedRuntimeFiles).
-  const coexisting = write ? await installedRuntimeFiles(root) : [];
+  // After a write, check whether multiple FULL-runtime files now coexist
+  // — a single host (notably Cursor, which reads AGENTS.md + .cursor
+  // rules) may then inject the block twice (see fullRuntimeFiles).
+  const coexisting = write ? await fullRuntimeFiles(root) : [];
   const overlap = coexisting.length > 1;
 
   if (json) {
@@ -150,14 +156,13 @@ export async function runPrompt(args: ParsedArgs): Promise<number> {
     }
     if (overlap) {
       process.stdout.write(
-        `\nNote: this project now has ${coexisting.length} gojaja runtime files:\n` +
+        `\nNote: ${coexisting.length} files now carry the full runtime block:\n` +
           coexisting.map((f) => `  - ${f}`).join("\n") +
-          `\nMany hosts read more than one of these (Cursor reads AGENTS.md\n` +
-          `AND .cursor/rules; Claude Code reads CLAUDE.md and, recently,\n` +
-          `AGENTS.md), so one window may inject the same block twice —\n` +
-          `wasteful, though not harmful. AGENTS.md alone already covers\n` +
-          `Cursor + Codex (+ Copilot / Windsurf / Zed); add the Cursor or\n` +
-          `Claude target only if you need that host's native file. Use\n` +
+          `\nCursor reads AGENTS.md AND .cursor/rules, so a Cursor window\n` +
+          `would inject the same block twice — wasteful, though not\n` +
+          `harmful. AGENTS.md alone already covers Cursor + Codex (+\n` +
+          `Copilot / Windsurf / Zed); the Cursor target is only a\n` +
+          `fallback for old Cursor or .mdc-specific features. Use\n` +
           `'gojaja reset' to remove a runtime file you don't want.\n`,
       );
     }

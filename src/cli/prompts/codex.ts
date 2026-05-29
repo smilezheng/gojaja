@@ -1,62 +1,65 @@
 import * as path from "node:path";
 import { activationSnippet, runtimeLoopBody, type RuntimeBodyOptions } from "./core";
-import { CLAUDE_MARKER_BEGIN, CLAUDE_MARKER_END } from "./claude";
+import { RUNTIME_MARKER_BEGIN, RUNTIME_MARKER_END } from "./markers";
 import type { RuntimeArtifact } from "./types";
 
-// Codex injects each project's AGENTS.md into the model instructions at
-// session start (walking from the git root to the cwd). That is exactly
-// the "always-on, survives compaction" channel we need — and unlike the
-// old user-level skill it is PROJECT-LOCAL, so there is no cross-project
-// sharing to reference-count and no user-level footprint. We upsert a
-// managed marker block, identical in spirit to the CLAUDE.md handling,
-// preserving any content the user already has in AGENTS.md.
+// AGENTS.md is the canonical runtime file: the cross-tool project
+// system-prompt standard, injected at session start and surviving
+// compaction. It is PROJECT-LOCAL (no user-level footprint, no
+// reference-counting). We upsert a managed marker block, preserving any
+// content the user already has in AGENTS.md. The `claude` target reuses
+// `agentsFile()` so AGENTS.md stays the single source of truth.
 
-function blockBody(projectRoot: string, opts: RuntimeBodyOptions): string {
+/** The managed marker-block content for AGENTS.md. */
+export function agentsBlock(projectRoot: string, opts: RuntimeBodyOptions): string {
   const effectiveOpts: RuntimeBodyOptions = { ...opts, target: "codex" };
   return [
-    CLAUDE_MARKER_BEGIN,
+    RUNTIME_MARKER_BEGIN,
     "<!-- managed by gojaja; edit the surrounding file freely, but do not edit the contents of this block -->",
     "",
     "## Multi-Agent Coordination",
     "",
     runtimeLoopBody(projectRoot, effectiveOpts),
-    CLAUDE_MARKER_END,
+    RUNTIME_MARKER_END,
   ].join("\n");
+}
+
+/** The AGENTS.md file descriptor (marker-block upsert at <root>/AGENTS.md). */
+export function agentsFile(
+  projectRoot: string,
+  opts: RuntimeBodyOptions,
+): RuntimeArtifact["files"][number] {
+  return {
+    path: path.join(projectRoot, "AGENTS.md"),
+    content: agentsBlock(projectRoot, opts),
+    mode: "marker-block",
+    markerBegin: RUNTIME_MARKER_BEGIN,
+    markerEnd: RUNTIME_MARKER_END,
+  };
 }
 
 export function buildCodexRuntime(
   projectRoot: string,
   opts: RuntimeBodyOptions = {},
 ): RuntimeArtifact {
-  const target = path.join(projectRoot, "AGENTS.md");
-  const block = blockBody(projectRoot, opts);
+  const file = agentsFile(projectRoot, opts);
   const body = [
-    `# Codex project instructions: ${target}`,
+    `# Project runtime: ${file.path}`,
     "",
     "Run with `--write` to insert (or refresh) a managed block in this",
-    "project's `AGENTS.md`. Codex reads AGENTS.md into its model",
-    "instructions at session start, so the runtime loop is always in",
-    "context. Existing content outside the block is preserved.",
+    "project's `AGENTS.md` — the cross-tool standard read by Codex,",
+    "Cursor, Copilot, Windsurf, Zed and more, injected into the model",
+    "instructions at session start. Existing content outside the block",
+    "is preserved.",
     "",
-    "After install, use `gojaja activate <role> --target codex` to get",
+    "After install, use `gojaja activate <role> --target agents` to get",
     "the chat-paste line for each role.",
     "",
     "---",
     "",
-    block,
+    file.content,
   ].join("\n");
-  return {
-    body,
-    files: [
-      {
-        path: target,
-        content: block,
-        mode: "marker-block",
-        markerBegin: CLAUDE_MARKER_BEGIN,
-        markerEnd: CLAUDE_MARKER_END,
-      },
-    ],
-  };
+  return { body, files: [file] };
 }
 
 export function buildCodexActivation(role: string, projectRoot: string): string {
