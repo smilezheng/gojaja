@@ -8,6 +8,47 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### Runtime body: frame `wait` as a parked state, suppress 30 s narration
+
+Codex-specific failure mode reported in the wild: the Codex agent
+host prompts its agent to "provide a status update" every 30 s while
+a tool call is running. With nothing in the runtime body telling the
+agent to ignore that for `gojaja wait`, the agent dutifully narrates
+every 30 s for the whole duration of the wait — burning tokens on
+an idle block. The same anti-pattern shows up in milder forms on
+other hosts (agents that get nervous about a long-running tool
+call and start "I'm still waiting..." check-ins).
+
+The runtime body's End-of-turn ritual paragraph gains an explicit
+parked-state framing:
+
+> **`wait` is a parked state, not active work.** Once it starts:
+> no progress narration, no polling, no check-ins with the user.
+> The block IS the work — some hosts (e.g. Codex) prompt you to
+> "update" every 30 s while a tool is running; ignore that prompt
+> for `wait`, or you'll burn tokens narrating an idle block.
+
+Three things the wording does deliberately:
+
+  - "parked state, not active work" is the framing the user-
+    reported fix suggested (it's the conceptual root; "do not
+    narrate / do not poll" are corollaries).
+  - The list of forbidden behaviours is enumerated (narration /
+    polling / check-ins) so an agent reading the rule cannot
+    rationalise "well, I'll just send one quick update".
+  - The Codex callout is named so a Codex agent reading "your host
+    is prompting you to update" recognises the situation and knows
+    to ignore it. Other hosts benefit from the same rule without
+    needing the same callout.
+
+Total runtime card grew by ~5 lines (90/95 → 95/100 across hosts),
+still well under the 130-line CLAUDE.md budget.
+
+`tests/prompt.test.ts` gains a regression asserting all three
+trigger phrases ("parked state, not active work" / "no progress
+narration" / the Codex callout) are present in every host's
+runtime body.
+
 ### `gojaja watch` Setup tab: role create / prompt --write / activate
 
 Follow-up to the previous PR's tab + init scaffold. The dashboard

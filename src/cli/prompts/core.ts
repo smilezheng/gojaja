@@ -89,6 +89,11 @@ turn — without it your role goes deaf. ONE call BLOCKS (no token
 cost) until an event wakes you, or TIMEOUT if you pass \`--in\`/\`--until\`.
 Bare \`wait\` blocks indefinitely. Host killed it? Re-run \`gojaja wait\`
 (no args) to resume; cap ~5 resumes. See \`gojaja handbook\`.
+**\`wait\` is a parked state, not active work.** Once it starts:
+no progress narration, no polling, no check-ins with the user. The
+block IS the work — some hosts (e.g. Codex) prompt you to "update"
+every 30 s while a tool is running; ignore that prompt for \`wait\`,
+or you'll burn tokens narrating an idle block.
 
 ## Rules
 

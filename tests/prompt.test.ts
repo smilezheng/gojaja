@@ -142,6 +142,29 @@ describe("buildRuntime (role-free)", () => {
     }
   });
 
+  it("every target's runtime body frames `wait` as a parked state (no narration / no polling during the block)", () => {
+    // Codex-specific trigger: the Codex agent's host prompts it to
+    // "provide a status update" every 30 s while a tool call is
+    // running. Without an explicit instruction to the contrary, the
+    // agent narrates progress every 30 s for the whole duration of
+    // `gojaja wait`, burning tokens on an idle block. The same
+    // anti-pattern exists in milder forms on other hosts when the
+    // agent gets nervous about a long-running tool call.
+    //
+    // The runtime body has to state, in the same place agents look
+    // when they hit a long wait, that "no narration / no check-ins /
+    // no polling" applies for the duration of `wait`. Three trigger
+    // phrases pin this — the parked-state framing, the explicit list
+    // of forbidden behaviours, and the explicit Codex callout so
+    // the agent knows why its host is asking for updates.
+    for (const t of ["agents", "claude", "cursor", "generic"] as const) {
+      const a = buildRuntime(t, ctx.root);
+      expect(a.body).toMatch(/parked state, not active work/i);
+      expect(a.body).toMatch(/no progress narration/);
+      expect(a.body).toMatch(/Codex/);
+    }
+  });
+
   it("every target's runtime body explicitly forbids ending a turn without `wait` (PR8w hard rule)", () => {
     // The most common per-turn failure mode is "agent answers the user
     // in chat and ends the turn unparked" — the role goes deaf and no
