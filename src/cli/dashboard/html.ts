@@ -110,6 +110,13 @@ export const DASHBOARD_HTML = `<!doctype html>
   .action h3 { font-size: 12px; margin: 0 0 10px; font-weight: 600; color: var(--fg);
     text-transform: uppercase; letter-spacing: .06em; }
   .action label { display: block; font-size: 11px; color: var(--dim); margin: 8px 0 3px; }
+  /* Required-field marker. Only shown on labels whose backend
+     handler refuses the request when the field is empty (see
+     postReport / postRfc / postTask / postRole / postPrompt /
+     postActivate in src/cli/commands/watch.ts). The asterisk colour
+     reuses the P0 red so it reads "you must fill this" without an
+     extra palette token. */
+  .action label.req::before { content: "* "; color: var(--p0); font-weight: 700; }
   .action input, .action select, .action textarea {
     width: 100%; box-sizing: border-box; background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; font: 12px ui-monospace, monospace; }
@@ -216,7 +223,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     <div class="actions">
       <div class="action">
         <h3>Create role</h3>
-        <label>Id (no spaces; <code>[A-Za-z0-9_-]</code>)</label>
+        <label class="req">Id (no spaces; <code>[A-Za-z0-9_-]</code>)</label>
         <input id="role-id" placeholder="Backend" />
         <label>Title (human-readable)</label>
         <input id="role-title" placeholder="Backend Engineer" />
@@ -235,7 +242,7 @@ export const DASHBOARD_HTML = `<!doctype html>
 
       <div class="action">
         <h3>Install runtime files</h3>
-        <label>Target host</label>
+        <label class="req">Target host</label>
         <select id="prompt-target">
           <option value="agents" selected>agents (writes AGENTS.md — covers Codex / Cursor / Copilot / Windsurf / Zed)</option>
           <option value="claude">claude (writes CLAUDE.md)</option>
@@ -257,9 +264,9 @@ export const DASHBOARD_HTML = `<!doctype html>
 
       <div class="action">
         <h3>Activate (per-window snippet)</h3>
-        <label>Role</label>
+        <label class="req">Role</label>
         <select id="act-role"></select>
-        <label>Target host</label>
+        <label class="req">Target host</label>
         <select id="act-target">
           <option value="agents" selected>agents</option>
           <option value="claude">claude</option>
@@ -285,9 +292,9 @@ export const DASHBOARD_HTML = `<!doctype html>
     <div class="actions">
       <div class="action">
         <h3>Send report</h3>
-        <label>To role</label>
+        <label class="req">To role</label>
         <select id="rep-to"></select>
-        <label>Message</label>
+        <label class="req">Message</label>
         <textarea id="rep-msg" placeholder="What you need them to do next."></textarea>
         <label>Ref (optional)</label>
         <input id="rep-ref" placeholder="T-0001 / RFC-0007 / ..." />
@@ -296,11 +303,11 @@ export const DASHBOARD_HTML = `<!doctype html>
       </div>
       <div class="action">
         <h3>Open RFC</h3>
-        <label>Slug</label>
+        <label class="req">Slug</label>
         <input id="rfc-slug" placeholder="lowercase-with-dashes" />
-        <label>Title</label>
+        <label class="req">Title</label>
         <input id="rfc-title" />
-        <label>Deciders (comma-separated roles)</label>
+        <label class="req">Deciders (comma-separated roles)</label>
         <input id="rfc-deciders" placeholder="CTO,CPO" />
         <label>Voters (comma-separated, optional)</label>
         <input id="rfc-voters" />
@@ -313,7 +320,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       </div>
       <div class="action">
         <h3>Create task</h3>
-        <label>Title</label>
+        <label class="req">Title</label>
         <input id="task-title" />
         <label>Owner (optional)</label>
         <select id="task-owner"><option value="">(unassigned)</option></select>
