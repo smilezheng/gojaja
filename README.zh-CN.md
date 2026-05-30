@@ -50,7 +50,32 @@
 
 ---
 
-## 一次性配置（你在自己的 shell 里跑）
+## 快速上手 —— 在 `gojaja watch` 看板里点几下就好（推荐）
+
+以前需要在终端里敲 `init` / `role create` / `prompt --write` / `activate` 的所有铺设步骤，看板都接管了。**只敲一句命令，剩下的全是点击。**
+
+```bash
+cd /path/to/your-project
+npm install -g gojaja@latest    # 还没装就装一下
+gojaja watch                    # 起服务在 http://127.0.0.1:7421，自动开浏览器
+```
+
+浏览器自动打开后跟着走：
+
+1. **初始化** —— 如果项目还没 `.gojaja/`，看板会整屏显示一个 *Initialise this project* 按钮，点一下就行。（如果项目不在 git 里、或者工作区有未提交修改，按钮会先解释风险，让你点二次确认——等价于原来 CLI 的 `[y/N]` 提示，只是搬到了浏览器里）。
+2. **建角色** —— 切到 **Setup** 标签页 → *Create role* 卡片。填 `id` / `title` / `owns`（需要的话再加 `reportsTo` / `mustNotEdit`），点 *Create role*。每个角色都这样建一遍（PM / Backend / TL / ...）。
+3. **填角色合约** —— 用编辑器打开 `.gojaja/roles/<id>.md`，把 `TBD` 占位符（角色描述 + 职责）替换成真实内容。看板的 *Activate* 步骤会拒绝为还是 TBD 的角色生成 snippet，所以这一步是机制硬卡，不是唠叨。
+4. **装运行时文件** —— *Setup* 标签 → *Install runtime files* 卡片。选 target（`agents` 覆盖 Cursor / Codex / Copilot / Windsurf / Zed；用 Claude Code 就选 `claude`），点 *Install*。卡片会提醒你重启已开的 agent 窗口让新规则生效。
+5. **激活每个 agent 窗口** —— *Setup* 标签 → *Activate* 卡片。选角色 + target，点 *Generate snippet*，再点 *Copy*。打开对应角色的 agent 窗口（Cursor 标签 / Claude Code 窗口 / Codex CLI shell）粘贴。每个想绑定的窗口跑一次。
+6. **从这里开始基本就只需要跟 agent 聊天了。** **Dashboard** 标签实时显示所有窗口的状态（session、任务板、RFC、活动流，外加红色 `stalled` 标记给那些 `ack` 之后忘了 `gojaja wait` 的角色）；**Actions** 标签让你不离开浏览器就能发 `report --to <role>` / 起 RFC / 建任务，全部以 `from: SYSTEM` 写入审计流。
+
+Setup 和 Actions 这两个写入标签**只在 watch 绑到 loopback（默认 `127.0.0.1`）时显示**。如果你用 `--host 0.0.0.0` 把看板分享到局域网，两个写入标签会自动隐藏，看板退化为只读——同事可以围观，但没人能借此往团队里推指令。终端里 Ctrl-C 停掉服务即可。
+
+如果你更喜欢从 shell 里走同一套流程（要写脚本做 onboarding、想搞清协议、或者纯粹偏好命令行），下面那节把同样的 4 步写成命令行版本。
+
+---
+
+## 用命令行配置（看板路径之外的另一种选择）
 
 四步，做完之后只和 agent 聊天即可。
 
@@ -137,7 +162,7 @@ gojaja activate Backend --target agents
 
 同一种工具的两个窗口可以同时持有不同角色，因为角色信息只活在那个窗口 shell 的 `GOJAJA_SESSION` 环境变量里，不在项目里。
 
-到这步，你要做的配置就结束了，剩下的都是跟 agent 聊天。想随时看全局进度，开一个 `gojaja watch` 看板（见[下文](#用看板盯进度gojaja-watch)）。
+到这步，你要做的配置就结束了，剩下的都是跟 agent 聊天。想随时看全局进度，开一个 `gojaja watch` 看板（参考下面的 [`gojaja watch` 参考](#gojaja-watch-参考运行期监控)）。
 
 ---
 
@@ -355,26 +380,34 @@ gojaja release <role>            # 在仍持有 session 的 shell 里跑，或
 
 ---
 
-## 用看板盯进度（`gojaja watch`）
+## `gojaja watch` 参考（运行期监控）
 
-在单机上，一个 agent 的对话一旦结束，没有任何机制能主动把它叫醒：后端（Claude）`report` 给技术 leader（Cursor）时，TL 窗口只有恰好停在 `wait` 上才会立刻看到，否则就得你去戳一下。换句话说，**调度的活儿落在你身上**。`gojaja watch` 就是给你这个"调度者"准备的总览面板：
+上面的快速上手已经讲了第一次铺设怎么用看板。**项目跑起来之后**就把看板挂在浏览器标签里——这是你的"调度者视角"：在单机上 agent 的对话结束之后没有任何机制能主动把它叫醒，所以你就盯着这一屏决定下一个该催谁。
 
 ```bash
-gojaja watch                 # 在 http://127.0.0.1:7421 起服务并自动打开浏览器
+gojaja watch                 # 默认 http://127.0.0.1:7421，自动开浏览器
 gojaja watch --port 8080     # 指定端口
+gojaja watch --host 0.0.0.0  # 局域网共享 —— 自动切只读模式（隐藏 Setup + Actions）
 gojaja watch --no-open       # 不自动开浏览器
 ```
 
-每两秒自动刷新一次，把所有窗口的状态汇到一屏：
+每两秒自动刷新一次，分三个标签页：
 
-- **角色** —— 每个角色的 session 是 `live` / `stale` 还是没有；是哪个进程（pid + host）持有的；上次心跳是多久前；角色空闲时还会显示它在 `wait` 等什么、等到几点。如果某个角色明明持有 live session 却长时间没跑过 `gojaja wait`，会被红色 `stalled` 标出来——这就是"agent 忘了 park"的失败模式，扫一眼就能发现。
-- **Setup（仅 loopback 可用）** —— 项目铺设用的写入面板：建角色、装运行时文件（等价于 `gojaja prompt --target X --write`）、生成每个窗口的激活 snippet。这个看板还接管了首次 `gojaja init` —— 如果 `.gojaja/` 不存在，watch 会显示一个"初始化此项目"的整屏页面，把原来 CLI 的 `[y/N]` 二次确认流程搬到浏览器里完成。
-- **Actions（仅 loopback 可用）** —— 一个写入面板，让你直接从看板里给某个角色发 `report`、起 RFC、建 task。所有动作都以 `from: SYSTEM` 写入（项目主理人通道，等价于在没 `GOJAJA_SESSION` 的 shell 里跑相应 CLI 命令）。当 watch 绑到非 loopback 地址（比如 `--host 0.0.0.0` 在局域网共享）时，这两个面板会自动隐藏，看板退化为只读，避免外人在 LAN 里乱推任务。
-- **任务板** —— 所有任务按状态（Backlog → Done）分列，带 owner、优先级、阻塞项和产出数。
-- **RFC** —— 哪些在 open / revising、哪些已决，连同 deciders 和 voters。
-- **活动流** —— 所有 agent 的实时事件（report、worklog、任务流转、RFC 评论与决定），最新的在最上面，同时也就是这个项目的历史。
+- **Dashboard** —— 全部窗口的实时状态：
+  - **角色** 卡片：session 是 `live` / `stale` 还是没有、哪个进程（pid + host）持有的、心跳多久前、空闲时在 `wait` 什么。**如果某个角色明明持有 live session 却长时间没跑过 `gojaja wait`，会被红色 `stalled` 标出来**——这是"agent `ack` 之后忘了 park"的失败模式，那个角色对事件失聪，扫一眼就能发现。
+  - **任务板** —— 所有任务按状态（Backlog → Done）分列，带 owner、优先级、阻塞项、产出数。
+  - **RFC** —— 哪些在 open / revising / 已决，连同 deciders 和 voters。
+  - **活动流** —— 所有 agent 的实时事件（report、worklog、任务流转、RFC 评论与决定），最新的在最上面，同时就是这个项目的历史。
+- **Setup（仅 loopback 可用）** —— 跟快速上手用的是同一个写入面板：建角色、装运行时、生成激活 snippet。**项目运行后也常用**——加新角色、给新机器装运行时、给新窗口生成 snippet 都从这里。
+- **Actions（仅 loopback 可用）** —— 不离开浏览器就把指令推进团队：给角色发 `report`、起 RFC、建 task，全部以 `from: SYSTEM` 写入审计流。
 
-它帮你判断下一个该催谁：红字 `stalled` 的角色该让它跑 `wait`；显示「空闲，等派活（task-assigned）」的角色该给它安排任务了；卡在 `Blocked` 的任务要去找它依赖的上游 owner；`open` 了很久没动的 RFC 要去戳它的 decider。Actions 面板让你不用切到终端就能直接从这一屏里推动。带队的时候就开一个浏览器标签挂着，终端里 Ctrl-C 即可停掉。
+按紧迫顺序看哪些信号要响应：
+- **header 上的红色 `stalled` 数字** —— 有角色失联了，去 Actions 发条 report 戳它，或者直接去那个 agent 窗口戳。
+- **角色显示「空闲，等派活（task-assigned）」** —— 该角色闲着，去 Actions 派任务给它。
+- **任务卡在 `Blocked`** —— 看 `dependsOn` 找上游催。
+- **RFC 在 `open` 状态停了很久** —— 去戳它的 decider。
+
+把 watch 绑到非 loopback 地址（比如 `--host 0.0.0.0` 局域网共享）时，两个写入标签会自动隐藏，看板退化为只读——同事可以围观，但没人能借此往团队里推指令。终端里 Ctrl-C 停掉服务即可。
 
 ## agent 之间怎么拍板（RFC）
 

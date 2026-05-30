@@ -50,7 +50,32 @@ If you find yourself running `gojaja plan` or `claim` by hand, you are probably 
 
 ---
 
-## One-time setup (you, in your shell)
+## Quickstart — drive everything from `gojaja watch` (recommended)
+
+The dashboard handles every setup step you used to need a terminal for. **One command, then point and click.** No `init` / `role create` / `prompt --write` / `activate` typed by hand unless you want to.
+
+```bash
+cd /path/to/your-project
+npm install -g gojaja@latest    # if not already installed
+gojaja watch                    # serves http://127.0.0.1:7421 and opens your browser
+```
+
+A browser tab opens automatically. Walk through it:
+
+1. **Initialise** — if `.gojaja/` is missing the dashboard shows a single full-screen *Initialise this project* button. Click it. (For non-git roots or repos with uncommitted changes the button explains the trade-off and asks for a one-click confirmation — same gate as the CLI's `[y/N]` prompt, just rendered in HTML.)
+2. **Create roles** — switch to the **Setup** tab → *Create role* card. Fill `id` / `title` / `owns` (and `reportsTo` / `mustNotEdit` if you need them), click *Create role*. Repeat for each role on your team (PM, Backend, TL, ...).
+3. **Fill each role contract** — open `.gojaja/roles/<id>.md` in your editor and replace the `TBD` placeholders (Role description + Responsibilities). The dashboard's *Activate* step refuses to issue a snippet for a role whose markdown is still TBD, so this step is gating-by-design rather than nagware.
+4. **Install the runtime** — *Setup* tab → *Install runtime files* card. Pick the target host (`agents` covers Cursor / Codex / Copilot / Windsurf / Zed; pick `claude` if you use Claude Code). Click *Install*. The card tells you to restart any open agent window so the new rule takes effect.
+5. **Activate each agent window** — *Setup* tab → *Activate* card. Pick role + target, click *Generate snippet*, then *Copy*. Open the agent window for that role (Cursor tab / Claude Code window / Codex CLI shell) and paste. Repeat once per window you want to staff.
+6. **From now on you mostly chat with the agents.** The **Dashboard** tab shows live state across every window (sessions, task board, RFCs, activity feed, plus a red `stalled` flag for any role that forgot to `gojaja wait` after `ack`); the **Actions** tab lets you push a `report --to <role>` / open an RFC / create a task without leaving the browser, all recorded in the audit log as `from: SYSTEM`.
+
+The Setup and Actions tabs only appear when `gojaja watch` is bound to loopback (default `127.0.0.1`). When you share the dashboard over a LAN with `--host 0.0.0.0`, both write tabs hide and the dashboard goes read-only — anyone on the network can spectate, no one can push directives at the team. Ctrl-C in the terminal stops the server.
+
+If you would rather drive the same flow from a shell — to script onboarding, learn the protocol, or just because you prefer the CLI — keep reading; the next section walks through the same four steps as terminal commands.
+
+---
+
+## Setup via the CLI (alternative to the dashboard quickstart)
 
 Four steps. After this, you only chat with the agents.
 
@@ -135,7 +160,7 @@ Each command's output is wrapped in `═══ BEGIN PASTE TO AGENT ═══` /
 
 Two windows of the same tool can hold different roles independently because the role lives in that window's `GOJAJA_SESSION` shell variable, not in any project file.
 
-From here, just chat with the agents normally. To see overall progress at a glance, run `gojaja watch` (see [Watch progress on a dashboard](#watch-progress-on-a-dashboard-gojaja-watch)).
+From here, just chat with the agents normally. To see overall progress at a glance, run `gojaja watch` (see the [`gojaja watch` reference](#gojaja-watch-reference-runtime-monitoring) below).
 
 ---
 
@@ -356,26 +381,34 @@ gojaja release <role>            # from a shell that still holds the session, or
 
 ---
 
-## Watch progress on a dashboard (`gojaja watch`)
+## `gojaja watch` reference (runtime monitoring)
 
-On a single machine nothing can wake an agent whose turn has ended — when Backend (Claude) reports to TL (Cursor), the TL window only notices if it happens to be mid-`wait`, otherwise you have to nudge it. In other words, **you are the scheduler.** `gojaja watch` gives you the one screen that role makes necessary:
+The Quickstart above already walks through using watch for first-time setup. Once the team is up and running, leave watch open in a browser tab — it is your scheduler view: on a single machine nothing can wake an agent whose turn has ended, so you watch this dashboard to decide who to nudge next.
 
 ```bash
-gojaja watch                 # serves http://127.0.0.1:7421 and opens your browser
-gojaja watch --port 8080     # pick a port
+gojaja watch                 # default: http://127.0.0.1:7421, auto-opens browser
+gojaja watch --port 8080     # custom port
+gojaja watch --host 0.0.0.0  # share on LAN — read-only mode (Setup + Actions hidden)
 gojaja watch --no-open       # don't auto-launch the browser
 ```
 
-It auto-refreshes every couple of seconds and shows, across every window:
+The dashboard auto-refreshes every couple of seconds and is split into three tabs:
 
-- **Roles** — each role's session: `live` / `stale` / no session, the pid + host holding it, last heartbeat age, and — when a role is idle — what it's `wait`-ing for and until when. A role that holds a live session but has not run `gojaja wait` for a while is flagged red as `stalled` so you can spot the "agent forgot to park" failure mode at a glance.
-- **Setup** (loopback only) — a write panel for project bootstrapping: create roles, install runtime files (`gojaja prompt --target X --write` equivalent), and generate per-window activation snippets. The dashboard also serves the first-time `gojaja init` from this same screen — if `.gojaja/` is missing watch shows a single "Initialise this project" landing page that handles the git-state confirmation flow in the browser instead of via the CLI's `[y/N]` prompt.
-- **Actions** (loopback only) — a small write panel: send a `report --to <role>`, open an RFC, or create a task, all posted as `from: SYSTEM` (the project-owner channel, equivalent to running the same CLI commands in a shell with no `GOJAJA_SESSION`). Hidden when watch is bound to a non-loopback address (`--host 0.0.0.0` etc.) so the dashboard stays read-only when shared on a LAN.
-- **Task board** — all tasks laid out by status (Backlog → Done), with owner, priority, blockers, and deliverable count.
-- **RFCs** — open/revising/decided, with deciders and voters.
-- **Activity feed** — the live, newest-first event stream across all agents (reports, worklogs, task moves, RFC comments/decisions), which doubles as the project history.
+- **Dashboard** — live state across every window:
+  - **Roles** card per role: session `live` / `stale` / no-session, pid + host holding it, heartbeat age, and what it's `wait`-ing for. A role that holds a live session but has not run `gojaja wait` for a while is flagged red as `stalled` (the "agent forgot to park after `ack`" failure mode — the role is deaf to events until it runs `wait`).
+  - **Task board** — every task by status (Backlog → Done), with owner, priority, blockers, and deliverable count.
+  - **RFCs** — open / revising / decided, with deciders and voters.
+  - **Activity feed** — newest-first event stream across all agents; doubles as the project history.
+- **Setup** (loopback only) — same write surface the Quickstart uses: create roles, install runtime files, generate per-window activation snippets. Useful long after first-run too — adding a new agent role mid-project goes through here.
+- **Actions** (loopback only) — push directly into the team without a terminal: send a `report --to <role>`, open an RFC, or create a task. All posted as `from: SYSTEM` (the project-owner channel; the receiver sees it as coming from you, not a peer agent).
 
-Use it to decide who to nudge next: a `stalled` role wants `gojaja wait`; a role sitting `idle (waiting for task-assigned)` wants work; a task stuck in `Blocked` needs its upstream owner; an RFC sitting `open` for a while needs its decider. The Actions panel lets you push directly from this same screen instead of switching to a terminal. Leave it running in a browser tab while you drive the team. Ctrl-C in the terminal stops it.
+What to look at, in order of urgency:
+- **Red `stalled` chip in the header** — a role is unparked. Either send it a directive in Actions or prod the agent window directly.
+- **A role badge `idle (waiting for task-assigned)`** — that role is free; assign it work via the Actions tab.
+- **A task stuck in `Blocked`** — its `dependsOn` line tells you who to chase; report up the chain.
+- **An RFC sitting at `open` for too long** — the decider needs a nudge.
+
+Both write tabs hide automatically when watch is bound to a non-loopback address (`--host 0.0.0.0` etc.) so a LAN-shared dashboard cannot be used to push directives at the team. Ctrl-C in the terminal stops the server.
 
 ## How decisions get made (RFCs)
 
