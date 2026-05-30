@@ -333,3 +333,155 @@ describe("watch HTTP server — Actions endpoints (loopback-gated)", () => {
     });
   });
 });
+
+// ---- Uninitialised project / Init landing page ----------------------
+
+describe("watch HTTP server — uninitialised project & POST /api/init", () => {
+  let envOrig: string | undefined;
+  beforeEach(() => {
+    envOrig = process.env.GOJAJA_SESSION;
+    delete process.env.GOJAJA_SESSION;
+  });
+  afterEach(() => {
+    if (envOrig === undefined) delete process.env.GOJAJA_SESSION;
+    else process.env.GOJAJA_SESSION = envOrig;
+  });
+
+  /**
+   * Spin a server pointing at an *uninitialised* project root: the
+   * directory exists (so the HTTP handler can stat it) but has no
+   * `.gojaja/` layer. The handler should serve the landing-page
+   * envelope on GET /api/state and accept POST /api/init.
+   */
+  async function withUninitialisedServer<T>(
+    body: (origin: string, root: string) => Promise<T>,
+  ): Promise<T> {
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-watch-uninit-"));
+    const store = new LocalFsStore(path.join(root, ".gojaja"), { safetyMarginMs: 0 });
+    const http = await import("node:http");
+    const watch = await import("../src/cli/commands/watch");
+    const handleRequest = (
+      watch as unknown as {
+        __test_handleRequest: (
+          req: import("node:http").IncomingMessage,
+          res: import("node:http").ServerResponse,
+          store: LocalFsStore,
+          root: string,
+          host: string,
+        ) => Promise<void>;
+      }
+    ).__test_handleRequest;
+    const server = http.createServer((req, res) => {
+      handleRequest(req, res, store, root, "127.0.0.1").catch((err) => {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: String((err as Error)?.message ?? err) }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const addr = server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const origin = `http://127.0.0.1:${port}`;
+    try {
+      return await body(origin, root);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await fsp.rm(root, { recursive: true, force: true });
+    }
+  }
+
+  it("GET /api/state on an uninitialised project returns the init landing envelope", async () => {
+    await withUninitialisedServer(async (origin) => {
+      const r = await fetch(`${origin}/api/state`);
+      expect(r.ok).toBe(true);
+      const body = (await r.json()) as {
+        initialised: boolean;
+        project: { root: string };
+        init: { layerDir: string; git: { kind: string } };
+      };
+      expect(body.initialised).toBe(false);
+      expect(body.init.layerDir).toMatch(/\.gojaja$/);
+      // mkdtemp roots are not git repos, so the inspector should
+      // surface "not-a-repo" — the dashboard's init screen turns
+      // this into the "Initialise without git" warning path.
+      expect(body.init.git.kind).toBe("not-a-repo");
+    });
+  });
+
+  it("POST /api/init without `force` on a non-git root refuses with INIT_GIT_GATE + git detail", async () => {
+    await withUninitialisedServer(async (origin) => {
+      const r = await fetch(`${origin}/api/init`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      expect(r.status).toBe(409);
+      const body = (await r.json()) as {
+        errorCode: string;
+        error: string;
+        git?: { kind: string };
+      };
+      expect(body.errorCode).toBe("INIT_GIT_GATE");
+      expect(body.git?.kind).toBe("not-a-repo");
+    });
+  });
+
+  it("POST /api/init with `force: true` initialises and unlocks the dashboard", async () => {
+    await withUninitialisedServer(async (origin) => {
+      const r = await fetch(`${origin}/api/init`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      });
+      expect(r.ok).toBe(true);
+      const body = (await r.json()) as {
+        status: string;
+        layerDir: string;
+        version: string;
+      };
+      expect(body.status).toBe("initialised");
+      // The next /api/state must now report initialised: true so the
+      // front-end swaps the landing page for the dashboard chrome.
+      const s = await fetch(`${origin}/api/state`);
+      const sBody = (await s.json()) as { initialised: boolean };
+      expect(sBody.initialised).toBe(true);
+    });
+  });
+
+  it("POST /api/init on an already-initialised project returns ALREADY_INITIALISED (409)", async () => {
+    await withUninitialisedServer(async (origin) => {
+      // First, init successfully.
+      await fetch(`${origin}/api/init`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      });
+      // A second init (e.g. another window racing on the landing
+      // page) must be a clean conflict, not a success that overwrites
+      // state.
+      const r = await fetch(`${origin}/api/init`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      });
+      expect(r.status).toBe(409);
+      const body = (await r.json()) as { errorCode: string };
+      expect(body.errorCode).toBe("ALREADY_INITIALISED");
+    });
+  });
+
+  it("POST /api/report on an uninitialised project returns 409 NOT_INITIALISED (defence-in-depth)", async () => {
+    // The front-end should never display the Actions panel when
+    // !initialised, but the server-side gate must hold even if a
+    // direct curl bypasses the UI gate.
+    await withUninitialisedServer(async (origin) => {
+      const r = await fetch(`${origin}/api/report`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ to: "Backend", message: "hi" }),
+      });
+      expect(r.status).toBe(409);
+      const body = (await r.json()) as { errorCode: string };
+      expect(body.errorCode).toBe("NOT_INITIALISED");
+    });
+  });
+});

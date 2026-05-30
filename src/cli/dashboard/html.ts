@@ -100,6 +100,43 @@ export const DASHBOARD_HTML = `<!doctype html>
   .action .feedback.ok { color: var(--live); }
   .action .feedback.err { color: var(--p0); }
   .action .hint { font-size: 11px; color: var(--dim); margin-top: 6px; }
+  /* Tab nav. Sits under the sticky header; switches which top-level
+     panel is visible. Active tab uses the accent underline. */
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line);
+    background: var(--panel); padding: 0 16px; position: sticky; top: 49px; z-index: 4; }
+  .tab { padding: 10px 14px; border: 0; background: transparent; color: var(--dim);
+    font: 600 12px ui-sans-serif, system-ui; cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    text-transform: uppercase; letter-spacing: .06em; }
+  .tab.active { color: var(--fg); border-bottom-color: var(--accent); }
+  .tab:hover:not(.active) { color: var(--fg); }
+  .panel { display: none; }
+  .panel.active { display: grid; gap: 16px; }
+  /* Init landing page — shown ONLY when /api/state reports
+     !initialised. Centred card with the project root, git status,
+     and a single big primary action. */
+  .init-screen { display: none; min-height: 60vh; align-items: center; justify-content: center; }
+  .init-screen.active { display: flex; }
+  .init-card { max-width: 640px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 28px 32px; }
+  .init-card h2 { margin: 0 0 4px; font-size: 18px; font-weight: 650; letter-spacing: .2px;
+    text-transform: none; color: var(--fg); }
+  .init-card .root-line { color: var(--dim); font-family: ui-monospace, monospace; font-size: 12px;
+    margin-bottom: 16px; word-break: break-all; }
+  .init-card .git { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px 12px; font-size: 12px; margin: 12px 0; }
+  .init-card .git.warn { border-color: var(--stale); }
+  .init-card .git.bad { border-color: var(--stalled); background: var(--stalled-bg); }
+  .init-card .git pre { margin: 6px 0 0; font: 11px ui-monospace, monospace; color: var(--dim);
+    white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto; }
+  .init-card button.primary { background: var(--accent); color: #0b1220; border: 0;
+    border-radius: 6px; padding: 9px 18px; font: 600 13px ui-sans-serif, system-ui;
+    cursor: pointer; margin-top: 8px; }
+  .init-card button.primary:disabled { opacity: .5; cursor: not-allowed; }
+  .init-card button.danger { background: var(--stalled); }
+  .init-card .feedback { margin-top: 10px; font-size: 12px; min-height: 16px; }
+  .init-card .feedback.err { color: var(--p0); }
+  .init-card .feedback.ok { color: var(--live); }
 </style>
 </head>
 <body>
@@ -115,8 +152,42 @@ export const DASHBOARD_HTML = `<!doctype html>
   </div>
 </header>
 <div id="err"></div>
-<main>
+
+<!-- Init landing page — shown ONLY when /api/state reports
+     !initialised. Replaces the tabbed dashboard until the user
+     completes init. -->
+<div class="init-screen" id="init-screen">
+  <div class="init-card">
+    <h2>Initialise this project</h2>
+    <div class="root-line" id="init-root">…</div>
+    <p style="margin:0 0 4px;color:var(--dim)">
+      <code>gojaja init</code> creates a <code>.gojaja/</code> directory at the
+      project root with the durable team-coordination state (events, sessions,
+      tasks, RFCs). Re-running it on a project that already has the layer is a
+      no-op until you <code>gojaja reset</code>.
+    </p>
+    <div id="init-git"></div>
+    <button class="primary" id="init-go">Initialise</button>
+    <div class="feedback" id="init-fb"></div>
+  </div>
+</div>
+
+<!-- Tab nav (hidden until initialised). Each .tab toggles the
+     matching .panel by id. -->
+<nav class="tabs" id="tabs" style="display:none">
+  <button class="tab active" data-tab="dashboard">Dashboard</button>
+  <button class="tab" data-tab="actions">Actions</button>
+</nav>
+
+<main id="panels" style="display:none">
+<section class="panel active" id="panel-dashboard">
   <section><h2>Roles</h2><div class="roles" id="roles"></div></section>
+  <section><h2>Task board</h2><div class="board" id="board"></div></section>
+  <section><h2>RFCs</h2><div class="rfcs" id="rfcs"></div></section>
+  <section><h2>Activity</h2><div class="feed" id="feed"></div></section>
+</section>
+
+<section class="panel" id="panel-actions">
   <section id="sec-actions" style="display:none">
     <h2>Actions <span style="color:var(--dim);text-transform:none;letter-spacing:0;font-weight:400">— posted as <code style="background:var(--panel2);padding:1px 5px;border-radius:3px">SYSTEM</code> (project-owner)</span></h2>
     <div class="actions">
@@ -172,9 +243,8 @@ export const DASHBOARD_HTML = `<!doctype html>
       the gojaja CLI in a shell with no <code>GOJAJA_SESSION</code>. Visible only when watch is bound to loopback.
     </div>
   </section>
-  <section><h2>Task board</h2><div class="board" id="board"></div></section>
-  <section><h2>RFCs</h2><div class="rfcs" id="rfcs"></div></section>
-  <section><h2>Activity</h2><div class="feed" id="feed"></div></section>
+</section>
+
 </main>
 <script>
   var STATUSES = ["Backlog","Ready","InProgress","Blocked","Review","Done"];
@@ -270,6 +340,13 @@ export const DASHBOARD_HTML = `<!doctype html>
 
   function render(s){
     clearErr();
+    // Two top-level UIs depending on whether the project has run
+    // gojaja init yet. The state envelope from /api/state carries
+    // an "initialised" boolean to drive this branch; uninitialised
+    // projects get a single-screen "Initialise" landing page (no
+    // tabs, no chips for counts that would all be zero anyway).
+    if(!s.initialised){ renderInitScreen(s); return; }
+    showInitialisedChrome();
     document.getElementById("root").textContent = s.project.root+"  ·  v"+s.project.version;
     document.getElementById("upd").textContent = "updated "+ago(s.project.generatedAt);
     document.getElementById("c-live").textContent = s.counts.liveRoles;
@@ -285,6 +362,147 @@ export const DASHBOARD_HTML = `<!doctype html>
     document.getElementById("rfcs").innerHTML = renderRfcs(s.rfcs);
     document.getElementById("feed").innerHTML = renderFeed(s.events);
     renderActions(s);
+  }
+
+  // ---- Init landing page ---------------------------------------
+
+  /**
+   * State machine for the Initialise button:
+   *   - "ready"   plain init, force=false; first click on a clean repo
+   *   - "confirm" the previous attempt was refused with INIT_GIT_GATE
+   *               (dirty / not-a-repo) and the user is being asked to
+   *               re-submit with force:true. The button label and
+   *               style change to "I understand, force init".
+   */
+  var initButtonState = "ready";
+
+  function showInitScreen(){
+    document.getElementById("init-screen").classList.add("active");
+    document.getElementById("tabs").style.display = "none";
+    document.getElementById("panels").style.display = "none";
+    // Some chips lose meaning on the init screen (zero-state); hide
+    // the count chips but keep the "updated" pulse so the user can
+    // see watch is alive.
+    ["c-live","c-stalled","c-rfc","c-ev"].forEach(function(id){
+      var el = document.getElementById(id);
+      if(el && el.parentElement) el.parentElement.style.display = "none";
+    });
+    document.getElementById("chip-stalled").style.display = "none";
+  }
+
+  function showInitialisedChrome(){
+    document.getElementById("init-screen").classList.remove("active");
+    document.getElementById("tabs").style.display = "";
+    document.getElementById("panels").style.display = "";
+    ["c-live","c-rfc","c-ev"].forEach(function(id){
+      var el = document.getElementById(id);
+      if(el && el.parentElement) el.parentElement.style.display = "";
+    });
+  }
+
+  function renderInitScreen(s){
+    showInitScreen();
+    document.getElementById("init-root").textContent = (s.project && s.project.root) || "(unknown root)";
+    var git = (s.init && s.init.git) || { kind: "clean" };
+    document.getElementById("init-git").innerHTML = renderGitState(git);
+    var btn = document.getElementById("init-go");
+    if(git.kind === "dirty"){
+      btn.textContent = "I understand — force init anyway";
+      btn.classList.add("danger");
+      initButtonState = "confirm";
+    } else if(git.kind === "not-a-repo"){
+      btn.textContent = "Initialise without git";
+      btn.classList.add("danger");
+      initButtonState = "confirm";
+    } else {
+      btn.textContent = "Initialise";
+      btn.classList.remove("danger");
+      initButtonState = "ready";
+    }
+  }
+
+  function renderGitState(git){
+    if(git.kind === "clean"){
+      return '<div class="git">git: clean working tree — gojaja\\'s changes will land in a revertable state.</div>';
+    }
+    if(git.kind === "dirty"){
+      var sample = (git.sample || []).map(function(l){ return esc(l); }).join("\\n");
+      return '<div class="git bad"><b>git: uncommitted changes detected.</b>'+
+        ' Commit or stash them before init so the layer\\'s changes are easy to revert.'+
+        '<pre>'+sample+'</pre></div>';
+    }
+    // not-a-repo
+    return '<div class="git warn"><b>Not a git repository.</b>'+
+      ' Without version control there is no clean way to undo gojaja\\'s changes if'+
+      ' something goes wrong. Strongly recommended: run <code>git init &amp;&amp; git add -A &amp;&amp;'+
+      ' git commit -m initial</code> first. Otherwise click below to proceed anyway.</div>';
+  }
+
+  function bindInitButton(){
+    document.getElementById("init-go").addEventListener("click", function(){
+      var btn = this;
+      var fb = document.getElementById("init-fb");
+      var force = (initButtonState === "confirm");
+      btn.disabled = true; fb.className = "feedback"; fb.textContent = "initialising…";
+      postJson("/api/init", { force: force }).then(function(r){
+        btn.disabled = false;
+        if(r.ok){
+          fb.className = "feedback ok";
+          fb.textContent = "Initialised. Loading dashboard…";
+          // Force an immediate refresh so the dashboard chrome
+          // takes over without the next 2 s poll lag.
+          setTimeout(tick, 200);
+          return;
+        }
+        if(r.body && r.body.errorCode === "INIT_GIT_GATE"){
+          // Server's git inspection refused the first attempt.
+          // Surface the detail and switch the button into
+          // "confirm" mode for a second click.
+          fb.className = "feedback err";
+          fb.textContent = r.body.error || "Refused.";
+          if(r.body.git){
+            document.getElementById("init-git").innerHTML = renderGitState(r.body.git);
+          }
+          btn.textContent = (r.body.git && r.body.git.kind === "dirty")
+            ? "I understand — force init anyway"
+            : "Initialise without git";
+          btn.classList.add("danger");
+          initButtonState = "confirm";
+          return;
+        }
+        if(r.body && r.body.errorCode === "ALREADY_INITIALISED"){
+          // Race: another window or someone running gojaja init in
+          // a terminal got there first. Refresh and the dashboard
+          // chrome will load.
+          fb.className = "feedback ok";
+          fb.textContent = "Already initialised — refreshing.";
+          setTimeout(tick, 200);
+          return;
+        }
+        fb.className = "feedback err";
+        fb.textContent = (r.body && r.body.error) || ("HTTP " + r.status);
+      }).catch(function(e){
+        btn.disabled = false;
+        fb.className = "feedback err";
+        fb.textContent = String(e);
+      });
+    });
+  }
+
+  // ---- Tab switching --------------------------------------------
+
+  function bindTabs(){
+    var tabs = document.querySelectorAll(".tab");
+    tabs.forEach(function(t){
+      t.addEventListener("click", function(){
+        tabs.forEach(function(x){ x.classList.remove("active"); });
+        t.classList.add("active");
+        var which = t.getAttribute("data-tab");
+        document.querySelectorAll(".panel").forEach(function(p){
+          p.classList.toggle("active", p.id === "panel-"+which);
+        });
+      });
+    });
   }
 
   // ---- Actions panel (loopback-only) ----------------------------
@@ -393,6 +611,8 @@ export const DASHBOARD_HTML = `<!doctype html>
       .catch(function(e){ showErr("Lost connection to gojaja watch ("+e.message+"). Is the server still running?"); });
   }
   bindActionButtons();
+  bindInitButton();
+  bindTabs();
   tick();
   setInterval(tick, 2000);
 </script>

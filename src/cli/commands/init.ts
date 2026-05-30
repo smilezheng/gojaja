@@ -6,10 +6,88 @@ import { LAYER_DIRNAME, SCHEMA_VERSION } from "../runtime";
 import type { ParsedArgs } from "../argv";
 import { boolFlag, optionalString } from "../argv";
 
-type GitState =
+export type GitState =
   | { kind: "clean" }
   | { kind: "dirty"; sample: string[] }
   | { kind: "not-a-repo" };
+
+/**
+ * Headless inspector + initializer for use outside the interactive
+ * CLI (`gojaja watch`'s POST /api/init in particular). Splits the
+ * command's logic into two pieces:
+ *
+ *   - `inspectInitState(root)` — pure inspection: is the layer
+ *     already there, what does git look like? Never writes.
+ *   - `performInit(root, opts)` — does the actual write. Refuses
+ *     dirty / non-git unless `opts.force === true`. Never reads
+ *     stdin or writes stdout — error reporting is via thrown
+ *     classed errors that the HTTP layer maps to 400/409 codes.
+ *
+ * The interactive `runInit` below composes these two with readline-
+ * based confirmation; the HTTP path composes them with a "first
+ * call probes, second call (force:true) confirms" pattern in the
+ * front-end.
+ */
+export interface InitInspection {
+  alreadyInitialised: boolean;
+  layerDir: string;
+  git: GitState;
+}
+
+export async function inspectInitState(root: string): Promise<InitInspection> {
+  const layerDir = path.join(root, LAYER_DIRNAME);
+  const store = new LocalFsStore(layerDir);
+  const alreadyInitialised = await store.isInitialised();
+  const git = alreadyInitialised
+    ? ({ kind: "clean" } as GitState)
+    : await inspectGit(root);
+  return { alreadyInitialised, layerDir, git };
+}
+
+/**
+ * Thrown by `performInit` when the working tree is dirty or not a
+ * git repo and the caller did not pass `force: true`. Carries the
+ * git inspection so the HTTP layer can render it inline.
+ */
+export class InitGitGateError extends Error {
+  readonly code = "INIT_GIT_GATE";
+  constructor(
+    public readonly git: GitState,
+    public readonly layerDir: string,
+  ) {
+    super(
+      git.kind === "dirty"
+        ? `Refusing to init: working tree has uncommitted git changes.`
+        : `Refusing to init: not a git repository (no clean revert path).`,
+    );
+  }
+}
+
+export class AlreadyInitialisedError extends Error {
+  readonly code = "ALREADY_INITIALISED";
+  constructor(public readonly layerDir: string) {
+    super(`gojaja layer already initialised at ${layerDir}.`);
+  }
+}
+
+export async function performInit(
+  root: string,
+  opts: { force?: boolean } = {},
+): Promise<{ layerDir: string; version: string }> {
+  const layerDir = path.join(root, LAYER_DIRNAME);
+  const store = new LocalFsStore(layerDir);
+  if (await store.isInitialised()) {
+    throw new AlreadyInitialisedError(layerDir);
+  }
+  if (!opts.force) {
+    const git = await inspectGit(root);
+    if (git.kind !== "clean") {
+      throw new InitGitGateError(git, layerDir);
+    }
+  }
+  await store.initialise(SCHEMA_VERSION);
+  return { layerDir, version: SCHEMA_VERSION };
+}
 
 /**
  * Inspect the git state of `root`. `gojaja init` writes a new `.gojaja/`
@@ -69,43 +147,42 @@ export async function runInit(args: ParsedArgs): Promise<number> {
   const root = path.resolve(
     optionalString(args.flags, "root") ?? args.positional[0] ?? process.cwd(),
   );
-  const layerDir = path.join(root, LAYER_DIRNAME);
-  const store = new LocalFsStore(layerDir);
   const json = boolFlag(args.flags, "json");
   const force = boolFlag(args.flags, "force");
 
-  if (await store.isInitialised()) {
+  const inspection = await inspectInitState(root);
+  if (inspection.alreadyInitialised) {
     if (json) {
       process.stdout.write(
-        JSON.stringify({ status: "already_initialised", root: layerDir }) + "\n",
+        JSON.stringify({ status: "already_initialised", root: inspection.layerDir }) + "\n",
       );
     } else {
       process.stderr.write(
-        `gojaja layer already initialised at ${layerDir}. ` +
+        `gojaja layer already initialised at ${inspection.layerDir}. ` +
           `Use 'gojaja reset' to remove it before re-initialising.\n`,
       );
     }
     return 4;
   }
 
-  // Safety gate: protect the user's working tree before we start writing
-  // files. `--force` skips all checks (scripts, CI, or "I know what I'm
-  // doing"). Skipped entirely in --json mode too, since a JSON caller is
-  // non-interactive and has opted into automation.
+  // Interactive safety gate (TTY only): mirrors the HTTP path's
+  // first-call-then-confirm pattern. `--force` and `--json` both
+  // skip — the latter assumes the caller is automated and has
+  // explicitly opted in.
+  let effectiveForce = force;
   if (!force && !json) {
-    const git = await inspectGit(root);
-    if (git.kind === "dirty") {
+    if (inspection.git.kind === "dirty") {
       process.stderr.write(
         `Refusing to init: ${root} has uncommitted git changes.\n\n` +
-          git.sample.map((l) => `    ${l}`).join("\n") +
-          (git.sample.length >= 10 ? "\n    ...\n" : "\n") +
+          inspection.git.sample.map((l) => `    ${l}`).join("\n") +
+          (inspection.git.sample.length >= 10 ? "\n    ...\n" : "\n") +
           `\nCommit or stash them first so gojaja's changes land in a\n` +
           `clean, revertable state. Then re-run 'gojaja init'.\n` +
           `(Override with 'gojaja init --force' if you understand the risk.)\n`,
       );
       return 2;
     }
-    if (git.kind === "not-a-repo") {
+    if (inspection.git.kind === "not-a-repo") {
       const interactive = process.stdin.isTTY === true;
       if (!interactive) {
         process.stderr.write(
@@ -129,21 +206,22 @@ export async function runInit(args: ParsedArgs): Promise<number> {
         process.stdout.write("Aborted. No files were created.\n");
         return 0;
       }
+      effectiveForce = true;
     }
   }
 
-  await store.initialise(SCHEMA_VERSION);
+  const result = await performInit(root, { force: effectiveForce });
 
   if (json) {
     process.stdout.write(
       JSON.stringify({
         status: "initialised",
-        root: layerDir,
-        version: SCHEMA_VERSION,
+        root: result.layerDir,
+        version: result.version,
       }) + "\n",
     );
   } else {
-    process.stdout.write(`Initialised gojaja layer (v${SCHEMA_VERSION}) at ${layerDir}\n`);
+    process.stdout.write(`Initialised gojaja layer (v${result.version}) at ${result.layerDir}\n`);
   }
   return 0;
 }

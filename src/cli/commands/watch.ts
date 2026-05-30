@@ -2,9 +2,10 @@ import * as http from "node:http";
 import { spawn } from "node:child_process";
 import { boolFlag, optionalString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
-import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
-import type { LocalFsStore } from "../../core/local-fs-store";
+import { discoverProjectRoot, layerRoot } from "../runtime";
+import { LocalFsStore } from "../../core/local-fs-store";
 import { DASHBOARD_HTML } from "../dashboard/html";
+import { inspectInitState, performInit } from "./init";
 
 const DEFAULT_PORT = 7421;
 const EVENT_TAIL = 300;
@@ -28,19 +29,32 @@ const STALLED_NO_WAIT_THRESHOLD_MS = 60_000;
 /**
  * `gojaja watch [--port <n>] [--host <addr>] [--no-open] [--root <path>]`
  *
- * Starts a local, read-only HTTP dashboard over the project's `.gojaja/`
- * state and opens it in the browser. This is the human-as-scheduler
- * view: on a single machine there is no way to wake a turn-ended agent,
- * so the operator needs one screen showing who is idle, what is blocked,
- * which RFCs await a decision, and the live activity feed across every
- * window. The server is read-only — it never mutates coordination state.
+ * Starts a local HTTP dashboard over the project's `.gojaja/` state
+ * and opens it in the browser. This is the human-as-scheduler view:
+ * on a single machine there is no way to wake a turn-ended agent, so
+ * the operator needs one screen showing who is idle, what is blocked,
+ * which RFCs await a decision, and the live activity feed across
+ * every window. Default 127.0.0.1 bind also exposes write actions
+ * (`report`, `rfc new`, `task new`); non-loopback binds hide them.
+ *
+ * Uninitialised projects: `runWatch` no longer refuses to start when
+ * `.gojaja/` is missing — it serves a single-screen "Initialise this
+ * project" landing page instead. The HTTP layer carries an
+ * `initialised` flag in `/api/state` so the front-end can decide
+ * which UI to render. This is what makes the dashboard a viable
+ * first-run experience.
  *
  * Long-running: the returned promise resolves only when the server
  * closes (Ctrl-C / SIGTERM), so the CLI process stays up serving.
  */
 export async function runWatch(args: ParsedArgs): Promise<number> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
-  const store = await openStoreOrThrow(root);
+  // The store is opened lazily per-request. We keep an
+  // `unchecked`-style instance here so `runWatch` still works
+  // against an uninitialised project (the front-end will steer the
+  // user through `gojaja init` via the dashboard); each handler
+  // gets its own `isInitialised` check before touching anything.
+  const store = new LocalFsStore(layerRoot(root));
 
   const host = optionalString(args.flags, "host") ?? "127.0.0.1";
   const portRaw = optionalString(args.flags, "port");
@@ -198,6 +212,23 @@ async function handleRequest(
     return;
   }
   if (method === "GET" && url.startsWith("/api/state")) {
+    // Uninitialised projects: return a minimal envelope so the
+    // front-end can render the "Initialise" landing page. We
+    // include the git inspection so the front-end can warn about
+    // dirty / non-git roots before the user clicks the button.
+    if (!(await store.isInitialised())) {
+      const init = await inspectInitState(root);
+      sendJson(res, 200, {
+        initialised: false,
+        project: { root, generatedAt: new Date().toISOString() },
+        init: {
+          layerDir: init.layerDir,
+          git: init.git,
+        },
+        capabilities: { writeEnabled: isLoopbackBind(host) },
+      });
+      return;
+    }
     const u = new URL(url, "http://placeholder/");
     const overrideRaw = u.searchParams.get("stalledThresholdMs");
     const override = overrideRaw === null ? null : Number(overrideRaw);
@@ -212,6 +243,7 @@ async function handleRequest(
     // wrong host still fails — this is purely UX so users do not
     // see a panel that would 403 on submit.
     sendJson(res, 200, {
+      initialised: true,
       ...snapshot,
       capabilities: { writeEnabled: isLoopbackBind(host) },
     });
@@ -219,9 +251,9 @@ async function handleRequest(
   }
 
   // Write endpoints — gated to loopback. The dashboard HTML hides
-  // the Actions panel when its capability check (GET /api/state -
-  // see `writeEnabled`) returns false, but we re-check here so a
-  // direct POST cannot bypass the UI gate.
+  // the Actions / Setup panels when its capability check (GET
+  // /api/state - see `writeEnabled`) returns false, but we re-check
+  // here so a direct POST cannot bypass the UI gate.
   if (method === "POST" && url.startsWith("/api/")) {
     if (!isLoopbackBind(host)) {
       sendJson(res, 403, {
@@ -241,6 +273,26 @@ async function handleRequest(
       return;
     }
     try {
+      // `/api/init` is the only write endpoint that runs when the
+      // project is NOT yet initialised — by definition. All other
+      // writes need the layer present and refuse with 409 if not
+      // (the front-end's first-screen "Initialise" landing page
+      // should keep users out of that path; the server-side check
+      // is a defence-in-depth in case the front-end is bypassed).
+      if (url === "/api/init") {
+        const out = await postInit(root, body);
+        sendJson(res, 200, out);
+        return;
+      }
+      if (!(await store.isInitialised())) {
+        sendJson(res, 409, {
+          error:
+            "Project is not initialised yet. POST /api/init first " +
+            "(or run `gojaja init` from the project root).",
+          errorCode: "NOT_INITIALISED",
+        });
+        return;
+      }
       if (url === "/api/report") {
         const out = await postReport(store, body);
         sendJson(res, 200, out);
@@ -257,15 +309,39 @@ async function handleRequest(
         return;
       }
     } catch (err) {
-      // store throws UsageError / ForbiddenError with `code`; we
-      // surface the message so the form can render it inline. 4xx
-      // for client-fixable errors, 500 for everything else.
-      const e = err as { code?: string; message?: string };
-      const code = e.code === "USAGE" ? 400 : e.code === "FORBIDDEN" ? 403 : 500;
-      sendJson(res, code, {
+      // The store layer throws UsageError / ForbiddenError with a
+      // `code` field; init throws InitGitGateError /
+      // AlreadyInitialisedError. We surface the message so the form
+      // can render it inline. Map error classes to HTTP status:
+      //   USAGE              → 400  client should fix and retry
+      //   FORBIDDEN          → 403  permission, not retriable here
+      //   INIT_GIT_GATE      → 409  state conflict; front-end shows
+      //                              git detail and re-submits with
+      //                              { force: true } if the user
+      //                              confirms
+      //   ALREADY_INITIALISED→ 409  state conflict; front-end
+      //                              should refresh `/api/state`
+      //   anything else      → 500  unexpected; show as-is
+      const e = err as {
+        code?: string;
+        message?: string;
+        git?: unknown;
+        layerDir?: string;
+      };
+      let code = 500;
+      if (e.code === "USAGE") code = 400;
+      else if (e.code === "FORBIDDEN") code = 403;
+      else if (e.code === "INIT_GIT_GATE") code = 409;
+      else if (e.code === "ALREADY_INITIALISED") code = 409;
+      const payload: Record<string, unknown> = {
         error: e.message ?? String(err),
         errorCode: e.code ?? null,
-      });
+      };
+      // Attach init-specific detail so the front-end can render
+      // the git status sample inline (rather than a generic "409 —
+      // try again" toast).
+      if (e.code === "INIT_GIT_GATE" && e.git) payload.git = e.git;
+      sendJson(res, code, payload);
       return;
     }
   }
@@ -284,6 +360,24 @@ async function handleRequest(
  * back these endpoints; downstream audit / manifest projection /
  * recipient routing are unchanged.
  */
+
+async function postInit(root: string, body: unknown) {
+  // First call from the front-end has no body (or `{}`). If the
+  // working tree is dirty we throw INIT_GIT_GATE; the front-end
+  // shows the git status and (only after a clear "I understand") re-
+  // submits with `{ force: true }`. The not-a-repo case is the same
+  // first-call-then-confirm flow — the warning is rendered in the
+  // browser instead of via readline.
+  const b = (body ?? {}) as Record<string, unknown>;
+  const force = b.force === true;
+  const result = await performInit(root, { force });
+  return {
+    status: "initialised",
+    layerDir: result.layerDir,
+    version: result.version,
+  };
+}
+
 function asString(v: unknown): string {
   return typeof v === "string" ? v : "";
 }

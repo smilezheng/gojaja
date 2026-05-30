@@ -8,6 +8,78 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### `gojaja watch` works on uninitialised projects (init from the dashboard)
+
+Previously `runWatch` called `openStoreOrThrow` and crashed if
+`.gojaja/` did not exist. Newcomers ran into "Not initialised; run
+`gojaja init` first" before the dashboard could even render — even
+though the dashboard is the natural place to drive that first init.
+The server now stays up regardless and serves a single-screen
+"Initialise this project" landing page for uninitialised roots.
+
+The dashboard layout is also reorganised into tabs to make room for
+the upcoming setup actions:
+
+- **Dashboard** tab: roles / task board / RFCs / activity feed
+  (everything that was on the page before).
+- **Actions** tab: the existing report / open-RFC / create-task forms,
+  moved out of the main dashboard so they do not crowd the read view.
+
+(More setup actions — `role create`, `prompt --write`, `activate` —
+land in a follow-up PR; the tab structure is shipped first so the
+front-end direction can be validated.)
+
+**Init flow** (front-end + back-end):
+
+- Front-end: when `/api/state` reports `initialised: false`, the
+  dashboard chrome (tabs, count chips) is hidden and the Init
+  landing page takes the whole screen. It shows the project root,
+  the `git` inspection result (clean / dirty + sample / not-a-repo),
+  and a single primary button.
+- First click on a clean repo: `POST /api/init` succeeds; the next
+  `/api/state` poll flips the dashboard on.
+- First click on a dirty repo: server refuses with 409
+  `INIT_GIT_GATE` and the git status sample. The front-end re-
+  renders the panel showing the dirty files and switches the button
+  into a "I understand — force init anyway" state. A second click
+  re-submits with `{ force: true }`.
+- Non-git roots: same first-call-then-confirm pattern, but the
+  warning explains "no clean revert path" and the button reads
+  "Initialise without git". This is the browser-equivalent of the
+  CLI's readline `[y/N]` prompt — a non-interactive front-end can
+  not poll readline, so the protocol surfaces the gate as a 409
+  and lets the JS render confirmation UI.
+- Race-safety: a parallel `gojaja init` from a terminal beats the
+  dashboard to it → 409 `ALREADY_INITIALISED`; the front-end
+  re-fetches `/api/state` and the dashboard appears.
+- Defence-in-depth: write endpoints other than `/api/init` (i.e.
+  `/api/report` / `/api/rfc` / `/api/task`) refuse with 409
+  `NOT_INITIALISED` if called against an uninitialised project, so
+  a hand-crafted curl that bypasses the front-end UI gate still
+  cannot write into a non-existent layer.
+
+**Code shape**:
+- `src/cli/commands/init.ts` is split into pure helpers
+  (`inspectInitState` / `performInit` + the `InitGitGateError` /
+  `AlreadyInitialisedError` classed exceptions) and a thin
+  CLI-flavoured `runInit` that composes them with readline-based
+  confirmation. `runInit`'s external behaviour (exit codes, stderr
+  wording, JSON shape) is unchanged. The `watch.ts` HTTP path
+  composes the same helpers via `POST /api/init` and surfaces the
+  errors as `errorCode` strings the front-end maps to UI states.
+- `runWatch` stops calling `openStoreOrThrow`; instead it keeps an
+  unchecked `LocalFsStore` and the per-request handler short-
+  circuits at `isInitialised` for endpoints that need the layer.
+
+**Tests** (`tests/watch.test.ts`, 5 new cases): GET `/api/state`
+on an uninitialised project returns the landing-page envelope with
+`init.git.kind === "not-a-repo"`; POST `/api/init` without `force`
+on a non-git root returns 409 `INIT_GIT_GATE` plus the git detail;
+POST `/api/init` with `{ force: true }` succeeds and the next
+`/api/state` reports `initialised: true`; a second `/api/init`
+returns 409 `ALREADY_INITIALISED`; POST `/api/report` on an
+uninitialised project returns 409 `NOT_INITIALISED`.
+
 ### `gojaja watch` adds an Actions panel (loopback-only): report / open RFC / create task
 
 The watch dashboard was previously read-only by design. In practice
