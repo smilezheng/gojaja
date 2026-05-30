@@ -54,8 +54,30 @@ export const DASHBOARD_HTML = `<!doctype html>
   .badge.none { color: var(--none); }
   .badge.stalled { color: var(--stalled); border-color: var(--stalled-border); }
   .board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
-  .col h3 { font-size: 11px; color: var(--dim); margin: 0 0 8px; font-weight: 600;
-    display: flex; justify-content: space-between; }
+  /* Column header: status label + a count "pill" sitting flush
+     against the label. Previously the layout was space-between, which
+     pushed the count to the right edge of the column — so visually
+     it read as belonging to the NEXT column (only 10 px of grid gap
+     to its right vs. a full column width to its label on the left).
+     We pin the count next to its own label and give it a chip
+     background so its column ownership is unambiguous; the bottom
+     border under the whole header reinforces "this is the start of
+     a column" framing. */
+  .col h3 {
+    font-size: 11px; color: var(--dim); margin: 0 0 8px; font-weight: 600;
+    display: flex; align-items: center; gap: 7px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+    text-transform: uppercase; letter-spacing: .06em;
+  }
+  .col h3 .count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 20px; height: 18px; padding: 0 6px;
+    background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 10px; color: var(--fg); font-weight: 600;
+    letter-spacing: 0;
+  }
   .task { background: var(--panel2); border: 1px solid var(--line); border-left-width: 3px;
     border-radius: 6px; padding: 7px 8px; margin-bottom: 7px; }
   .task .tid { font-family: ui-monospace, monospace; color: var(--dim); font-size: 11px; }
@@ -378,7 +400,7 @@ export const DASHBOARD_HTML = `<!doctype html>
           '<div class="tt">'+esc(t.title)+'</div>'+
           '<div class="to">'+esc(t.owner||"(unassigned)")+'</div>'+blk+'</div>';
       }).join("") || '<div class="empty">—</div>';
-      return '<div class="col"><h3>'+s+'<span>'+list.length+'</span></h3>'+cards+'</div>';
+      return '<div class="col"><h3>'+s+'<span class="count">'+list.length+'</span></h3>'+cards+'</div>';
     }).join("");
   }
 
