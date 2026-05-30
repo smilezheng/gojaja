@@ -176,6 +176,7 @@ export const DASHBOARD_HTML = `<!doctype html>
      matching .panel by id. -->
 <nav class="tabs" id="tabs" style="display:none">
   <button class="tab active" data-tab="dashboard">Dashboard</button>
+  <button class="tab" data-tab="setup">Setup</button>
   <button class="tab" data-tab="actions">Actions</button>
 </nav>
 
@@ -185,6 +186,75 @@ export const DASHBOARD_HTML = `<!doctype html>
   <section><h2>Task board</h2><div class="board" id="board"></div></section>
   <section><h2>RFCs</h2><div class="rfcs" id="rfcs"></div></section>
   <section><h2>Activity</h2><div class="feed" id="feed"></div></section>
+</section>
+
+<section class="panel" id="panel-setup">
+  <section id="sec-setup" style="display:none">
+    <h2>Setup <span style="color:var(--dim);text-transform:none;letter-spacing:0;font-weight:400">— roles, runtime files, per-window activation</span></h2>
+    <div class="actions">
+      <div class="action">
+        <h3>Create role</h3>
+        <label>Id (no spaces; <code>[A-Za-z0-9_-]</code>)</label>
+        <input id="role-id" placeholder="Backend" />
+        <label>Title (human-readable)</label>
+        <input id="role-title" placeholder="Backend Engineer" />
+        <label>Description (one line, optional)</label>
+        <input id="role-desc" />
+        <label>Owns (comma-separated paths)</label>
+        <input id="role-owns" placeholder="src/api/,src/db/" />
+        <label>Reports to (comma-separated roles)</label>
+        <input id="role-reports" placeholder="TL,CTO" />
+        <label>Must not edit (comma-separated paths)</label>
+        <input id="role-mne" />
+        <button id="role-go">Create role</button>
+        <div class="feedback" id="role-fb"></div>
+        <div class="hint">After create, fill the TBD sections in <code>.gojaja/roles/&lt;id&gt;.md</code> before activating.</div>
+      </div>
+
+      <div class="action">
+        <h3>Install runtime files</h3>
+        <label>Target host</label>
+        <select id="prompt-target">
+          <option value="agents" selected>agents (writes AGENTS.md — covers Codex / Cursor / Copilot / Windsurf / Zed)</option>
+          <option value="claude">claude (writes CLAUDE.md)</option>
+          <option value="cursor">cursor (writes .cursor/rules/gojaja-runtime.mdc)</option>
+          <option value="generic">generic (preview only — bundled into activate snippet)</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:var(--fg)">
+          <input type="checkbox" id="prompt-force" style="width:auto;margin:0" />
+          Force rewrite (overwrite even if file is byte-identical)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:12px;color:var(--fg)">
+          <input type="checkbox" id="prompt-no-handbook" style="width:auto;margin:0" />
+          Skip the cheatsheet (smaller card, less guidance)
+        </label>
+        <button id="prompt-go">Install</button>
+        <div class="feedback" id="prompt-fb"></div>
+        <div class="hint">Hosts only inject these files when an agent window first opens — restart any open window after a write.</div>
+      </div>
+
+      <div class="action">
+        <h3>Activate (per-window snippet)</h3>
+        <label>Role</label>
+        <select id="act-role"></select>
+        <label>Target host</label>
+        <select id="act-target">
+          <option value="agents" selected>agents</option>
+          <option value="claude">claude</option>
+          <option value="cursor">cursor</option>
+          <option value="generic">generic (snippet bundles runtime body)</option>
+        </select>
+        <button id="act-go">Generate snippet</button>
+        <div class="feedback" id="act-fb"></div>
+        <textarea id="act-out" readonly placeholder="(snippet appears here after Generate)" style="margin-top:8px;min-height:120px;font-size:11px"></textarea>
+        <button id="act-copy" style="background:var(--panel2);color:var(--fg);border:1px solid var(--line);margin-top:6px;display:none">Copy snippet</button>
+        <div class="hint">Paste the snippet into the agent window's chat to bind that window to the role. Refuses if the role's <code>.md</code> still has TBD sections.</div>
+      </div>
+    </div>
+    <div class="hint" style="margin-top:10px;color:var(--dim);font-size:11px">
+      Setup actions require <code>.gojaja/</code> to exist (run <em>Initialise</em> first if missing) and must be on a loopback bind to be visible.
+    </div>
+  </section>
 </section>
 
 <section class="panel" id="panel-actions">
@@ -511,22 +581,36 @@ export const DASHBOARD_HTML = `<!doctype html>
     // Snapshot current selection so re-renders during typing do not
     // wipe what the user just picked.
     var ids = roles.map(function(r){ return r.id; });
-    [["rep-to", false], ["task-owner", true]].forEach(function(spec){
+    // [id, allowEmpty]: rep-to / act-role MUST pick a role; task-owner
+    // tolerates "(unassigned)".
+    [
+      ["rep-to", false],
+      ["task-owner", true],
+      ["act-role", false],
+    ].forEach(function(spec){
       var sel = document.getElementById(spec[0]);
       if(!sel) return;
       var prev = sel.value;
       var allowEmpty = spec[1];
       var opts = (allowEmpty ? '<option value="">(unassigned)</option>' : "") +
         ids.map(function(id){ return '<option value="'+esc(id)+'">'+esc(id)+'</option>'; }).join("");
+      // Empty role list: show a single "no roles yet" hint instead
+      // of an empty <select>; the act-role submit will then fail
+      // cleanly with a USAGE error if the user tries.
+      if(ids.length === 0 && !allowEmpty){
+        opts = '<option value="">(no roles yet — Create role first)</option>';
+      }
       if(sel.innerHTML !== opts){ sel.innerHTML = opts; }
       if(prev && ids.indexOf(prev) >= 0){ sel.value = prev; }
     });
   }
 
   function renderActions(s){
-    var sec = document.getElementById("sec-actions");
     var enabled = s.capabilities && s.capabilities.writeEnabled;
-    sec.style.display = enabled ? "" : "none";
+    var actionsSec = document.getElementById("sec-actions");
+    var setupSec = document.getElementById("sec-setup");
+    actionsSec.style.display = enabled ? "" : "none";
+    setupSec.style.display = enabled ? "" : "none";
     if(!enabled) return;
     fillRoleSelects(s.roles || []);
   }
@@ -548,6 +632,8 @@ export const DASHBOARD_HTML = `<!doctype html>
   }
 
   function bindActionButtons(){
+    var splitCsv = function(s){ return (s||"").split(",").map(function(x){return x.trim();}).filter(Boolean); };
+
     document.getElementById("rep-go").addEventListener("click", function(){
       var btn = this; btn.disabled = true; setFb("rep-fb", "", "sending…");
       postJson("/api/report", {
@@ -565,7 +651,6 @@ export const DASHBOARD_HTML = `<!doctype html>
     });
     document.getElementById("rfc-go").addEventListener("click", function(){
       var btn = this; btn.disabled = true; setFb("rfc-fb", "", "creating…");
-      var splitCsv = function(s){ return (s||"").split(",").map(function(x){return x.trim();}).filter(Boolean); };
       var optsRaw = splitCsv(document.getElementById("rfc-options").value);
       var opts = optsRaw.map(function(p){
         var i = p.indexOf(":"); return i < 0 ? null : { id: p.slice(0,i).trim(), summary: p.slice(i+1).trim() };
@@ -587,6 +672,89 @@ export const DASHBOARD_HTML = `<!doctype html>
         tick();
       }).catch(function(e){ btn.disabled = false; setFb("rfc-fb", "err", String(e)); });
     });
+
+    document.getElementById("role-go").addEventListener("click", function(){
+      var btn = this; btn.disabled = true; setFb("role-fb", "", "creating…");
+      postJson("/api/role", {
+        id: document.getElementById("role-id").value.trim(),
+        title: document.getElementById("role-title").value.trim(),
+        description: document.getElementById("role-desc").value,
+        owns: splitCsv(document.getElementById("role-owns").value),
+        reportsTo: splitCsv(document.getElementById("role-reports").value),
+        mustNotEdit: splitCsv(document.getElementById("role-mne").value),
+      }).then(function(r){
+        btn.disabled = false;
+        if(!r.ok){ setFb("role-fb", "err", r.body.error || ("HTTP "+r.status)); return; }
+        var msg = "Created role '"+(r.body.role && r.body.role.id || "")+"'.";
+        if(r.body.needsFill){
+          msg += " Edit "+r.body.rolePath+" to fill the TBD sections before activating.";
+        }
+        setFb("role-fb", "ok", msg);
+        ["role-id","role-title","role-desc","role-owns","role-reports","role-mne"].forEach(function(id){
+          document.getElementById(id).value = "";
+        });
+        tick();
+      }).catch(function(e){ btn.disabled = false; setFb("role-fb", "err", String(e)); });
+    });
+
+    document.getElementById("prompt-go").addEventListener("click", function(){
+      var btn = this; btn.disabled = true; setFb("prompt-fb", "", "installing…");
+      postJson("/api/prompt", {
+        target: document.getElementById("prompt-target").value,
+        forceRewrite: document.getElementById("prompt-force").checked,
+        withHandbook: !document.getElementById("prompt-no-handbook").checked,
+      }).then(function(r){
+        btn.disabled = false;
+        if(!r.ok){ setFb("prompt-fb", "err", r.body.error || ("HTTP "+r.status)); return; }
+        var wrote = r.body.wrote || [];
+        if(wrote.length === 0 && r.body.status === "previewed"){
+          setFb("prompt-fb", "ok", "Generic target previewed (no files written; bundled into the activate snippet).");
+          return;
+        }
+        var lines = wrote.map(function(w){ return (w.result === "wrote" ? "WROTE " : "UNCHANGED ") + w.path; });
+        var head = r.body.requiresWindowRestart
+          ? "Installed. Restart any open agent window for it to pick up the new rules."
+          : "Already up to date — no files changed.";
+        setFb("prompt-fb", "ok", head + " (" + lines.join("; ") + ")");
+      }).catch(function(e){ btn.disabled = false; setFb("prompt-fb", "err", String(e)); });
+    });
+
+    document.getElementById("act-go").addEventListener("click", function(){
+      var btn = this; btn.disabled = true; setFb("act-fb", "", "generating…");
+      var out = document.getElementById("act-out");
+      var copyBtn = document.getElementById("act-copy");
+      out.value = "";
+      copyBtn.style.display = "none";
+      postJson("/api/activate", {
+        role: document.getElementById("act-role").value,
+        target: document.getElementById("act-target").value,
+      }).then(function(r){
+        btn.disabled = false;
+        if(!r.ok){ setFb("act-fb", "err", r.body.error || ("HTTP "+r.status)); return; }
+        out.value = r.body.activation || "";
+        copyBtn.style.display = "";
+        setFb("act-fb", "ok", "Snippet ready — copy and paste into the agent window for '"+r.body.role+"'.");
+      }).catch(function(e){ btn.disabled = false; setFb("act-fb", "err", String(e)); });
+    });
+
+    document.getElementById("act-copy").addEventListener("click", function(){
+      var out = document.getElementById("act-out");
+      out.select();
+      // navigator.clipboard requires a secure context (loopback counts
+      // as secure on modern browsers); fall back to execCommand for
+      // older ones. Either way the textarea selection is the visible
+      // confirmation that the right text is being copied.
+      var doneOk = function(){ setFb("act-fb", "ok", "Copied to clipboard."); };
+      var doneFail = function(){ setFb("act-fb", "err", "Copy failed — select the snippet manually."); };
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(out.value).then(doneOk).catch(function(){
+          try { document.execCommand("copy"); doneOk(); } catch (e) { doneFail(); }
+        });
+      } else {
+        try { document.execCommand("copy"); doneOk(); } catch (e) { doneFail(); }
+      }
+    });
+
     document.getElementById("task-go").addEventListener("click", function(){
       var btn = this; btn.disabled = true; setFb("task-fb", "", "creating…");
       postJson("/api/task", {

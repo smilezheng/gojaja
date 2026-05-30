@@ -369,6 +369,7 @@ gojaja watch --no-open       # don't auto-launch the browser
 It auto-refreshes every couple of seconds and shows, across every window:
 
 - **Roles** — each role's session: `live` / `stale` / no session, the pid + host holding it, last heartbeat age, and — when a role is idle — what it's `wait`-ing for and until when. A role that holds a live session but has not run `gojaja wait` for a while is flagged red as `stalled` so you can spot the "agent forgot to park" failure mode at a glance.
+- **Setup** (loopback only) — a write panel for project bootstrapping: create roles, install runtime files (`gojaja prompt --target X --write` equivalent), and generate per-window activation snippets. The dashboard also serves the first-time `gojaja init` from this same screen — if `.gojaja/` is missing watch shows a single "Initialise this project" landing page that handles the git-state confirmation flow in the browser instead of via the CLI's `[y/N]` prompt.
 - **Actions** (loopback only) — a small write panel: send a `report --to <role>`, open an RFC, or create a task, all posted as `from: SYSTEM` (the project-owner channel, equivalent to running the same CLI commands in a shell with no `GOJAJA_SESSION`). Hidden when watch is bound to a non-loopback address (`--host 0.0.0.0` etc.) so the dashboard stays read-only when shared on a LAN.
 - **Task board** — all tasks laid out by status (Backlog → Done), with owner, priority, blockers, and deliverable count.
 - **RFCs** — open/revising/decided, with deciders and voters.

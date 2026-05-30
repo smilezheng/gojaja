@@ -368,7 +368,8 @@ gojaja watch --no-open       # 不自动开浏览器
 每两秒自动刷新一次，把所有窗口的状态汇到一屏：
 
 - **角色** —— 每个角色的 session 是 `live` / `stale` 还是没有；是哪个进程（pid + host）持有的；上次心跳是多久前；角色空闲时还会显示它在 `wait` 等什么、等到几点。如果某个角色明明持有 live session 却长时间没跑过 `gojaja wait`，会被红色 `stalled` 标出来——这就是"agent 忘了 park"的失败模式，扫一眼就能发现。
-- **Actions（仅 loopback 可用）** —— 一个写入面板，让你直接从看板里给某个角色发 `report`、起 RFC、建 task。所有动作都以 `from: SYSTEM` 写入（项目主理人通道，等价于在没 `GOJAJA_SESSION` 的 shell 里跑相应 CLI 命令）。当 watch 绑到非 loopback 地址（比如 `--host 0.0.0.0` 在局域网共享）时，这个面板会自动隐藏，看板退化为只读，避免外人在 LAN 里乱推任务。
+- **Setup（仅 loopback 可用）** —— 项目铺设用的写入面板：建角色、装运行时文件（等价于 `gojaja prompt --target X --write`）、生成每个窗口的激活 snippet。这个看板还接管了首次 `gojaja init` —— 如果 `.gojaja/` 不存在，watch 会显示一个"初始化此项目"的整屏页面，把原来 CLI 的 `[y/N]` 二次确认流程搬到浏览器里完成。
+- **Actions（仅 loopback 可用）** —— 一个写入面板，让你直接从看板里给某个角色发 `report`、起 RFC、建 task。所有动作都以 `from: SYSTEM` 写入（项目主理人通道，等价于在没 `GOJAJA_SESSION` 的 shell 里跑相应 CLI 命令）。当 watch 绑到非 loopback 地址（比如 `--host 0.0.0.0` 在局域网共享）时，这两个面板会自动隐藏，看板退化为只读，避免外人在 LAN 里乱推任务。
 - **任务板** —— 所有任务按状态（Backlog → Done）分列，带 owner、优先级、阻塞项和产出数。
 - **RFC** —— 哪些在 open / revising、哪些已决，连同 deciders 和 voters。
 - **活动流** —— 所有 agent 的实时事件（report、worklog、任务流转、RFC 评论与决定），最新的在最上面，同时也就是这个项目的历史。

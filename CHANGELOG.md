@@ -8,6 +8,65 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### `gojaja watch` Setup tab: role create / prompt --write / activate
+
+Follow-up to the previous PR's tab + init scaffold. The dashboard
+now carries the project-bootstrapping operations alongside the
+already-shipped Actions, so a user can drive an entire project from
+`gojaja init` to "agent windows are activated and looping" without
+leaving the browser.
+
+Three new POST endpoints (loopback-only, same gate as the existing
+write surface):
+
+- `POST /api/role     { id, title?, description?, owns?, reportsTo?, mustNotEdit? }`
+  - Equivalent to `gojaja role create`. Returns the created config
+    plus a `needsFill` boolean so the front-end can surface the
+    "fill the TBD sections in `.gojaja/roles/<id>.md`" warning that
+    matters for `activate` later.
+- `POST /api/prompt   { target, forceRewrite?, withHandbook? }`
+  - Equivalent to `gojaja prompt --target <X> --write`. Writes the
+    runtime files for the chosen host (AGENTS.md / CLAUDE.md /
+    `.cursor/rules/gojaja-runtime.mdc`). For `target: "generic"`
+    there is no install location — the endpoint returns the
+    runtime body without writing files (matches the CLI's preview
+    behaviour). Reports `requiresWindowRestart: true` when any
+    file actually changed so the front-end can flag "restart your
+    open agent windows".
+- `POST /api/activate { role, target, withHandbook? }`
+  - Equivalent to `gojaja activate <role> --target <X>`. Returns
+    the chat-paste snippet directly in JSON; the front-end shows
+    it in a textarea with a Copy button (no clipboard side-effects
+    on the server side, unlike the CLI which copies via
+    pbcopy/wl-copy). Refuses with the same TBD gate the CLI uses,
+    so a user cannot generate an activation for a role whose
+    markdown is still empty.
+
+Front-end changes:
+
+- New `Setup` tab (between Dashboard and Actions). Three side-by-
+  side cards (Create role / Install runtime / Activate). Activate's
+  role dropdown auto-populates from the live `roles` snapshot;
+  if there are no roles yet it shows "(no roles yet — Create role
+  first)" so the empty-state isn't ambiguous.
+- Activate output renders into a read-only textarea with a Copy
+  button. Uses `navigator.clipboard.writeText` on supported
+  browsers and falls back to `document.execCommand("copy")`
+  otherwise.
+- Both Setup and Actions panels are gated on
+  `capabilities.writeEnabled` (loopback-only); on a non-loopback
+  bind the tab still appears but the inner panel renders empty
+  (the section is hidden), matching the existing Actions behaviour.
+
+Tests in `tests/watch.test.ts` (8 new cases): `POST /api/role` happy
+path with the `needsFill` warning surface; missing `id` returns 400
+USAGE; `POST /api/prompt` writes AGENTS.md and reports
+`requiresWindowRestart: true` on first write, false on idempotent
+re-run; generic target previews without writing; unknown target
+returns 400 USAGE; `POST /api/activate` refuses while role markdown
+has TBD; once the markdown is filled returns the snippet (mentions
+the role id verbatim); unknown role returns 400 USAGE.
+
 ### `gojaja watch` works on uninitialised projects (init from the dashboard)
 
 Previously `runWatch` called `openStoreOrThrow` and crashed if

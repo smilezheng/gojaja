@@ -376,10 +376,14 @@ Monitoring (you, the human scheduler):
       agent windows. Useful because on a single machine nothing can
       wake a turn-ended agent — you are the scheduler, and this is
       your view. On the default 127.0.0.1 bind, the dashboard also
-      exposes an Actions panel: send report, open RFC, create task,
-      posted as from=SYSTEM (project-owner channel). Non-loopback
-      binds hide the panel; the dashboard then stays purely read-only
-      so it is safe to share over the LAN.
+      exposes Setup (init / role create / prompt --write / activate)
+      and Actions (report / rfc / task) tabs — same writes the CLI
+      does, posted as from=SYSTEM (project-owner channel). For an
+      uninitialised project the dashboard serves a single
+      "Initialise" landing page so first-time setup can run from the
+      browser. Non-loopback binds hide both write tabs; the
+      dashboard then stays purely read-only so it is safe to share
+      over the LAN.
       Serves on 127.0.0.1:7421 by default (falls back to a free port if
       busy); --no-open skips launching the browser. Read-only: never
       mutates coordination state. Ctrl-C to stop.

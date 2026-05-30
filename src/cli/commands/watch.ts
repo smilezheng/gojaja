@@ -6,6 +6,15 @@ import { discoverProjectRoot, layerRoot } from "../runtime";
 import { LocalFsStore } from "../../core/local-fs-store";
 import { DASHBOARD_HTML } from "../dashboard/html";
 import { inspectInitState, performInit } from "./init";
+import { roleMarkdownHasTbd } from "./role";
+import { buildActivation, buildRuntime, writeArtifactFile, type Target } from "../prompts";
+
+const PROMPT_TARGETS: ReadonlySet<Target> = new Set([
+  "agents",
+  "claude",
+  "cursor",
+  "generic",
+]);
 
 const DEFAULT_PORT = 7421;
 const EVENT_TAIL = 300;
@@ -308,6 +317,21 @@ async function handleRequest(
         sendJson(res, 200, out);
         return;
       }
+      if (url === "/api/role") {
+        const out = await postRole(store, body);
+        sendJson(res, 200, out);
+        return;
+      }
+      if (url === "/api/prompt") {
+        const out = await postPrompt(root, body);
+        sendJson(res, 200, out);
+        return;
+      }
+      if (url === "/api/activate") {
+        const out = await postActivate(store, root, body);
+        sendJson(res, 200, out);
+        return;
+      }
     } catch (err) {
       // The store layer throws UsageError / ForbiddenError with a
       // `code` field; init throws InitGitGateError /
@@ -457,6 +481,111 @@ async function postTask(store: LocalFsStore, body: unknown) {
     actor: "SYSTEM",
   });
   return { status: "created", task };
+}
+
+// ---- Setup endpoints (role / prompt / activate) -------------------
+
+async function postRole(store: LocalFsStore, body: unknown) {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const id = asString(b.id).trim();
+  const title = asString(b.title).trim() || `${id} Agent`;
+  const description = asString(b.description);
+  const owns = asStringArr(b.owns);
+  const reportsTo = asStringArr(b.reportsTo);
+  const mustNotEdit = asStringArr(b.mustNotEdit);
+  if (!id) throw makeUsage("`id` is required.");
+  const roleConfig = await store.createRole({
+    id,
+    title,
+    description,
+    owns,
+    reportsTo,
+    mustNotEdit,
+  });
+  // The freshly-rendered roles/<id>.md still contains TBD placeholders
+  // for the Role description and Responsibilities sections — same
+  // contract the CLI's `role create` checks. Front-end renders this
+  // as a "next step" warning so the user knows `activate` will
+  // refuse until they fill the file.
+  const needsFill = await roleMarkdownHasTbd(store, id);
+  return {
+    status: "created",
+    role: { id, ...roleConfig },
+    needsFill,
+    rolePath: `.gojaja/roles/${id}.md`,
+  };
+}
+
+async function postPrompt(root: string, body: unknown) {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const target = asString(b.target).trim() as Target;
+  if (!PROMPT_TARGETS.has(target)) {
+    throw makeUsage(
+      "`target` must be one of: agents, claude, cursor, generic.",
+    );
+  }
+  const forceRewrite = b.forceRewrite === true;
+  const withHandbook = b.withHandbook !== false; // default true
+  // `--target generic` has no persistent install location — the CLI's
+  // `prompt --write generic` errors for the same reason. The "body"
+  // is still useful (it goes into the activate snippet for generic
+  // hosts), so we return it without writing files.
+  const artifact = buildRuntime(target, root, { withHandbook });
+  if (target === "generic") {
+    return {
+      status: "previewed",
+      target,
+      body: artifact.body,
+      wrote: [] as Array<{ path: string; result: "wrote" | "unchanged" }>,
+      requiresWindowRestart: false,
+    };
+  }
+  const wrote: Array<{ path: string; result: "wrote" | "unchanged" }> = [];
+  for (const f of artifact.files) {
+    const result = await writeArtifactFile(f, { force: forceRewrite });
+    wrote.push({ path: f.path, result });
+  }
+  return {
+    status: "wrote",
+    target,
+    body: artifact.body,
+    wrote,
+    requiresWindowRestart: wrote.some((r) => r.result === "wrote"),
+  };
+}
+
+async function postActivate(store: LocalFsStore, root: string, body: unknown) {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const role = asString(b.role).trim();
+  const target = asString(b.target).trim() as Target;
+  if (!role) throw makeUsage("`role` is required.");
+  if (!PROMPT_TARGETS.has(target)) {
+    throw makeUsage(
+      "`target` must be one of: agents, claude, cursor, generic.",
+    );
+  }
+  const withHandbook = b.withHandbook !== false; // default true
+  const config = await store.readConfig();
+  if (!config.roles[role]) {
+    throw makeUsage(
+      `Unknown role '${role}'. Roles: ${Object.keys(config.roles).sort().join(", ") || "(none)"}.`,
+    );
+  }
+  // Hard refusal mirroring the CLI: a role with TBD sections in its
+  // markdown has no real description, and the agent will keep
+  // bouncing identity questions back to the user. The dashboard
+  // should send the user back to the Setup card to fill the file
+  // first; we surface a USAGE error so the front-end can render it
+  // inline.
+  if (await roleMarkdownHasTbd(store, role)) {
+    throw makeUsage(
+      `Role '${role}' still has TBD sections in .gojaja/roles/${role}.md ` +
+        `(Role description and/or Responsibilities). Open that file, fill ` +
+        `them in (this is the agent's self-introduction), then re-try.`,
+    );
+  }
+  const activation = buildActivation(target, role, root, { withHandbook });
+  return { status: "activated", role, target, activation };
 }
 
 function makeUsage(message: string): Error & { code: string } {

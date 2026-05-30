@@ -485,3 +485,244 @@ describe("watch HTTP server — uninitialised project & POST /api/init", () => {
     });
   });
 });
+
+// ---- Setup endpoints (role / prompt / activate) ---------------------
+
+describe("watch HTTP server — Setup endpoints (role / prompt / activate)", () => {
+  let ctx: { root: string; store: LocalFsStore };
+  let envOrig: string | undefined;
+  beforeEach(async () => {
+    ctx = await freshStore();
+    envOrig = process.env.GOJAJA_SESSION;
+    delete process.env.GOJAJA_SESSION;
+  });
+  afterEach(async () => {
+    if (envOrig === undefined) delete process.env.GOJAJA_SESSION;
+    else process.env.GOJAJA_SESSION = envOrig;
+    await fsp.rm(ctx.root, { recursive: true, force: true });
+  });
+
+  async function withServer<T>(
+    body: (origin: string) => Promise<T>,
+  ): Promise<T> {
+    const http = await import("node:http");
+    const watch = await import("../src/cli/commands/watch");
+    const handleRequest = (
+      watch as unknown as {
+        __test_handleRequest: (
+          req: import("node:http").IncomingMessage,
+          res: import("node:http").ServerResponse,
+          store: LocalFsStore,
+          root: string,
+          host: string,
+        ) => Promise<void>;
+      }
+    ).__test_handleRequest;
+    const server = http.createServer((req, res) => {
+      handleRequest(req, res, ctx.store, ctx.root, "127.0.0.1").catch(
+        (err) => {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({ error: String((err as Error)?.message ?? err) }),
+          );
+        },
+      );
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const addr = server.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    const origin = `http://127.0.0.1:${port}`;
+    try {
+      return await body(origin);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }
+
+  it("POST /api/role creates a role and reports the TBD-fill warning", async () => {
+    await withServer(async (origin) => {
+      const r = await fetch(`${origin}/api/role`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "Frontend",
+          title: "Frontend Engineer",
+          owns: ["src/web/"],
+        }),
+      });
+      expect(r.ok).toBe(true);
+      const body = (await r.json()) as {
+        status: string;
+        role: { id: string; title: string; owns: string[] };
+        needsFill: boolean;
+        rolePath: string;
+      };
+      expect(body.status).toBe("created");
+      expect(body.role.id).toBe("Frontend");
+      expect(body.role.owns).toEqual(["src/web/"]);
+      // Fresh role markdown ships with TBD placeholders the user
+      // must hand-fill — surface this so the front-end can warn.
+      expect(body.needsFill).toBe(true);
+      expect(body.rolePath).toBe(".gojaja/roles/Frontend.md");
+    });
+  });
+
+  it("POST /api/role with missing id returns 400 USAGE", async () => {
+    await withServer(async (origin) => {
+      const r = await fetch(`${origin}/api/role`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "no id" }),
+      });
+      expect(r.status).toBe(400);
+      const body = (await r.json()) as { errorCode: string; error: string };
+      expect(body.errorCode).toBe("USAGE");
+      expect(body.error).toMatch(/id/);
+    });
+  });
+
+  it("POST /api/prompt with target=agents writes AGENTS.md and reports requiresWindowRestart", async () => {
+    await withServer(async (origin) => {
+      const r = await fetch(`${origin}/api/prompt`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ target: "agents" }),
+      });
+      expect(r.ok).toBe(true);
+      const body = (await r.json()) as {
+        status: string;
+        target: string;
+        wrote: Array<{ path: string; result: string }>;
+        requiresWindowRestart: boolean;
+      };
+      expect(body.status).toBe("wrote");
+      expect(body.target).toBe("agents");
+      expect(body.wrote.length).toBeGreaterThanOrEqual(1);
+      // First-time install on a clean project: the runtime card
+      // does not exist yet, so writing it is genuinely new content.
+      expect(body.requiresWindowRestart).toBe(true);
+      // Idempotent re-run: same byte content -> result === "unchanged",
+      // requiresWindowRestart flips to false.
+      const r2 = await fetch(`${origin}/api/prompt`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ target: "agents" }),
+      });
+      const body2 = (await r2.json()) as {
+        wrote: Array<{ result: string }>;
+        requiresWindowRestart: boolean;
+      };
+      expect(body2.wrote.every((w) => w.result === "unchanged")).toBe(true);
+      expect(body2.requiresWindowRestart).toBe(false);
+    });
+  });
+
+  it("POST /api/prompt with target=generic returns the body without writing files", async () => {
+    await withServer(async (origin) => {
+      const r = await fetch(`${origin}/api/prompt`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ target: "generic" }),
+      });
+      expect(r.ok).toBe(true);
+      const body = (await r.json()) as {
+        status: string;
+        wrote: unknown[];
+        body: string;
+      };
+      expect(body.status).toBe("previewed");
+      expect(body.wrote).toEqual([]);
+      // The body is the runtime text the agent would see; just sanity-
+      // check it is non-trivial. Production tests of the body's
+      // contents live in tests/prompt.test.ts.
+      expect(body.body.length).toBeGreaterThan(100);
+    });
+  });
+
+  it("POST /api/prompt with an unknown target returns 400 USAGE", async () => {
+    await withServer(async (origin) => {
+      const r = await fetch(`${origin}/api/prompt`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ target: "claude-7" }),
+      });
+      expect(r.status).toBe(400);
+      const body = (await r.json()) as { errorCode: string };
+      expect(body.errorCode).toBe("USAGE");
+    });
+  });
+
+  it("POST /api/activate refuses while the role markdown still has TBD sections", async () => {
+    // PM in freshStore is registered but its markdown is the
+    // template (still has TBD). activate must refuse so the user
+    // does not produce a snippet that activates an empty role.
+    await withServer(async (origin) => {
+      const r = await fetch(`${origin}/api/activate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role: "PM", target: "agents" }),
+      });
+      expect(r.status).toBe(400);
+      const body = (await r.json()) as { errorCode: string; error: string };
+      expect(body.errorCode).toBe("USAGE");
+      expect(body.error).toMatch(/TBD/);
+    });
+  });
+
+  it("POST /api/activate returns the chat-paste snippet once the markdown is filled", async () => {
+    // Overwrite the template TBDs so activate's hard refusal
+    // passes. We are simulating "the user opened the file and
+    // wrote a real description". freshStore() puts the layer
+    // directly at `ctx.root`, not at `ctx.root/.gojaja`.
+    const rolePath = path.join(ctx.root, "roles", "PM.md");
+    const md = await fsp.readFile(rolePath, "utf8");
+    // Replace EVERY TBD instance (the template seeds at least three —
+    // Role description plus two Responsibilities bullets) with a
+    // realistic-looking sentence, and use a replacement that itself
+    // contains no `TBD` substring so the post-condition check
+    // (\bTBD\b) goes clean.
+    await fsp.writeFile(
+      rolePath,
+      md.replace(/TBD[^\n]*/g, "Real role description, fully filled."),
+    );
+    await withServer(async (origin) => {
+      const r = await fetch(`${origin}/api/activate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role: "PM", target: "agents" }),
+      });
+      const body = (await r.json()) as {
+        status: string;
+        role: string;
+        target: string;
+        activation: string;
+        error?: string;
+      };
+      if (!r.ok) {
+        // Fail loudly with the actual error so we can debug instead
+        // of staring at "expected true got false".
+        throw new Error(`activate failed: ${r.status} ${JSON.stringify(body)}`);
+      }
+      expect(body.status).toBe("activated");
+      expect(body.role).toBe("PM");
+      expect(body.target).toBe("agents");
+      expect(body.activation).toMatch(/PM/);
+      expect(body.activation.length).toBeGreaterThan(50);
+    });
+  });
+
+  it("POST /api/activate with an unknown role returns 400 USAGE", async () => {
+    await withServer(async (origin) => {
+      const r = await fetch(`${origin}/api/activate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role: "Unicorn", target: "agents" }),
+      });
+      expect(r.status).toBe(400);
+      const body = (await r.json()) as { errorCode: string };
+      expect(body.errorCode).toBe("USAGE");
+    });
+  });
+});
