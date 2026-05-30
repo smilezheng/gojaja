@@ -26,7 +26,7 @@ import type { Store } from "../../core/store";
  * snappier detection at negligible CPU. Tests pass a shorter value to
  * keep wall-clock cost low.
  */
-const DEFAULT_POLL_INTERVAL_MS = 30 * 1000;
+const DEFAULT_POLL_INTERVAL_MS = 10 * 1000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
