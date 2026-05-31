@@ -139,8 +139,49 @@ export const DASHBOARD_HTML = `<!doctype html>
     text-transform: uppercase; letter-spacing: .06em; }
   .tab.active { color: var(--fg); border-bottom-color: var(--accent); }
   .tab:hover:not(.active) { color: var(--fg); }
+  /* Small numeric badge embedded inside a tab label (e.g. archived
+     count). Sits flush after the label, in muted panel chrome so it
+     reads as metadata rather than a competing visual element. */
+  .tab .tab-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 16px; padding: 0 5px; margin-left: 6px;
+    background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 10px; color: var(--fg); font-weight: 600;
+    letter-spacing: 0;
+  }
   .panel { display: none; }
   .panel.active { display: grid; gap: 16px; }
+  /* Archived tab: one block per day, newest day first. Each block
+     leads with a date header, followed by a compact list of cards
+     (id · title · owner · priority). The cards are intentionally
+     leaner than the board cards — these are historical records, not
+     work in flight, and the user is scanning for "did we ship X"
+     not "what's the next move on Y". */
+  .archived-list { display: flex; flex-direction: column; gap: 18px; }
+  .archived-day { background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 12px; }
+  .archived-day h3 { font-size: 12px; color: var(--dim); margin: 0 0 8px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+    display: flex; align-items: center; gap: 8px;
+    padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .archived-day h3 .count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 20px; height: 18px; padding: 0 6px;
+    background: var(--bg); border: 1px solid var(--line);
+    border-radius: 999px; font-size: 10px; color: var(--fg); font-weight: 600;
+  }
+  .arch-card { display: grid;
+    grid-template-columns: 80px 1fr 140px 40px;
+    gap: 10px; align-items: baseline;
+    padding: 5px 0; border-bottom: 1px dashed var(--line); }
+  .arch-card:last-child { border-bottom: 0; }
+  .arch-card .aid { font-family: ui-monospace, monospace; color: var(--dim); font-size: 11px; }
+  .arch-card .att { color: var(--fg); }
+  .arch-card .ato { color: var(--dim); font-size: 12px; }
+  .arch-card .apr { font-family: ui-monospace, monospace; font-size: 11px; text-align: right; }
+  .arch-card .apr.p0 { color: var(--p0); } .arch-card .apr.p1 { color: var(--p1); }
+  .arch-card .apr.p2 { color: var(--p2); } .arch-card .apr.p3 { color: var(--p3); }
   /* Init landing page — shown ONLY when /api/state reports
      !initialised. Centred card with the project root, git status,
      and a single big primary action. */
@@ -205,6 +246,7 @@ export const DASHBOARD_HTML = `<!doctype html>
      matching .panel by id. -->
 <nav class="tabs" id="tabs" style="display:none">
   <button class="tab active" data-tab="dashboard">Dashboard</button>
+  <button class="tab" data-tab="archived">Archived <span class="tab-count" id="tab-archived-count" style="display:none">0</span></button>
   <button class="tab" data-tab="setup">Setup</button>
   <button class="tab" data-tab="actions">Actions</button>
 </nav>
@@ -215,6 +257,13 @@ export const DASHBOARD_HTML = `<!doctype html>
   <section><h2>Task board</h2><div class="board" id="board"></div></section>
   <section><h2>RFCs</h2><div class="rfcs" id="rfcs"></div></section>
   <section><h2>Activity</h2><div class="feed" id="feed"></div></section>
+</section>
+
+<section class="panel" id="panel-archived">
+  <section>
+    <h2>Archived tasks <span style="color:var(--dim);text-transform:none;letter-spacing:0;font-weight:400">— tasks auto-hidden from the active board after 48 h in Done. Grouped by the day they were last updated (local time).</span></h2>
+    <div id="archived" class="archived-list"></div>
+  </section>
 </section>
 
 <section class="panel" id="panel-setup">
@@ -423,6 +472,70 @@ export const DASHBOARD_HTML = `<!doctype html>
     }).join("");
   }
 
+  /**
+   * Format a Date as the local-day label shown above each Archived
+   * block. "Today" / "Yesterday" for the two most recent days, then
+   * a plain ISO-ish YYYY-MM-DD. Uses the browser's local timezone
+   * (consistent with the user's reading "what shipped this week").
+   */
+  function archDayLabel(d){
+    var today = new Date();
+    var sameYMD = function(a, b){
+      return a.getFullYear() === b.getFullYear() &&
+        a.getMonth() === b.getMonth() &&
+        a.getDate() === b.getDate();
+    };
+    if(sameYMD(d, today)) return "Today";
+    var yest = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    if(sameYMD(d, yest)) return "Yesterday";
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1).padStart(2, "0");
+    var dd = String(d.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + dd;
+  }
+
+  /**
+   * Group archived tasks by the local day of their updatedAt and
+   * render each day as a block. Server pre-sorts the list newest-first
+   * so a single pass preserves order both within and across days.
+   * Day buckets keyed by YYYY-MM-DD in local time (collision-proof
+   * for the duration of the page; we don't need sortable keys because
+   * server order is the source of truth).
+   */
+  function renderArchived(tasks){
+    if(!tasks || !tasks.length){
+      return '<div class="empty">No archived tasks yet. Tasks land here automatically after sitting in Done for 48 h.</div>';
+    }
+    var days = []; // ordered [{ key, label, items }]
+    var byKey = {};
+    tasks.forEach(function(t){
+      var d = new Date(t.updatedAt);
+      if(isNaN(d.getTime())) d = new Date(0);
+      var key = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
+      var bucket = byKey[key];
+      if(!bucket){
+        bucket = { key: key, label: archDayLabel(d), items: [] };
+        byKey[key] = bucket;
+        days.push(bucket);
+      }
+      bucket.items.push(t);
+    });
+    return days.map(function(day){
+      var cards = day.items.map(function(t){
+        var pri = (t.priority || "P2").toLowerCase();
+        return '<div class="arch-card">'+
+          '<span class="aid">'+esc(t.id)+'</span>'+
+          '<span class="att">'+esc(t.title)+'</span>'+
+          '<span class="ato">'+esc(t.owner || "(unassigned)")+'</span>'+
+          '<span class="apr '+esc(pri)+'">'+esc(t.priority || "")+'</span>'+
+          '</div>';
+      }).join("");
+      return '<div class="archived-day">'+
+        '<h3>'+esc(day.label)+'<span class="count">'+day.items.length+'</span></h3>'+
+        cards+'</div>';
+    }).join("");
+  }
+
   function renderFeed(events){
     if(!events.length) return '<div class="empty">No events yet.</div>';
     return events.map(function(e){
@@ -460,6 +573,15 @@ export const DASHBOARD_HTML = `<!doctype html>
     document.getElementById("board").innerHTML = renderBoard(s.tasks);
     document.getElementById("rfcs").innerHTML = renderRfcs(s.rfcs);
     document.getElementById("feed").innerHTML = renderFeed(s.events);
+    var archived = s.archivedTasks || [];
+    document.getElementById("archived").innerHTML = renderArchived(archived);
+    var archCountBadge = document.getElementById("tab-archived-count");
+    if(archived.length > 0){
+      archCountBadge.textContent = archived.length;
+      archCountBadge.style.display = "";
+    } else {
+      archCountBadge.style.display = "none";
+    }
     renderActions(s);
   }
 

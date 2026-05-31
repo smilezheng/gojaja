@@ -1,9 +1,17 @@
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import * as yaml from "js-yaml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalFsStore } from "../src/core/local-fs-store";
 import { buildSnapshot } from "../src/cli/commands/watch";
+import {
+  isLockLive,
+  readWatchLock,
+  removeWatchLockSync,
+  writeWatchLock,
+  type WatchLockInfo,
+} from "../src/cli/commands/watch-lock";
 
 /**
  * The dashboard's most operator-actionable signal is `healthStatus`
@@ -22,7 +30,13 @@ async function freshStore() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-watch-"));
   const store = new LocalFsStore(root, { safetyMarginMs: 0 });
   await store.initialise("2.0.0-test");
-  await store.createRole({ id: "PM", title: "PM" });
+  // PM owns the task board in our fixtures so createTask works.
+  // Original watch-snapshot tests didn't write tasks so this never
+  // mattered; the archive tests do.
+  await store.createRole({
+    id: "PM", title: "PM",
+    owns: ["state/task_board.yaml"],
+  });
   await store.createRole({ id: "Backend", title: "Backend" });
   return { root, store };
 }
@@ -726,3 +740,136 @@ describe("watch HTTP server — Setup endpoints (role / prompt / activate)", () 
     });
   });
 });
+
+// ---- archived projection in /api/state ---------------------------
+
+describe("buildSnapshot — archived tasks splitting", () => {
+  let ctx: { root: string; store: LocalFsStore };
+  beforeEach(async () => { ctx = await freshStore(); });
+  afterEach(async () => { await fsp.rm(ctx.root, { recursive: true, force: true }); });
+
+  it("splits archived tasks out of `tasks` into `archivedTasks`", async () => {
+    const live = await ctx.store.createTask({
+      title: "live", owner: "PM", actor: "PM",
+    });
+    const done = await ctx.store.createTask({
+      title: "done", owner: "PM", actor: "PM",
+    });
+    await ctx.store.setTaskStatus({
+      taskId: done.id, newStatus: "Done", actor: "PM",
+    });
+    await ctx.store.archiveTask({ taskId: done.id });
+
+    const snap = await buildSnapshot(ctx.store, ctx.root, 60_000);
+    const liveIds = snap.tasks.map((t) => t.id);
+    const archIds = snap.archivedTasks.map((t) => t.id);
+    expect(liveIds).toContain(live.id);
+    expect(liveIds).not.toContain(done.id);
+    expect(archIds).toEqual([done.id]);
+    expect(snap.counts.archivedTasks).toBe(1);
+  });
+
+  it("archivedTasks are sorted newest-updatedAt first", async () => {
+    // Three Done tasks with distinct updatedAt values, archived in
+    // arbitrary order. The snapshot must surface them newest-first
+    // regardless of board insertion order.
+    const t1 = await ctx.store.createTask({ title: "t1", owner: "PM", actor: "PM" });
+    const t2 = await ctx.store.createTask({ title: "t2", owner: "PM", actor: "PM" });
+    const t3 = await ctx.store.createTask({ title: "t3", owner: "PM", actor: "PM" });
+    await ctx.store.setTaskStatus({ taskId: t1.id, newStatus: "Done", actor: "PM" });
+    await ctx.store.setTaskStatus({ taskId: t2.id, newStatus: "Done", actor: "PM" });
+    await ctx.store.setTaskStatus({ taskId: t3.id, newStatus: "Done", actor: "PM" });
+    const boardPath = path.join(ctx.root, "state", "task_board.yaml");
+    const text = await fsp.readFile(boardPath, "utf8");
+    const board = yaml.load(text) as {
+      tasks: Record<string, { updatedAt: string; archived?: boolean }>;
+    };
+    board.tasks[t1.id].updatedAt = "2026-05-29T10:00:00.000Z";
+    board.tasks[t2.id].updatedAt = "2026-05-30T10:00:00.000Z"; // newest
+    board.tasks[t3.id].updatedAt = "2026-05-28T10:00:00.000Z";
+    board.tasks[t1.id].archived = true;
+    board.tasks[t2.id].archived = true;
+    board.tasks[t3.id].archived = true;
+    await fsp.writeFile(boardPath, yaml.dump(board));
+
+    const snap = await buildSnapshot(ctx.store, ctx.root, 60_000);
+    expect(snap.archivedTasks.map((t) => t.id)).toEqual([t2.id, t1.id, t3.id]);
+  });
+
+  it("archivedTasks is empty when no task is archived (no chip noise)", async () => {
+    await ctx.store.createTask({ title: "x", owner: "PM", actor: "PM" });
+    const snap = await buildSnapshot(ctx.store, ctx.root, 60_000);
+    expect(snap.archivedTasks).toEqual([]);
+    expect(snap.counts.archivedTasks).toBe(0);
+  });
+});
+
+// ---- watch-lock: single-instance gate ----------------------------
+
+describe("watch-lock", () => {
+  let layerRoot: string;
+  beforeEach(async () => {
+    layerRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-wl-"));
+  });
+  afterEach(async () => { await fsp.rm(layerRoot, { recursive: true, force: true }); });
+
+  function fakeInfo(overrides: Partial<WatchLockInfo> = {}): WatchLockInfo {
+    const base = {
+      pid: process.pid,
+      host: os.hostname(),
+      bindHost: "127.0.0.1",
+      port: 9876,
+      startedAt: new Date().toISOString(),
+    };
+    const merged = { ...base, ...overrides };
+    // Re-derive URL from the final bindHost/port unless the caller
+    // explicitly supplied one, so a `port: 1234` override doesn't
+    // leave behind the default URL string.
+    return {
+      ...merged,
+      url: overrides.url ?? `http://${merged.bindHost}:${merged.port}/`,
+    };
+  }
+
+  it("readWatchLock returns null when no lock file exists", async () => {
+    expect(await readWatchLock(layerRoot)).toBeNull();
+  });
+
+  it("writeWatchLock + readWatchLock round-trip the info", async () => {
+    const info = fakeInfo({ port: 1234 });
+    await writeWatchLock(layerRoot, info);
+    const read = await readWatchLock(layerRoot);
+    expect(read?.pid).toBe(info.pid);
+    expect(read?.port).toBe(1234);
+    expect(read?.url).toBe("http://127.0.0.1:1234/");
+  });
+
+  it("readWatchLock returns null on a malformed lock file (treat as stale)", async () => {
+    await fsp.writeFile(path.join(layerRoot, "watch.lock"), "{not json", "utf8");
+    expect(await readWatchLock(layerRoot)).toBeNull();
+  });
+
+  it("isLockLive returns true for our own pid on the same host", () => {
+    expect(isLockLive(fakeInfo(), os.hostname())).toBe(true);
+  });
+
+  it("isLockLive returns false for an unknown pid on the same host", () => {
+    // Pick a pid that is almost certainly not in use. (pid 0 is a
+    // bad choice — `process.kill(0, …)` on Node has the POSIX
+    // semantic of "send to the whole process group" and succeeds.)
+    expect(isLockLive(fakeInfo({ pid: 2_147_483_640 }), os.hostname())).toBe(false);
+  });
+
+  it("isLockLive returns false for a different host (cross-host locks are not probable)", () => {
+    expect(isLockLive(fakeInfo({ host: "some-other-machine" }), os.hostname())).toBe(false);
+  });
+
+  it("removeWatchLockSync is idempotent (missing file is not an error)", async () => {
+    removeWatchLockSync(layerRoot);
+    removeWatchLockSync(layerRoot);
+    await writeWatchLock(layerRoot, fakeInfo());
+    removeWatchLockSync(layerRoot);
+    expect(await readWatchLock(layerRoot)).toBeNull();
+  });
+});
+

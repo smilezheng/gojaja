@@ -1,4 +1,5 @@
 import * as http from "node:http";
+import * as os from "node:os";
 import { spawn } from "node:child_process";
 import { boolFlag, optionalString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
@@ -8,6 +9,12 @@ import { DASHBOARD_HTML } from "../dashboard/html";
 import { inspectInitState, performInit } from "./init";
 import { roleMarkdownHasTbd } from "./role";
 import { buildActivation, buildRuntime, writeArtifactFile, type Target } from "../prompts";
+import {
+  isLockLive,
+  readWatchLock,
+  removeWatchLockSync,
+  writeWatchLock,
+} from "./watch-lock";
 
 const PROMPT_TARGETS: ReadonlySet<Target> = new Set([
   "agents",
@@ -18,6 +25,17 @@ const PROMPT_TARGETS: ReadonlySet<Target> = new Set([
 
 const DEFAULT_PORT = 7421;
 const EVENT_TAIL = 300;
+/**
+ * How long a `Done` task can sit before the watch dashboard moves it
+ * into the Archived tab. Hard-coded at 48 hours — long enough that
+ * deliberate Done-and-walk-away workflow is preserved, short enough
+ * that the active board doesn't fill with last week's wins. Run on
+ * watch startup AND every 30 minutes thereafter so a window left
+ * open over the weekend catches up to the same state as a fresh
+ * one started Monday morning.
+ */
+const AUTO_ARCHIVE_THRESHOLD_MS = 48 * 3600 * 1000;
+const AUTO_ARCHIVE_INTERVAL_MS = 30 * 60 * 1000;
 /**
  * Threshold past which a `live`-session role with no `wait` session
  * on disk is flagged as `stalled-no-wait`. Empirically the most
@@ -58,12 +76,13 @@ const STALLED_NO_WAIT_THRESHOLD_MS = 60_000;
  */
 export async function runWatch(args: ParsedArgs): Promise<number> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
+  const layer = layerRoot(root);
   // The store is opened lazily per-request. We keep an
   // `unchecked`-style instance here so `runWatch` still works
   // against an uninitialised project (the front-end will steer the
   // user through `gojaja init` via the dashboard); each handler
   // gets its own `isInitialised` check before touching anything.
-  const store = new LocalFsStore(layerRoot(root));
+  const store = new LocalFsStore(layer);
 
   const host = optionalString(args.flags, "host") ?? "127.0.0.1";
   const portRaw = optionalString(args.flags, "port");
@@ -72,6 +91,27 @@ export async function runWatch(args: ParsedArgs): Promise<number> {
     throw new UsageError(`Invalid --port '${portRaw}'. Use 0-65535.`);
   }
   const noOpen = boolFlag(args.flags, "no-open");
+  const force = boolFlag(args.flags, "force");
+
+  // Single-instance gate. If a live watch is already running against
+  // the same `.gojaja/` on this host, bounce the user to its URL
+  // instead of starting a second dashboard. --force overrides
+  // (escape hatch when the existing process is wedged but
+  // process.kill(pid, 0) still says it's alive).
+  if (await store.isInitialised()) {
+    const existing = await readWatchLock(layer);
+    if (existing && isLockLive(existing, os.hostname()) && !force) {
+      process.stdout.write(
+        `gojaja watch is already running for this project.\n` +
+          `  pid:    ${existing.pid}\n` +
+          `  url:    ${existing.url}\n` +
+          `  since:  ${existing.startedAt}\n` +
+          `Opening the existing window. Pass --force to start a second instance anyway.\n`,
+      );
+      if (!noOpen) openBrowser(existing.url);
+      return 0;
+    }
+  }
 
   const server = http.createServer((req, res) => {
     handleRequest(req, res, store, root, host).catch((err) => {
@@ -83,12 +123,62 @@ export async function runWatch(args: ParsedArgs): Promise<number> {
   port = await listenWithFallback(server, port, host);
   const url = `http://${host}:${port}/`;
 
+  // Write the lock AFTER `listen` succeeds so we never advertise a
+  // port we don't actually own. This intentionally overwrites a stale
+  // record (the isLockLive check above already cleared us to start).
+  let lockWritten = false;
+  if (await store.isInitialised()) {
+    await writeWatchLock(layer, {
+      pid: process.pid,
+      host: os.hostname(),
+      bindHost: host,
+      port,
+      startedAt: new Date().toISOString(),
+      url,
+    });
+    lockWritten = true;
+  }
+
+  // Kick the auto-archive sweep once at startup so a watch opened
+  // after a long pause catches up immediately, then schedule the
+  // periodic sweep. Silent failure path: if anything inside
+  // autoArchive throws, log it but keep serving — archiving is
+  // cosmetic, the dashboard is not.
+  const runArchive = async (): Promise<void> => {
+    try {
+      if (!(await store.isInitialised())) return;
+      await store.autoArchiveDoneTasks({ thresholdMs: AUTO_ARCHIVE_THRESHOLD_MS });
+    } catch (err) {
+      process.stderr.write(
+        `gojaja watch: auto-archive sweep failed: ${(err as Error).message}\n`,
+      );
+    }
+  };
+  await runArchive();
+  const archiveTimer = setInterval(runArchive, AUTO_ARCHIVE_INTERVAL_MS);
+  // unref so an idle archive timer is never the thing keeping the
+  // process alive (in tests this matters; in production the HTTP
+  // server holds the loop open).
+  archiveTimer.unref?.();
+
   process.stdout.write(
     `gojaja watch — dashboard for ${root}\n` +
       `  serving at ${url}\n` +
       `  (read-only; Ctrl-C to stop)\n`,
   );
   if (!noOpen) openBrowser(url);
+
+  // Sync cleanup runs from `process.on("exit", ...)` — the only
+  // hook that fires for both `process.exit()` and ordinary loop
+  // drain. Async cleanup is also wired from signal handlers because
+  // exit handlers must be synchronous.
+  const cleanupSync = () => {
+    if (lockWritten) {
+      removeWatchLockSync(layer);
+      lockWritten = false; // idempotent across SIGINT->exit chain
+    }
+  };
+  process.once("exit", cleanupSync);
 
   // Never resolves; the process exits when a stop signal arrives. We
   // exit immediately rather than `server.close()`-ing, because the
@@ -98,6 +188,8 @@ export async function runWatch(args: ParsedArgs): Promise<number> {
   // accumulates if signals repeat.
   return new Promise<number>(() => {
     const shutdown = () => {
+      clearInterval(archiveTimer);
+      cleanupSync();
       process.stdout.write("\ngojaja watch stopped.\n");
       process.exit(0);
     };
@@ -711,7 +803,13 @@ export async function buildSnapshot(
     }),
   );
 
-  const tasks = Object.values(board.tasks).map((t) => ({
+  // Split archived out of the main board projection so the front-end
+  // can render the Archived tab as a separate timeline without having
+  // to know our archive rules. `tasks` is the active board (whatever
+  // the Done sweep has not yet swept); `archivedTasks` is everything
+  // the sweep has hidden. Both projections share the same shape so
+  // the renderers can reuse helpers.
+  const projectTask = (t: typeof board.tasks[keyof typeof board.tasks]) => ({
     id: t.id,
     title: t.title,
     status: t.status,
@@ -724,7 +822,18 @@ export async function buildSnapshot(
     tags: t.tags ?? [],
     deliverables: (t.deliverables ?? []).length,
     updatedAt: t.updatedAt,
-  }));
+    archived: t.archived === true ? (true as const) : undefined,
+  });
+  const tasks = Object.values(board.tasks)
+    .filter((t) => !t.archived)
+    .map(projectTask);
+  // Archived tasks: newest-updated first. The UI groups by local
+  // day, but we sort here so the front-end's per-day buckets are
+  // pre-sorted and can be rendered with a single pass.
+  const archivedTasks = Object.values(board.tasks)
+    .filter((t) => t.archived === true)
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+    .map(projectTask);
 
   const rfcList = rfcs.map((p) => ({
     id: p.id,
@@ -759,6 +868,7 @@ export async function buildSnapshot(
     project: { root, version, generatedAt: new Date(now).toISOString() },
     roles,
     tasks,
+    archivedTasks,
     rfcs: rfcList,
     events,
     counts: {
@@ -766,6 +876,7 @@ export async function buildSnapshot(
       liveRoles: roles.filter((r) => r.session.state === "live").length,
       openRfcs: rfcList.filter((r) => r.status === "open" || r.status === "revising").length,
       stalledRoles: roles.filter((r) => r.healthStatus === "stalled-no-wait").length,
+      archivedTasks: archivedTasks.length,
     },
     config: { stalledThresholdMs },
   };

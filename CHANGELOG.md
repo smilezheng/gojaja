@@ -8,6 +8,86 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### `gojaja watch`: single-instance gate, auto-archive sweep, Archived tab
+
+Follow-up to the backend archive PR. Three changes wire the live
+dashboard onto the new `Task.archived` substrate, plus a long-asked-for
+"don't let me accidentally start two of these" gate.
+
+**Single-instance gate.** The first `gojaja watch` to start writes a
+`.gojaja/watch.lock` recording its pid, host, port, and URL. A
+second `gojaja watch` against the same `.gojaja/`:
+
+  - reads the lock, checks `process.kill(pid, 0)` on this host,
+  - if the existing process is alive: prints its URL + pid, opens
+    the user's browser at that URL (the friendliest signal that
+    "you already have one of these"), and exits 0,
+  - if the recorded process is dead or written by another host:
+    silently overwrites the lock and continues.
+
+`--force` skips the check (escape hatch for a wedged process that
+still passes the liveness probe). Cleanup is wired through
+`process.on("exit", ...)` (sync, covers normal drain) AND signal
+handlers (SIGINT / SIGTERM, for ergonomics) so the lock vanishes
+on Ctrl-C the same as on a clean stop.
+
+The lock file deliberately lives at `.gojaja/watch.lock`, NOT
+under `Paths.locksDir/` — that directory is the store layer's
+short-lived per-resource lock; the watch lock is a long-lived
+process registration with very different semantics.
+
+**Auto-archive sweep.** On startup AND every 30 minutes thereafter,
+`runWatch` calls `Store.autoArchiveDoneTasks({ thresholdMs: 48 h })`.
+Silent housekeeping per the backend PR — no events, no `updatedAt`
+bump. The sweep is gated on `store.isInitialised()` so a watch
+opened on a not-yet-initialised project doesn't fail noisily. A
+failed sweep logs to stderr but never breaks the dashboard
+serving path: archiving is cosmetic, the dashboard is not.
+
+The 30-minute timer is `.unref()`-ed so an otherwise-idle event
+loop (in tests) isn't kept alive by it.
+
+**`/api/state` split.** Tasks are split into two projections:
+
+  - `tasks` — active board (whatever the sweep has not yet hidden).
+    Drops `archived === true` from the response, so the existing
+    Task-board UI continues to show only what the user wants on
+    their plate.
+  - `archivedTasks` — archived tasks, server-side pre-sorted
+    newest-`updatedAt` first so the front-end can render per-day
+    buckets in a single pass.
+
+`counts.archivedTasks` is added for the tab badge.
+
+**Archived tab.** New top-level tab in the dashboard:
+
+  - One block per local-time day (today's `updatedAt`).
+    Day label is "Today" / "Yesterday" for the two most recent
+    days, then `YYYY-MM-DD`.
+  - Lean card per task — `id · title · owner · priority` only.
+    Archived tasks are historical residue; the user is scanning
+    for "did we ship X" not "what's the next move on Y", so the
+    cards are deliberately tighter than the active board's.
+  - Tab label carries a small count badge when non-zero;
+    hidden entirely on a clean board so the chrome doesn't grow
+    visual noise for projects with nothing to archive yet.
+  - Friendly empty state explains "tasks land here after 48 h
+    in Done" so users who navigate to the tab on a fresh project
+    don't see a blank panel and wonder if it's broken.
+
+Tests in `tests/watch.test.ts` cover:
+
+  - `buildSnapshot` splits archived out of `tasks` and into
+    `archivedTasks`, with the count chip reflecting the split.
+  - Archived list is sorted newest `updatedAt` first regardless
+    of the order tasks were archived.
+  - Clean board produces an empty `archivedTasks` and zero count
+    (no chip noise).
+  - `watch-lock`: round-trip read/write; malformed lock returns
+    null (treated as stale rather than throwing); cross-host
+    locks are never reported live; a clearly-dead pid on the
+    same host returns false; `removeWatchLockSync` is idempotent.
+
 ### Task archive: silent housekeeping for Done tasks (backend)
 
 Long-running projects accumulate finished tasks in the `Done` column
