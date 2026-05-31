@@ -732,24 +732,26 @@ export const DASHBOARD_HTML = `<!doctype html>
     // Snapshot current selection so re-renders during typing do not
     // wipe what the user just picked.
     var ids = roles.map(function(r){ return r.id; });
-    // [id, allowEmpty]: rep-to / act-role MUST pick a role; task-owner
-    // tolerates "(unassigned)".
+    // [elementId, emptyOptionLabel]: rep-to / act-role start blank so
+    // the operator must explicitly pick a recipient; task-owner keeps
+    // "(unassigned)".
     [
-      ["rep-to", false],
-      ["task-owner", true],
-      ["act-role", false],
+      ["rep-to", "(select role)"],
+      ["task-owner", "(unassigned)"],
+      ["act-role", "(select role)"],
     ].forEach(function(spec){
       var sel = document.getElementById(spec[0]);
       if(!sel) return;
       var prev = sel.value;
-      var allowEmpty = spec[1];
-      var opts = (allowEmpty ? '<option value="">(unassigned)</option>' : "") +
-        ids.map(function(id){ return '<option value="'+esc(id)+'">'+esc(id)+'</option>'; }).join("");
-      // Empty role list: show a single "no roles yet" hint instead
-      // of an empty <select>; the act-role submit will then fail
-      // cleanly with a USAGE error if the user tries.
-      if(ids.length === 0 && !allowEmpty){
-        opts = '<option value="">(no roles yet — Create role first)</option>';
+      var emptyLabel = spec[1];
+      var opts;
+      if(ids.length === 0){
+        opts = emptyLabel === "(unassigned)"
+          ? '<option value="">(unassigned)</option>'
+          : '<option value="">(no roles yet — Create role first)</option>';
+      } else {
+        opts = '<option value="">'+esc(emptyLabel)+'</option>' +
+          ids.map(function(id){ return '<option value="'+esc(id)+'">'+esc(id)+'</option>'; }).join("");
       }
       if(sel.innerHTML !== opts){ sel.innerHTML = opts; }
       if(prev && ids.indexOf(prev) >= 0){ sel.value = prev; }
@@ -786,15 +788,19 @@ export const DASHBOARD_HTML = `<!doctype html>
     var splitCsv = function(s){ return (s||"").split(",").map(function(x){return x.trim();}).filter(Boolean); };
 
     document.getElementById("rep-go").addEventListener("click", function(){
-      var btn = this; btn.disabled = true; setFb("rep-fb", "", "sending…");
+      var btn = this;
+      var to = document.getElementById("rep-to").value;
+      if(!to){ setFb("rep-fb", "err", "Pick a role first."); return; }
+      btn.disabled = true; setFb("rep-fb", "", "sending…");
       postJson("/api/report", {
-        to: document.getElementById("rep-to").value,
+        to: to,
         message: document.getElementById("rep-msg").value,
         ref: document.getElementById("rep-ref").value,
       }).then(function(r){
         btn.disabled = false;
         if(!r.ok){ setFb("rep-fb", "err", r.body.error || ("HTTP "+r.status)); return; }
         setFb("rep-fb", "ok", "Reported "+(r.body.event && r.body.event.id || "")+".");
+        document.getElementById("rep-to").value = "";
         document.getElementById("rep-msg").value = "";
         document.getElementById("rep-ref").value = "";
         tick();
@@ -871,13 +877,16 @@ export const DASHBOARD_HTML = `<!doctype html>
     });
 
     document.getElementById("act-go").addEventListener("click", function(){
-      var btn = this; btn.disabled = true; setFb("act-fb", "", "generating…");
+      var btn = this;
+      var role = document.getElementById("act-role").value;
+      if(!role){ setFb("act-fb", "err", "Pick a role first."); return; }
+      btn.disabled = true; setFb("act-fb", "", "generating…");
       var out = document.getElementById("act-out");
       var copyBtn = document.getElementById("act-copy");
       out.value = "";
       copyBtn.style.display = "none";
       postJson("/api/activate", {
-        role: document.getElementById("act-role").value,
+        role: role,
         target: document.getElementById("act-target").value,
       }).then(function(r){
         btn.disabled = false;
