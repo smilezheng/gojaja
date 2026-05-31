@@ -214,10 +214,16 @@ async function runTaskList(args: ParsedArgs): Promise<number> {
   const statusFilter = optionalString(args.flags, "status");
   const tagFilters = parseTags(args.rawArgs);
   const json = boolFlag(args.flags, "json");
+  const includeArchived = boolFlag(args.flags, "include-archived");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
   const board = await store.readTaskBoard();
   let tasks: Task[] = Object.values(board.tasks);
+  // Default-hide archived. They are watch-board housekeeping (Done >
+  // 48h), not "what's on my plate"; surfacing them in `task list`
+  // would re-create the long-tail noise the archive was supposed to
+  // remove. `--include-archived` is the audit / debug escape hatch.
+  if (!includeArchived) tasks = tasks.filter((t) => !t.archived);
   if (ownerFilter) tasks = tasks.filter((t) => t.owner === ownerFilter);
   if (statusFilter) {
     if (!(TASK_STATUSES as readonly string[]).includes(statusFilter)) {
@@ -241,8 +247,9 @@ async function runTaskList(args: ParsedArgs): Promise<number> {
     return 0;
   }
   for (const t of tasks) {
+    const archivedMark = t.archived ? " [archived]" : "";
     process.stdout.write(
-      `${t.id.padEnd(8)} ${t.status.padEnd(11)} ${(t.owner ?? "-").padEnd(12)} ${t.priority.padEnd(4)} ${t.title}\n`,
+      `${t.id.padEnd(8)} ${t.status.padEnd(11)} ${(t.owner ?? "-").padEnd(12)} ${t.priority.padEnd(4)} ${t.title}${archivedMark}\n`,
     );
   }
   return 0;
@@ -301,7 +308,9 @@ async function runTaskShow(args: ParsedArgs): Promise<number> {
 
   process.stdout.write(`id:         ${task.id}\n`);
   process.stdout.write(`title:      ${task.title}\n`);
-  process.stdout.write(`status:     ${task.status}\n`);
+  process.stdout.write(
+    `status:     ${task.status}${task.archived ? " [archived]" : ""}\n`,
+  );
   process.stdout.write(`owner:      ${task.owner ?? "(unassigned)"}\n`);
   if (task.parent) process.stdout.write(`parent:     ${task.parent}\n`);
   process.stdout.write(`priority:   ${task.priority}\n`);
@@ -378,7 +387,7 @@ export async function runTask(args: ParsedArgs): Promise<number> {
           "                   [--deliverable 'kind:ref::desc' ...]\n" +
           "  gojaja task assign <task-id> --to <role>\n" +
           `  gojaja task status <task-id> <${TASK_STATUSES.join("|")}> [--force-incomplete]\n` +
-          "  gojaja task list [--owner <role>] [--status <s>] [--tag <label> ...]\n" +
+          "  gojaja task list [--owner <role>] [--status <s>] [--tag <label> ...] [--include-archived]\n" +
           "  gojaja task show <task-id>",
       );
   }

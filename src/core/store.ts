@@ -370,6 +370,32 @@ export interface Store {
   /** Read a single task; throws UsageError if id unknown. */
   readTask(taskId: string): Promise<Task>;
 
+  /**
+   * Mark a task `archived: true`. Silent housekeeping: emits NO event
+   * and does NOT change `task.updatedAt` (UI groupings of the
+   * Archived tab read `updatedAt`, which should reflect the last
+   * meaningful state change — typically when the task became Done).
+   *
+   * Idempotent: archiving an already-archived task is a no-op (still
+   * returns the task). Throws `UsageError` if the id is unknown.
+   *
+   * Caller is responsible for any permission gating; the watch
+   * dashboard's auto-archiver runs as SYSTEM and skips ownership.
+   */
+  archiveTask(input: { taskId: string }): Promise<Task>;
+
+  /**
+   * Sweep the board for `status === "Done" && !archived` tasks whose
+   * `updatedAt` is older than `Date.now() - thresholdMs` and archive
+   * them in a single locked transaction. Silent — no events emitted.
+   *
+   * Returns the list of task ids that were archived during this
+   * sweep. An empty array means the board was already clean.
+   */
+  autoArchiveDoneTasks(input: {
+    thresholdMs: number;
+  }): Promise<{ archived: string[] }>;
+
   // ---- RFCs ---------------------------------------------------------------
 
   /**

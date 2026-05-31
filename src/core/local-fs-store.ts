@@ -88,6 +88,10 @@ function backfillTaskFields(t: Task): void {
   if (!Array.isArray(t.deliverables)) t.deliverables = [];
   if (!Array.isArray(t.tags)) t.tags = [];
   if (!Array.isArray(t.reviewers)) t.reviewers = [];
+  // `archived` stays optional — undefined === false for filters. We
+  // intentionally do NOT default-set it to false, to keep the on-disk
+  // YAML tight for the (overwhelmingly common) un-archived case.
+  if (t.archived !== true) delete (t as Task).archived;
 }
 
 /**
@@ -2156,6 +2160,48 @@ export class LocalFsStore implements Store {
     return t;
   }
 
+  async archiveTask(input: { taskId: string }): Promise<Task> {
+    return this.withLock("task-board", async () => {
+      const board = await this.readTaskBoard();
+      const task = board.tasks[input.taskId];
+      if (!task) {
+        throw new UsageError(`Unknown task '${input.taskId}'.`);
+      }
+      if (task.archived) return task; // idempotent
+      task.archived = true;
+      // Deliberately NOT bumping updatedAt: the Archived tab groups
+      // by updatedAt and the user wants that to reflect "moved to
+      // Done at <date>", not "moved to archived at <date>".
+      await this.writeTaskBoardUnlocked(board);
+      // Silent — no event. Archiving is a watch-dashboard housekeeping
+      // op, not a governance change that other agents should react to.
+      return task;
+    });
+  }
+
+  async autoArchiveDoneTasks(input: {
+    thresholdMs: number;
+  }): Promise<{ archived: string[] }> {
+    const cutoff = Date.now() - Math.max(0, input.thresholdMs);
+    return this.withLock("task-board", async () => {
+      const board = await this.readTaskBoard();
+      const archived: string[] = [];
+      for (const t of Object.values(board.tasks)) {
+        if (t.archived) continue;
+        if (t.status !== "Done") continue;
+        const ts = Date.parse(t.updatedAt);
+        if (!Number.isFinite(ts)) continue;
+        if (ts > cutoff) continue;
+        t.archived = true;
+        archived.push(t.id);
+      }
+      if (archived.length > 0) {
+        await this.writeTaskBoardUnlocked(board);
+      }
+      return { archived };
+    });
+  }
+
   private async taskSummariesForRole(
     board: TaskBoard,
     role: RoleId,
@@ -2164,6 +2210,12 @@ export class LocalFsStore implements Store {
     for (const t of Object.values(board.tasks)) {
       if (t.owner !== role) continue;
       if (!ACTIVE_TASK_STATUSES.has(t.status)) continue;
+      // Archived tasks are intentionally hidden from manifests too.
+      // They never reach an ACTIVE status today (only `Done` is
+      // auto-archived, and `Done` is not active), but check defensively
+      // so a hand-edit that pairs `archived: true` with an active
+      // status still drops the task from the agent's plan.
+      if (t.archived) continue;
       matching.push(t);
     }
 

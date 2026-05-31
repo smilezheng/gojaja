@@ -8,6 +8,69 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### Task archive: silent housekeeping for Done tasks (backend)
+
+Long-running projects accumulate finished tasks in the `Done` column
+of `gojaja watch`'s Task board. After a few sprints the column
+becomes a wall of text nobody reads, drowning the columns that
+actually need attention. This PR adds the data model + store APIs
+to soft-archive those stale finishes; the watch dashboard wiring
+(auto-run on startup, 30-minute periodic sweep, dedicated Archived
+tab) lands separately so this change stays focused on the contract.
+
+`Task` gains an optional `archived?: boolean` field. Two new store
+APIs flip it:
+
+  - `archiveTask({ taskId })` — set `archived = true` for one task.
+    Idempotent on already-archived tasks; throws `USAGE` on unknown
+    ids.
+  - `autoArchiveDoneTasks({ thresholdMs })` — sweep the board for
+    `status === "Done" && !archived && updatedAt < now - thresholdMs`
+    and archive matches in a single locked transaction. Returns the
+    list of archived ids; an empty sweep skips the YAML rewrite
+    entirely (no churn on quiet projects).
+
+Both APIs are **deliberately silent**:
+
+  - **No event is emitted.** Archiving is a watch-dashboard view
+    decision, not a governance change. Emitting `TASK_ARCHIVED`
+    would wake every interested agent every 30 minutes for nothing.
+  - **`updatedAt` is NOT bumped.** The Archived tab groups entries
+    by `updatedAt` (= "completed on day X"), which is the timeline
+    the user actually cares about. Bumping it would scramble that
+    view every sweep.
+
+Downstream filters drop archived tasks by default:
+
+  - `manifest.tasks` (the agent's plan) — defensive `if (t.archived)
+    continue` inside `taskSummariesForRole`. Today the only path to
+    archived is via `Done`, which is already excluded by the
+    `ACTIVE_TASK_STATUSES` gate; the explicit check protects against
+    a future hand-edit or status-set extension that would otherwise
+    leak archived work back into manifests.
+  - `gojaja task list` — hidden unless `--include-archived` is set.
+    Matches the principle that a default `task list` is "what's on
+    the team's plate", not historical residue. The archive flag is
+    the audit / debug escape hatch.
+  - `gojaja task show` annotates archived tasks with `[archived]` on
+    the status line so an agent that fetched a specific id (e.g. via
+    `gojaja wait --for event-ref T-0123`) is not surprised the task
+    no longer appears in their plan.
+
+`backfillTaskFields` aggressively strips `archived !== true` to keep
+the on-disk YAML tight in the (overwhelming) un-archived case.
+
+Tests in `tests/task-board.test.ts` cover:
+
+  - `archiveTask` flips the field, emits no event, leaves `updatedAt`
+    untouched, and is idempotent / refuses unknown ids.
+  - `autoArchiveDoneTasks` only archives `Done` tasks past the
+    threshold (not `Done` under threshold, not non-`Done` over
+    threshold), never emits, and short-circuits without a YAML write
+    when the board is clean.
+  - `manifest.tasks` drops a hand-archived task even when its status
+    is still `Ready` (defence-in-depth check).
+
 ### Runtime body: frame `wait` as a parked state, suppress 30 s narration
 
 Codex-specific failure mode reported in the wild: the Codex agent

@@ -312,6 +312,24 @@ export interface Task {
    * remains a fallback for sign-off.
    */
   reviewers: RoleId[];
+
+  /**
+   * Soft-deleted marker for tasks the framework hides from the active
+   * Task board, manifests, and default `task list` output. Set true
+   * by `Store.archiveTask` / `autoArchiveDoneTasks`. The task record
+   * is preserved in `task_board.yaml` for audit and for the watch
+   * dashboard's Archived tab; it never re-enters circulation unless a
+   * human hand-edits the field back to false.
+   *
+   * Archiving is a silent housekeeping operation — no event is
+   * emitted, and `updatedAt` is intentionally NOT bumped, so UI
+   * grouping by `updatedAt` continues to reflect when the task was
+   * last meaningfully changed (typically "moved to Done").
+   *
+   * Omitted (= undefined) on tasks that have never been archived.
+   * Treat `undefined` and `false` as equivalent.
+   */
+  archived?: boolean;
 }
 
 export interface TaskBoard {

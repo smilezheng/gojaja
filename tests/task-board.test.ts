@@ -809,3 +809,174 @@ tasks:
     expect(done.status).toBe("Done");
   });
 });
+
+// ---------- archive: Done sweep + silent housekeeping ----------
+
+describe("archive: archiveTask + autoArchiveDoneTasks", () => {
+  let ctx: { root: string; store: LocalFsStore };
+  beforeEach(async () => { ctx = await freshStore(); });
+  afterEach(async () => { await fsp.rm(ctx.root, { recursive: true, force: true }); });
+
+  /**
+   * Set `task.updatedAt` directly on disk to simulate a task that
+   * Done'd N days ago. Bypasses the API on purpose — exercising the
+   * 48 h boundary requires synthetic timestamps.
+   */
+  async function backdateUpdatedAt(taskId: string, isoTs: string): Promise<void> {
+    const boardPath = path.join(ctx.root, "state", "task_board.yaml");
+    const text = await fsp.readFile(boardPath, "utf8");
+    const board = yaml.load(text) as {
+      tasks: Record<string, { updatedAt: string }>;
+    };
+    board.tasks[taskId].updatedAt = isoTs;
+    await fsp.writeFile(boardPath, yaml.dump(board));
+  }
+
+  it("archiveTask flips archived=true without emitting an event", async () => {
+    const t = await ctx.store.createTask({
+      title: "x", owner: "PM", actor: "PM",
+    });
+    await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "Done", actor: "PM",
+    });
+    const eventsBefore = (await ctx.store.listEventsAfter("")).length;
+
+    const archived = await ctx.store.archiveTask({ taskId: t.id });
+    expect(archived.archived).toBe(true);
+
+    const eventsAfter = await ctx.store.listEventsAfter("");
+    expect(eventsAfter.length).toBe(eventsBefore);
+  });
+
+  it("archiveTask does NOT bump updatedAt (group-by-updatedAt is the goal)", async () => {
+    const t = await ctx.store.createTask({
+      title: "x", owner: "PM", actor: "PM",
+    });
+    await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "Done", actor: "PM",
+    });
+    const before = (await ctx.store.readTask(t.id)).updatedAt;
+    // Sleep a beat to make sure a stamp bump would be observable.
+    await new Promise((r) => setTimeout(r, 20));
+    await ctx.store.archiveTask({ taskId: t.id });
+    const after = (await ctx.store.readTask(t.id)).updatedAt;
+    expect(after).toBe(before);
+  });
+
+  it("archiveTask is idempotent on an already-archived task", async () => {
+    const t = await ctx.store.createTask({
+      title: "x", owner: "PM", actor: "PM",
+    });
+    await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "Done", actor: "PM",
+    });
+    await ctx.store.archiveTask({ taskId: t.id });
+    await ctx.store.archiveTask({ taskId: t.id });
+    const final = await ctx.store.readTask(t.id);
+    expect(final.archived).toBe(true);
+  });
+
+  it("archiveTask rejects unknown ids with USAGE", async () => {
+    await expect(
+      ctx.store.archiveTask({ taskId: "T-9999" }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("autoArchiveDoneTasks(48h) archives ONLY Done tasks updated >48h ago", async () => {
+    // Build five tasks varying on (status, age):
+    //   tA: Done, 50h old   -> archived
+    //   tB: Done, 47h old   -> kept (under threshold)
+    //   tC: Done, 200h old  -> archived
+    //   tD: Review, 200h old -> kept (not Done)
+    //   tE: Done, brand new  -> kept
+    const tA = await ctx.store.createTask({ title: "A", owner: "PM", actor: "PM" });
+    const tB = await ctx.store.createTask({ title: "B", owner: "PM", actor: "PM" });
+    const tC = await ctx.store.createTask({ title: "C", owner: "PM", actor: "PM" });
+    const tD = await ctx.store.createTask({ title: "D", owner: "PM", actor: "PM" });
+    const tE = await ctx.store.createTask({ title: "E", owner: "PM", actor: "PM" });
+    await ctx.store.setTaskStatus({ taskId: tA.id, newStatus: "Done", actor: "PM" });
+    await ctx.store.setTaskStatus({ taskId: tB.id, newStatus: "Done", actor: "PM" });
+    await ctx.store.setTaskStatus({ taskId: tC.id, newStatus: "Done", actor: "PM" });
+    await ctx.store.setTaskStatus({ taskId: tD.id, newStatus: "Review", actor: "PM" });
+    await ctx.store.setTaskStatus({ taskId: tE.id, newStatus: "Done", actor: "PM" });
+
+    const now = Date.now();
+    const HOUR = 3600_000;
+    await backdateUpdatedAt(tA.id, new Date(now - 50 * HOUR).toISOString());
+    await backdateUpdatedAt(tB.id, new Date(now - 47 * HOUR).toISOString());
+    await backdateUpdatedAt(tC.id, new Date(now - 200 * HOUR).toISOString());
+    await backdateUpdatedAt(tD.id, new Date(now - 200 * HOUR).toISOString());
+    // tE keeps its fresh updatedAt.
+
+    const result = await ctx.store.autoArchiveDoneTasks({
+      thresholdMs: 48 * HOUR,
+    });
+    expect(result.archived.sort()).toEqual([tA.id, tC.id].sort());
+
+    const board = await ctx.store.readTaskBoard();
+    expect(board.tasks[tA.id].archived).toBe(true);
+    expect(board.tasks[tC.id].archived).toBe(true);
+    expect(board.tasks[tB.id].archived).toBeUndefined();
+    expect(board.tasks[tD.id].archived).toBeUndefined();
+    expect(board.tasks[tE.id].archived).toBeUndefined();
+  });
+
+  it("autoArchiveDoneTasks emits no events even when it archives many tasks", async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const t = await ctx.store.createTask({
+        title: `t${i}`, owner: "PM", actor: "PM",
+      });
+      await ctx.store.setTaskStatus({
+        taskId: t.id, newStatus: "Done", actor: "PM",
+      });
+      ids.push(t.id);
+    }
+    const boardPath = path.join(ctx.root, "state", "task_board.yaml");
+    const text = await fsp.readFile(boardPath, "utf8");
+    const board = yaml.load(text) as {
+      tasks: Record<string, { updatedAt: string }>;
+    };
+    const stale = new Date(Date.now() - 100 * 3600_000).toISOString();
+    for (const id of ids) board.tasks[id].updatedAt = stale;
+    await fsp.writeFile(boardPath, yaml.dump(board));
+
+    const eventsBefore = (await ctx.store.listEventsAfter("")).length;
+    const res = await ctx.store.autoArchiveDoneTasks({ thresholdMs: 48 * 3600_000 });
+    expect(res.archived.length).toBe(3);
+    const eventsAfter = (await ctx.store.listEventsAfter("")).length;
+    expect(eventsAfter).toBe(eventsBefore);
+  });
+
+  it("autoArchiveDoneTasks returns an empty array on a clean board (no writes)", async () => {
+    await ctx.store.createTask({ title: "fresh", owner: "PM", actor: "PM" });
+    const boardPath = path.join(ctx.root, "state", "task_board.yaml");
+    const before = await fsp.readFile(boardPath, "utf8");
+    const res = await ctx.store.autoArchiveDoneTasks({ thresholdMs: 48 * 3600_000 });
+    expect(res.archived).toEqual([]);
+    const after = await fsp.readFile(boardPath, "utf8");
+    // No-op runs must NOT touch the board file (saves a rewrite per
+    // 30 min sweep on a quiet project).
+    expect(after).toBe(before);
+  });
+
+  it("archived tasks are dropped from manifest.tasks (defence-in-depth even with active status)", async () => {
+    // Normal flow: archived task is Done, so it would already be
+    // excluded from manifest.tasks by the ACTIVE_TASK_STATUSES gate.
+    // We force-archive a Ready task (hand-edit) to prove the
+    // archived filter is independent.
+    const t = await ctx.store.createTask({
+      title: "active-but-archived", owner: "Backend", actor: "PM",
+    });
+    const boardPath = path.join(ctx.root, "state", "task_board.yaml");
+    const text = await fsp.readFile(boardPath, "utf8");
+    const board = yaml.load(text) as {
+      tasks: Record<string, { archived?: boolean }>;
+    };
+    board.tasks[t.id].archived = true;
+    await fsp.writeFile(boardPath, yaml.dump(board));
+
+    const m = await ctx.store.openOrCreatePlan("Backend");
+    expect(m.tasks.some((s) => s.id === t.id)).toBe(false);
+  });
+});
