@@ -20,6 +20,33 @@ Requires Node.js 20+. Linux and macOS only for now.
 
 ---
 
+## Install
+
+The CLI is published on [npm](https://www.npmjs.com/package/gojaja). Install it globally with either package manager:
+
+```bash
+npm install -g gojaja
+# or
+pnpm add -g gojaja
+```
+
+Check that it is on your `PATH`:
+
+```bash
+gojaja --version
+gojaja help
+```
+
+Prefer not to install globally? Run a one-off command instead:
+
+```bash
+npx gojaja@latest watch
+# or
+pnpm dlx gojaja watch
+```
+
+---
+
 ## Mental model (three sentences)
 
 1. **The CLI is the source of truth, not chat.** Anything that needs to outlive a conversation goes through `gojaja`.
@@ -56,9 +83,10 @@ The dashboard handles every setup step you used to need a terminal for. **One co
 
 ```bash
 cd /path/to/your-project
-npm install -g gojaja@latest    # if not already installed
 gojaja watch                    # serves http://127.0.0.1:7421 and opens your browser
 ```
+
+(Install the CLI first if needed — see [Install](#install) above.)
 
 A browser tab opens automatically. Walk through it:
 

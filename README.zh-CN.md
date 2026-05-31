@@ -20,6 +20,33 @@
 
 ---
 
+## 安装
+
+CLI 已发布到 [npm](https://www.npmjs.com/package/gojaja)，任选一种方式全局安装：
+
+```bash
+npm install -g gojaja
+# 或
+pnpm add -g gojaja
+```
+
+确认命令可用：
+
+```bash
+gojaja --version
+gojaja help
+```
+
+不想全局安装？也可以直接跑一次性命令：
+
+```bash
+npx gojaja@latest watch
+# 或
+pnpm dlx gojaja watch
+```
+
+---
+
 ## 心智模型（三句话）
 
 1. **CLI 是真相，chat 不是。** 任何需要跨对话存在的东西都走 `gojaja`，不要靠聊天记录。
@@ -56,9 +83,10 @@
 
 ```bash
 cd /path/to/your-project
-npm install -g gojaja@latest    # 还没装就装一下
 gojaja watch                    # 起服务在 http://127.0.0.1:7421，自动开浏览器
 ```
+
+（还没装 CLI 的话先看上面的[安装](#安装)。）
 
 浏览器自动打开后跟着走：
 
