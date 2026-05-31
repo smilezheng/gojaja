@@ -6,7 +6,17 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Tracking v2.0.0; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
+Tracking v1.x; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
+
+## [1.0.0] — 2026-05-31
+
+First public npm release. Prior development is documented under
+`[2.0.0-alpha.*]` below (internal pre-release versioning only).
+
+### Fixed
+
+- **`gojaja watch` dashboard:** Activate and Send report role selects no
+  longer pre-fill the first role; operators must pick explicitly.
 
 ### `gojaja watch`: single-instance gate, auto-archive sweep, Archived tab
 

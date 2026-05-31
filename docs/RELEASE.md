@@ -2,21 +2,17 @@
 
 Cross-references: [CHANGELOG](../CHANGELOG.md), [ROADMAP](./ROADMAP.md).
 
-This document is how to ship a new version to npm. It covers the very
-first publish (still alpha, package goes to the `next` dist-tag), every
-subsequent alpha / beta, and the eventual transition to a stable `latest`
-release. Follow the checklist top-to-bottom; each step has a verifiable
-output before moving on.
+This document is how to ship a new version to npm. The first public cut
+is **`1.0.0` on `latest`**. Follow the checklist top-to-bottom; each
+step has a verifiable output before moving on.
 
 ## Audience and pre-conditions
 
 - The repository at `git@github.com:smilezheng/gojaja.git`
-  is **private** during alpha. It will be flipped to public when the
-  protocol is judged stable — see "Going public" below.
-- npm-side, the package name `gojaja` is registered
-  publicly; npm has no concept of "private GitHub + public npm" working
-  against each other. Anyone with the package name can `npm view` /
-  `npm install` an alpha version once published.
+  is **private** during early rollout. It can be flipped to public when
+  you want outside contributors — see "Going public" below.
+- npm-side, the package name `gojaja` is registered publicly once
+  published; anyone can `npm view` / `npm install` it.
 - All publishing happens from the maintainer's laptop (no CI release
   job yet). A CI publish workflow is sketched at the end of this doc;
   enabling it is a one-flag change once you trust the release process.
@@ -28,7 +24,7 @@ output before moving on.
 | `package.json:version` | repo | `npm version <bump>` or hand-edit |
 | `CHANGELOG.md` entry | repo | hand-edit (date + section) |
 | `dist/` JavaScript | tarball only | auto-built by `prepublishOnly` |
-| npm dist-tag | npm registry | `npm publish --tag <tag>` |
+| npm dist-tag | npm registry | `npm publish` or `npm publish --tag <tag>` |
 | `git tag v<version>` | repo + GitHub | `git tag` + `git push --tags` |
 | GitHub Release notes | GitHub | optional, `gh release create` |
 
@@ -64,22 +60,22 @@ Stop here if anything is red. Never publish from a dirty tree.
 
 ### 2. Bump the version
 
-For alpha increments (`2.0.0-alpha.9 → 2.0.0-alpha.10`):
+For patch releases (`1.0.0 → 1.0.1`):
 
 ```bash
-npm version prerelease --preid=alpha     # bumps + commits + tags v<new>
+npm version patch                        # bumps + commits + tags v<new>
 ```
 
-For beta cuts (`2.0.0-alpha.N → 2.0.0-beta.0`):
+For minor releases (`1.0.1 → 1.1.0`):
 
 ```bash
-npm version 2.0.0-beta.0                 # explicit version
+npm version minor
 ```
 
-For the eventual stable cut (`2.0.0-beta.N → 2.0.0`):
+For prerelease cuts (`1.1.0 → 1.2.0-alpha.0`):
 
 ```bash
-npm version 2.0.0
+npm version prerelease --preid=alpha     # explicit version also works
 ```
 
 `npm version` automatically commits with message `v<version>` and creates
@@ -94,7 +90,7 @@ git push && git push --tags
 Open `CHANGELOG.md`. Below the `## [Unreleased]` header, add a section:
 
 ```markdown
-## [2.0.0-alpha.10] — YYYY-MM-DD
+## [1.0.1] — YYYY-MM-DD
 
 ### Added
 - ...
@@ -114,6 +110,14 @@ in that case skip ahead.
 
 ### 4. Dry-run the publish
 
+Stable release:
+
+```bash
+npm publish --dry-run
+```
+
+Prerelease (alpha / beta):
+
 ```bash
 npm publish --dry-run --tag next
 ```
@@ -121,9 +125,8 @@ npm publish --dry-run --tag next
 Expected output (verify each line):
 
 - ends with `+ gojaja@<version>` and no error.
-- tarball size around 80–100 kB during alpha; warn if it suddenly
-  jumps to several MB (something has slipped past the `files`
-  whitelist).
+- tarball size around 80–100 kB; warn if it suddenly jumps to several
+  MB (something has slipped past the `files` whitelist).
 - file list contains `bin/gojaja`, all `dist/cli/**/*.js` and
   `dist/core/**/*.js`, `README.md`, `README.zh-CN.md`, `LICENSE`,
   `CHANGELOG.md`, `package.json`.
@@ -136,28 +139,28 @@ real publish, so a broken tree cannot ship. Dry-run also triggers it.
 
 ### 5. Publish
 
+For a stable release (no prerelease suffix in the version):
+
+```bash
+npm publish                              # default tag is "latest"
+```
+
 For an alpha or beta (anything with a prerelease tag in the version):
 
 ```bash
 npm publish --tag next
 ```
 
-`--tag next` is mandatory — npm refuses to publish a prerelease without
-an explicit tag (so you can never accidentally promote an alpha to the
-default `latest` tag).
-
-For the stable `2.0.0` cut (no prerelease tag in the version):
-
-```bash
-npm publish                              # default tag is "latest"
-```
+`--tag next` is mandatory for prereleases — npm refuses to publish a
+prerelease without an explicit tag (so you can never accidentally promote
+an alpha to the default `latest` tag).
 
 Sanity check immediately after:
 
 ```bash
 npm view gojaja dist-tags
-# during alpha:  { next: "2.0.0-alpha.10" }
-# after stable:  { latest: "2.0.0", next: "<latest alpha if still around>" }
+# stable:   { latest: "1.0.0" }
+# prerelease on next: { latest: "1.0.0", next: "1.1.0-alpha.0" }
 ```
 
 ### 6. Verify the install path from a clean environment
@@ -166,11 +169,13 @@ In a separate shell, away from this repo:
 
 ```bash
 mkdir -p /tmp/ma-test && cd /tmp/ma-test
-npx -y gojaja@next --version
-# → gojaja <version>
-npx -y gojaja@next help
+npx -y gojaja@latest --version
+# → gojaja 1.0.0
+npx -y gojaja@latest help
 # → full help, no stack traces
 ```
+
+For a prerelease on `next`, swap `@latest` for `@next`.
 
 If `--version` or `help` errors, **immediately deprecate the broken
 release** (does not delete it, but warns installs):
@@ -208,8 +213,7 @@ gh repo edit smilezheng/gojaja --visibility public
 ```
 
 There is no separate npm step — the package is already publicly
-installable from `next` (npm has no concept of repo-tied visibility).
-What changes after the flip:
+installable from `latest`. What changes after the flip:
 
 - GitHub issues / PRs become open.
 - Existing GitHub releases / tags become visible.
@@ -221,24 +225,6 @@ Consider also adding a `LICENSE` reminder, a `CONTRIBUTING.md`, and a
 `CODE_OF_CONDUCT.md` before flipping — outside contributors look for
 these. The license is already in `LICENSE` at the repo root; the other
 two are conventions, not requirements.
-
-## Promoting an alpha to stable `latest`
-
-When you ship `2.0.0` final:
-
-1. `npm publish` (no `--tag` flag — defaults to `latest`).
-2. `npm view gojaja dist-tags` should now show
-   `latest: 2.0.0` and (if you want to keep them) older alpha versions
-   still living under `next`.
-3. The README's `npm install -g gojaja` instruction
-   (without `@next`) now works as expected; users get 2.0.0.
-
-If you want to retire the `next` tag entirely so it does not float on
-an old alpha:
-
-```bash
-npm dist-tag rm gojaja next
-```
 
 ## Yanking a bad release
 
@@ -308,8 +294,7 @@ latest   → stable                       (npm i ... with no tag)
 `npm publish` with no flag goes to `latest`. `npm publish --tag <name>`
 goes to whatever tag you specify. npm refuses to put a version with a
 prerelease component (`-alpha.X`, `-beta.X`) on `latest` unless you
-explicitly opt in — that is the safety net that has saved this project
-more than once during the alpha cycle.
+explicitly opt in — that is the safety net for future prerelease cycles.
 
 Always think "which tag should this version live under?" before
-publishing. When in doubt, `--tag next`.
+publishing. Stable cuts use `npm publish`; prereleases use `--tag next`.
