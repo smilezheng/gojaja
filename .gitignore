@@ -6,3 +6,4 @@ dist/
 # Local test scratch dirs
 .tmp/
 coverage/
+.obsidian/

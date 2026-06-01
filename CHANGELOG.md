@@ -1324,7 +1324,7 @@ Suite 316 -> 316.
 ### Rename — `multi-agent-coordination` → `gojaja` (过家家)
 
 Project, CLI, layer directory, env vars, and host artifacts all
-rename in one sweep. The name 过家家 (gòu-jiā-jiā) is a Chinese
+rename in one sweep. The name 过家家 (guò-jiā-jiā) is a Chinese
 phrase for kids' role-play games where each kid pretends to be a
 family member — exactly what this tool lets your LLM agents do on
 a shared codebase.

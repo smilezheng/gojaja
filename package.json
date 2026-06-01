@@ -23,10 +23,7 @@
   "bugs": {
     "url": "https://github.com/smilezheng/gojaja/issues"
   },
-  "author": {
-    "name": "smilezheng",
-    "email": "smile_zheng@163.com"
-  },
+  "author": "smilezheng",
   "license": "MIT",
   "bin": {
     "gojaja": "bin/gojaja"
