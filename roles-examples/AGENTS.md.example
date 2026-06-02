@@ -1,0 +1,21 @@
+# AGENTS.md
+
+## Git Workflow
+
+- Before writing code, branch off the latest `main`. Never commit directly on `main`.
+- Every change must keep unit tests current and maintain coverage. Do not weaken or delete tests just to make failing code pass.
+- Before committing, run all related tests, type checks, and the build. All must pass.
+- After finishing a task, merge the branch back into `main` and delete the now-stale branch. If there are conflicts, resolve them properly — never force-merge. If you do not understand the business logic on either side of a conflict, ask the member who owns that code before resolving.
+- Keep each PR focused on a single concern. Do not expand scope beyond the PR's stated goal.
+- Commit messages: imperative mood, no Conventional Commits prefixes, no emoji anywhere in code or commits. Reference the PR number in the subject when applicable.
+
+## Documentation
+
+- All docs live under `docs/`. Treat docs as part of the deliverable, not an afterthought.
+- Before every commit, review whether docs need to be added or updated. Keep them concise and clear.
+- Maintain both kinds: internal docs that support development, and external docs aimed at users.
+
+## Multi-Member Collaboration
+
+- Prefix every commit message with your member id.
+- Each member maintains a personal ownership doc listing the components/areas they own, what has actually been implemented so far, and the files or directories involved. This is an ownership map, not a task list.
