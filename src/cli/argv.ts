@@ -47,6 +47,9 @@ const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   // consumed (e.g. `gojaja report --as-system --to X` must keep "X"
   // as the --to value, not promote it to --as-system's argument).
   "as-system",
+  // PR9.3 `gojaja migrate` flags.
+  "execute",
+  "cleanup",
 ]);
 
 /**

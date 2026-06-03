@@ -4,6 +4,7 @@ import { runAck } from "./commands/ack";
 import { runActivate } from "./commands/activate";
 import { runClaim } from "./commands/claim";
 import { runInit } from "./commands/init";
+import { runMigrate } from "./commands/migrate";
 import { runPlan } from "./commands/plan";
 import { runPrompt } from "./commands/prompt";
 import { runRelease } from "./commands/release";
@@ -59,6 +60,8 @@ async function dispatch(): Promise<number> {
   switch (args.command) {
     case "init":
       return runInit(args);
+    case "migrate":
+      return runMigrate(args);
     case "version":
       return runVersion(args);
     case "claim":

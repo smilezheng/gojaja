@@ -8,6 +8,68 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v1.x; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### PR9.3 — `gojaja migrate` v2 → v3 walker
+
+Companion to PR9.2: gives existing v2 users a one-command path
+onto the v3 layout. Pairs `gojaja init` (for new projects) with
+`gojaja migrate` (for projects initialised against earlier
+gojaja binaries).
+
+**Walker.** `src/cli/migrate.ts` (new module, no I/O on import):
+
+  - `inspectMigrate(projectRoot)` — pure read. Returns
+    `{ hasLayer, version, project, action }`. `action` is one of:
+      - `no-layer` (no `.gojaja/` at projectRoot);
+      - `already-v3` (project.json present — idempotent no-op);
+      - `ready` (v2 layer with no project.json, ready to migrate).
+  - `planMigrate(inspection)` — builds the concrete copy plan.
+    Walks the user tree, classifies each file via `classifyPath`,
+    and groups the "central"-classified ones into a copy list.
+    Pure read; suitable as a dry-run preview.
+  - `performMigrate(projectRoot, { cleanup? })` — executes the
+    plan. Three phases:
+      1. Copy each central-classified file atomically to
+         `~/.gojaja/projects/<new-ULID>/`. ULID is freshly minted
+         here (RFC-0001 §2.2, Q1 ULID-not-derivation).
+      2. Write `<project>/.gojaja/project.json` and bump VERSION
+         to `3.0.0`. project.json goes first so a crash between
+         them leaves a recoverable "has marker but old VERSION"
+         state.
+      3. (Optional, `--cleanup`) remove the central-classified
+         source files from the user tree and prune the emptied
+         parent dirs. Default off — the source files stay as a
+         safety net for at least one sprint.
+
+  Idempotent: re-running on a v3 layer throws `MIGRATE_ALREADY_V3`
+  (exit 0 with `--cleanup`, which runs a fresh cleanup pass).
+  Re-running on an empty project throws `MIGRATE_NO_LAYER`
+  (exit 2).
+
+**CLI.** `gojaja migrate [--execute] [--cleanup] [--json]`. Default
+is dry-run preview — never modifies anything. `--execute` performs
+the copy + marker writes. `--cleanup` also removes the user-tree
+source files (recommended only after verifying the v3 layout in
+operation). `--json` returns machine-readable output for
+automation.
+
+**Tests.** New `tests/migrate.test.ts` (12 cases). Each test
+hand-builds a v2 layer with realistic content (config, roles,
+sessions, tasks, events, worklog, an RFC), then exercises:
+  - inspection variants (v2 / v3 / no-layer);
+  - dry-run plan shape (central files copied, contracts kept);
+  - execute copies to central + writes project.json + bumps
+    VERSION;
+  - safety-net default keeps user-tree sources;
+  - `--cleanup` removes them;
+  - idempotency (`MIGRATE_ALREADY_V3` on re-run; cleanup is a
+    no-op after a clean run);
+  - `MIGRATE_NO_LAYER` on an empty project;
+  - end-to-end round trip: migrated layer opens via
+    `openStoreOrThrow` in split mode, the original tasks + events
+    are still accessible.
+
+514 → 526.
+
 ### PR9.2 — `gojaja init` writes the v3 two-tree layout (breaking)
 
 First user-visible bite of RFC-0001 (central root for runtime

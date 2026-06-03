@@ -31,7 +31,7 @@ we'd then have to revisit.
 | B | **SYSTEM-2: forensic metadata** | SYSTEM events gain `pid`, `ppid`, `tty`, `cwd`, `hostname`, `user` fields via `Event.actorMeta?`. Post-hoc audit can identify the originating process. Role events deliberately omit (their trace lives in the session record). | ~80 + tests | 0.3 | **done** |
 | C | **SYSTEM-3: role create / delete gate** | `role create` becomes ownership-gated (owner of `config.yaml` OR `--as-system`). `role delete` migrates from "GOJAJA_SESSION must be unset" to the same gate. ROLE_DELETED carries actual actor. PR8m baked in. | ~100 + tests | 0.5 | **done** |
 | D | **PR9.2: `gojaja init` writes v3 shape** | Mint ULID; write `<project>/.gojaja/project.json`; create `~/.gojaja/projects/<ulid>/`; construct split-mode `LocalFsStore`; `SCHEMA_VERSION → 3.0.0`. `openStoreOrThrow` reads `project.json` and reconstructs the split store on subsequent invocations. New `GOJAJA_HOME` env override. | ~250 + tests | 1 | **done** |
-| E | **PR9.3: `gojaja migrate` v2 → v3** | One-shot walker. `--dry-run` (default), `--execute`, `--cleanup`. Idempotent. Preserves event ULIDs. Without `--cleanup`, leaves v2 files in place as a safety net. | ~250 + tests | 1 | pending |
+| E | **PR9.3: `gojaja migrate` v2 → v3** | One-shot walker. Default = dry-run; `--execute` copies; `--cleanup` removes user-tree sources. Idempotent (`MIGRATE_ALREADY_V3`). Preserves event ULIDs (file copies, no renumbering). | ~250 + tests | 1 | **done** |
 | F | **PR9.6: `gojaja reset` adapts to two trees** | Removes user tree; moves central tree to `~/.gojaja/trash/<id>-<ts>/` (TTL 7d soft-delete). `gojaja reset --purge` skips trash. | ~150 + tests | 0.5 | pending |
 | G | **PR9.7: docs sweep** | SCHEMA / DESIGN / AGENTS / README / HANDBOOK / `src/cli/prompts/*` rewritten for v3. CHANGELOG gains migration cookbook. `gojaja help` and per-command `-h` synced. | ~500 docs diff | 1 | pending |
 | H | **v3.0.0 cut** | `package.json` 1.x → 3.0.0; `CHANGELOG[3.0.0]` top section; final typecheck/test/lint; `npm publish --dry-run`. | ~50 diff | 0.3 | pending |
@@ -125,6 +125,14 @@ Append-only. One line per milestone transition.
   caller passes one. 9 new tests in `tests/system-meta.test.ts`;
   490 → 499. typecheck + lint clean. Next: C (SYSTEM-3 role
   create/delete ownership gate).
+- 2026-06-03 — Milestone E (PR9.3) done. New `gojaja migrate`
+  command + `src/cli/migrate.ts` walker. Three phases: copy
+  central-classified files to `~/.gojaja/projects/<new-ULID>/`,
+  write project.json + bump VERSION to 3.0.0, optional
+  `--cleanup` to remove user-tree sources. Default is dry-run
+  preview; `--execute` actually migrates. Idempotent. 12 new
+  tests in `tests/migrate.test.ts`. 514 → 526. Next: F (PR9.6
+  reset for two-tree).
 - 2026-06-03 — Milestone D (PR9.2) done. `gojaja init` now writes
   the v3 layout: mints a ULID, writes `<project>/.gojaja/project.
   json`, creates `~/.gojaja/projects/<ulid>/` (overridable via
