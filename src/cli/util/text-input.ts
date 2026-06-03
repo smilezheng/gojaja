@@ -12,8 +12,10 @@ import { UsageError } from "../../core/errors";
  * The standard `--message "..."` shape is unsafe in interactive shells:
  * zsh and bash both perform command substitution on backticks and
  * `$(...)` inside double quotes, so a literal Markdown fenced code
- * block in a `--message` value executes the embedded commands. See
- * `postmortem-2026-06-02-shell-eval.md` for the resulting damage.
+ * block in a `--message` value executes the embedded commands.
+ * A real incident on 2026-06-02 (state-file truncation, force-
+ * pushed empty branches, mis-advanced task statuses) motivated
+ * the explicit-channel design below.
  *
  * `requireText` accepts three explicit channels, in priority order:
  *

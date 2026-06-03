@@ -3,7 +3,7 @@
 Cross-references: [DESIGN](./DESIGN.md) — architecture rationale.
 [PROTOCOL](./PROTOCOL.md) — how agents use these files.
 [RFC-0001](./RFC-0001-central-root.md) — the v2 → v3 split rationale
-and design freeze. [PLAN-v3](./PLAN-v3.md) — release plan.
+and design freeze.
 
 This document is the source of truth for what gojaja writes to disk.
 The on-disk version is recorded in the top-level `VERSION` file. Any

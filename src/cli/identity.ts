@@ -95,8 +95,8 @@ export async function resolveIdentity(
  * role" cases that would otherwise silently bypass every
  * ownership gate.
  *
- * See `postmortem-2026-06-02-shell-eval.md` §8.10 + the SYSTEM audit
- * in `docs/HANDBOOK.md` for the full threat model.
+ * See the "SYSTEM bypass is now explicit" section in
+ * `docs/HANDBOOK.md` for the full threat model.
  */
 export async function resolveActor(
   store: Store,

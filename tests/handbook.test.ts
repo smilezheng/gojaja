@@ -128,9 +128,9 @@ describe("COLLABORATION_HANDBOOK", () => {
     // (Anthropic's guidance), so the handbook gets a hard cap here.
     // Historical ladder: 8/10/12/14/16/18/20 KB; this step climbs one
     // rung (12→14) because PR8u landed the "Body text safely"
-    // shell-eval guidance — a load-bearing rule whose absence has
-    // produced concrete prod damage (see postmortem-2026-06-02-
-    // shell-eval.md). PR8q's table compression of report/worklog/RFC
+    // shell-eval guidance — a load-bearing rule whose absence
+    // produced concrete prod damage in the 2026-06-02 incident.
+    // PR8q's table compression of report/worklog/RFC
     // remains in place; no rationale paragraphs were re-added.
     expect(Buffer.byteLength(COLLABORATION_HANDBOOK, "utf8")).toBeLessThan(14 * 1024);
   });

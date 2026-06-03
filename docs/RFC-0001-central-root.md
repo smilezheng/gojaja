@@ -2,12 +2,13 @@
 
 > Status: Draft (PR9.0)
 > Author: CTO (gojaja maintainers)
-> Trigger: postmortem-2026-06-02-shell-eval.md §8.3, §8.7, §8.10b
+> Trigger: internal 2026-06-02 shell-eval incident (state-file
+>   merge clobbers, multi-worktree git interference; details in
+>   maintainers' private postmortem)
 > Targets: `gojaja` v3.0.0 (`schema: 3.0.0`)
 
 Cross-references: [DESIGN](./DESIGN.md), [SCHEMA](./SCHEMA.md),
-[ROADMAP](./ROADMAP.md), [HANDBOOK](./HANDBOOK.md),
-[postmortem-2026-06-02-shell-eval.md](../postmortem-2026-06-02-shell-eval.md).
+[ROADMAP](./ROADMAP.md), [HANDBOOK](./HANDBOOK.md).
 
 This RFC proposes splitting the on-disk layout into **two trees**:
 

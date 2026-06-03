@@ -18,8 +18,9 @@ import type { ProjectJson } from "../core/types";
  * git (the rest is per-user / per-machine). Every git worktree of
  * the same repository inherits the same project.json and therefore
  * the same central root, which is the entire reason this exists —
- * see postmortem-2026-06-02-shell-eval.md §8.3 / §8.10b for the
- * v2 incidents that motivated the split.
+ * the v2 layout's runtime files living inside the git tree produced
+ * repeated stale-merge clobbers and multi-worktree interference
+ * (see RFC-0001 §1 for the incident summary that motivated this).
  */
 
 /**

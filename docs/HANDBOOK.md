@@ -99,9 +99,10 @@ Any flag carrying a multi-line message body — `--message`,
 tax. zsh and bash both perform command substitution on backticks and
 `$(...)` inside double quotes, so a literal Markdown fenced code
 block in a `--message "..."` value executes the embedded commands.
-See [postmortem-2026-06-02-shell-eval.md](../postmortem-2026-06-02-shell-eval.md)
-for the resulting damage (state file truncation, force-pushed empty
-branches, mis-advanced task statuses).
+An incident on 2026-06-02 caused real damage along exactly these
+lines: state file truncation, force-pushed empty branches, mis-
+advanced task statuses. That incident motivated the explicit-channel
+design described here.
 
 `gojaja` follows the `git commit` shape exactly. Per body flag,
 three channels are accepted in this priority order:

@@ -12,7 +12,7 @@ Currently empty. Future v3.0.x work lands here.
 
 Major release. **Breaking** — see migration guidance below.
 
-This release closes the postmortem-2026-06-02 incidents through
+This release closes the internal 2026-06-02 incident class through
 two coordinated lines of work:
 
   - **Central root for runtime state** (RFC-0001): the historical
@@ -45,7 +45,7 @@ two coordinated lines of work:
     `--description`) accept `--flag -` + heredoc / pipe / $EDITOR
     so backticks and `$(...)` inside Markdown fenced blocks no
     longer execute as shell commands. Eliminates the bug class
-    documented in `postmortem-2026-06-02-shell-eval.md`.
+    that produced the 2026-06-02 incident.
 
 ### Migration from 2.x
 
@@ -537,10 +537,9 @@ backticks or `$(...)` in the message body causes the shell to execute
 the embedded commands BEFORE gojaja sees the argument. zsh and bash
 both perform command substitution on `` ` ` `` and `$(...)` inside
 double quotes; agents writing Markdown fenced code blocks into a
-message would silently run the contents. See
-[`postmortem-2026-06-02-shell-eval.md`](./postmortem-2026-06-02-shell-eval.md)
-for the resulting damage (state-file truncation, force-pushed empty
-branches, mis-advanced task statuses).
+message would silently run the contents. A 2026-06-02 incident
+exposed exactly this pattern (state-file truncation, force-pushed
+empty branches, mis-advanced task statuses).
 
 **New channel chain** (per body flag, in priority order):
 

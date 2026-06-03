@@ -326,8 +326,9 @@ gojaja wait --in 1h --for task-assigned      # also broadcasts "I'm idle"
 chain as `git commit`. **Do not wrap multi-line content in
 `--message "..."`**: shells run backticks and `$(...)` inside double
 quotes, so `--message "see \`git push\`"` actually runs git push.
-This pattern caused real damage (see
-[postmortem-2026-06-02-shell-eval.md](./postmortem-2026-06-02-shell-eval.md)).
+This pattern caused real damage in a 2026-06-02 incident (state
+file truncation, force-pushed empty branches, mis-advanced task
+statuses) and motivated the channels described below.
 
 Use one of:
 

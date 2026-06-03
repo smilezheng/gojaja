@@ -396,7 +396,7 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
     interactive `$EDITOR` when stdin is a TTY. stdin is opt-in, not
     auto-detected, so CI / test runners with unclosed non-TTY stdin
     never deadlock.
-  - Eliminates the postmortem-2026-06-02 class of shell-eval bug:
+  - Eliminates the 2026-06-02-incident class of shell-eval bug:
     backticks and `$(...)` inside `--message "..."` no longer reach
     a context where the shell evaluates them, because the safe path
     is a quoted heredoc whose body is shell-literal.

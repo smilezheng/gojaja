@@ -162,7 +162,6 @@ Messaging (agent, requires GOJAJA_SESSION):
       cat draft.md | gojaja ... --message -
       gojaja report --to X            # interactive: opens $EDITOR
   The '-' sentinel (or bare --message) tells gojaja to read stdin.
-  See: postmortem-2026-06-02-shell-eval.md.
 
   --as-system flag (project owner only):
       A bare 'gojaja report' / 'task new' / 'rfc new' / 'rfc comment'
