@@ -34,6 +34,7 @@ import {
   waitStatePath,
   worklogEntryPath,
 } from "./paths";
+import { classifyPath } from "./path-routing";
 import { validateRoleId, validateSlug } from "./role-id";
 import { renderRoleMarkdown } from "./role-template";
 import type { Store } from "./store";
@@ -58,6 +59,7 @@ import {
   type RoleId,
   type RoleReminder,
   type SessionInfo,
+  type SystemActorMeta,
   type Task,
   type TaskAsset,
   type TaskBoard,
@@ -65,6 +67,32 @@ import {
   type TaskSummary,
   type WaitState,
 } from "./types";
+
+/**
+ * Build the `actorMeta` slice of an `Event` payload.
+ *
+ * Returns `{ actorMeta: meta }` ONLY when the actor is `"SYSTEM"`
+ * AND metadata was provided. Role-bearing events always get
+ * `{}` (no `actorMeta` field on the resulting event) — their trace
+ * lives in the session record, not on the event itself.
+ *
+ * This is a one-line spread helper so every `recordEventInternal`
+ * call site can stay terse:
+ *
+ *   return this.recordEventInternal({
+ *     type: "REPORT",
+ *     from: input.from,
+ *     ...
+ *     ...attachActorMeta(input.from, input.actorMeta),
+ *   });
+ */
+function attachActorMeta(
+  actor: RoleId | "SYSTEM",
+  meta: SystemActorMeta | undefined,
+): { actorMeta?: SystemActorMeta } {
+  if (actor === "SYSTEM" && meta) return { actorMeta: meta };
+  return {};
+}
 
 function freshConfig(schemaVersion: string): ProjectConfig {
   return { schemaVersion, roles: {} };
@@ -473,25 +501,67 @@ export interface LocalFsStoreOptions {
    * visibility.
    */
   safetyMarginMs?: number;
+
+  /**
+   * v3 split-mode opt-in (RFC-0001). When provided, `LocalFsStore`
+   * routes file I/O through `classifyPath` to either the user tree
+   * (`rootDir` — git tracked) or the central tree (`centralRoot` —
+   * `~/.gojaja/projects/<id>/`, per-machine).
+   *
+   * When omitted, both logical scopes resolve to `rootDir`. This is
+   * the v2 single-root layout and remains the behaviour for every
+   * existing on-disk project until PR9.2 / PR9.3 migrate it.
+   */
+  centralRoot?: string;
 }
 
 const DEFAULT_SAFETY_MARGIN_MS = 200;
 
 /**
- * Filesystem-backed Store. Operates against a `.gojaja` directory rooted
- * at `root`. All path construction is forced through `resolveInside`, so no
- * user input can reach `fs.*` without validation.
+ * Filesystem-backed Store. Operates against the on-disk layer.
+ *
+ * In v2 single-root mode (the default), all file I/O resolves against
+ * `<project>/.gojaja/` (`this.userRoot === this.centralRoot`). In v3
+ * split mode (RFC-0001), `centralRoot` is passed to the constructor and
+ * each path is classified at the call site by `classifyPath`: contracts
+ * (config.yaml, role briefs, project_state.md) land in the user tree
+ * (git-tracked); runtime state (task board, comms/, rfcs/, worklog/,
+ * locks/) lands in the central tree (per-machine, never in git).
+ *
+ * Either way, every concrete path is forced through `resolveInside` so
+ * user / agent input can never reach `fs.*` without validation.
  */
 export class LocalFsStore implements Store {
   readonly rootDescription: string;
 
-  private readonly root: string;
+  private readonly userRoot: string;
+  private readonly centralRoot: string;
   private readonly safetyMarginMs: number;
 
   constructor(rootDir: string, opts: LocalFsStoreOptions = {}) {
-    this.root = path.resolve(rootDir);
-    this.rootDescription = this.root;
+    this.userRoot = path.resolve(rootDir);
+    this.centralRoot = opts.centralRoot
+      ? path.resolve(opts.centralRoot)
+      : this.userRoot;
+    // Single-root mode keeps the historical one-path description so
+    // error messages and `gojaja --version` stay readable. Split mode
+    // surfaces both roots so audit / doctor output stays diagnosable.
+    this.rootDescription =
+      this.userRoot === this.centralRoot
+        ? this.userRoot
+        : `user=${this.userRoot} central=${this.centralRoot}`;
     this.safetyMarginMs = opts.safetyMarginMs ?? DEFAULT_SAFETY_MARGIN_MS;
+  }
+
+  /**
+   * Backwards-compatible accessor used by code paths that still think
+   * of "the root" as a single directory (deliverable file gate
+   * resolution; lock-key namespacing). In v3 split mode, the user
+   * tree is the right answer here — it's the one that sits next to
+   * the project source code on disk.
+   */
+  private get root(): string {
+    return this.userRoot;
   }
 
   /**
@@ -500,10 +570,11 @@ export class LocalFsStore implements Store {
    * gate on `setTaskStatus(... Done)`. We rely on the convention that
    * the layer directory lives at the project root; if that ever
    * changes we will need to thread project root through the
-   * constructor instead.
+   * constructor instead. In v3 split mode the user tree is the project
+   * tree, so this is still correct.
    */
   private projectRoot(): string {
-    return path.dirname(this.root);
+    return path.dirname(this.userRoot);
   }
 
   // ---- bootstrap ----------------------------------------------------------
@@ -1108,6 +1179,7 @@ export class LocalFsStore implements Store {
     to: RoleId;
     ref?: string;
     message: string;
+    actorMeta?: SystemActorMeta;
   }): Promise<Event> {
     // `"SYSTEM"` is allowed for a human running the CLI without
     // `GOJAJA_SESSION` — the project owner directing a question or
@@ -1134,6 +1206,7 @@ export class LocalFsStore implements Store {
       to: input.to,
       ref: input.ref,
       payload: { message: input.message },
+      ...attachActorMeta(input.from, input.actorMeta),
     });
   }
 
@@ -1502,6 +1575,7 @@ export class LocalFsStore implements Store {
   async deleteRole(input: {
     id: RoleId;
     actor: RoleId | "SYSTEM";
+    actorMeta?: SystemActorMeta;
   }): Promise<{ role: RoleId; removedSessions: number }> {
     validateRoleId(input.id);
     // Role deletion is a project-governance act, not a per-role
@@ -1561,6 +1635,7 @@ export class LocalFsStore implements Store {
         to: "*",
         ref: input.id,
         payload: { roleId: input.id, removedSessions },
+        ...attachActorMeta("SYSTEM", input.actorMeta),
       });
       return { role: input.id, removedSessions };
     });
@@ -1824,6 +1899,7 @@ export class LocalFsStore implements Store {
     deliverables?: Deliverable[];
     tags?: string[];
     reviewers?: RoleId[];
+    actorMeta?: SystemActorMeta;
   }): Promise<Task> {
     const title = String(input.title ?? "").trim();
     if (title.length === 0) {
@@ -1950,6 +2026,7 @@ export class LocalFsStore implements Store {
         to: "*",
         ref: id,
         payload: { taskId: id, title, owner, priority },
+        ...attachActorMeta(input.actor, input.actorMeta),
       });
       if (owner) {
         await this.recordEventInternal({
@@ -1958,6 +2035,7 @@ export class LocalFsStore implements Store {
           to: owner,
           ref: id,
           payload: { taskId: id, previousOwner: null, newOwner: owner },
+          ...attachActorMeta(input.actor, input.actorMeta),
         });
       }
       return task;
@@ -1968,6 +2046,7 @@ export class LocalFsStore implements Store {
     taskId: string;
     newOwner: RoleId;
     actor: RoleId | "SYSTEM";
+    actorMeta?: SystemActorMeta;
   }): Promise<Task> {
     validateRoleId(input.newOwner);
     // Step 12: owner must be registered. Same reasoning as createTask.
@@ -1997,6 +2076,7 @@ export class LocalFsStore implements Store {
         to: input.newOwner,
         ref: input.taskId,
         payload: { taskId: input.taskId, previousOwner, newOwner: input.newOwner },
+        ...attachActorMeta(input.actor, input.actorMeta),
       });
       return task;
     });
@@ -2007,6 +2087,7 @@ export class LocalFsStore implements Store {
     newStatus: TaskStatus;
     actor: RoleId | "SYSTEM";
     forceIncomplete?: boolean;
+    actorMeta?: SystemActorMeta;
   }): Promise<Task> {
     if (!TASK_STATUSES.includes(input.newStatus)) {
       throw new UsageError(
@@ -2110,6 +2191,7 @@ export class LocalFsStore implements Store {
             missing: bypassMissing,
             by: input.actor,
           },
+          ...attachActorMeta(input.actor, input.actorMeta),
         });
       }
       await this.recordEventInternal({
@@ -2122,6 +2204,7 @@ export class LocalFsStore implements Store {
           previousStatus,
           newStatus: input.newStatus,
         },
+        ...attachActorMeta(input.actor, input.actorMeta),
       });
       return task;
     });
@@ -2318,6 +2401,7 @@ export class LocalFsStore implements Store {
     options: RfcOption[];
     deadline?: string | null;
     createdBy: RoleId | "SYSTEM";
+    actorMeta?: SystemActorMeta;
     description?: string;
     relatedTasks?: string[];
   }): Promise<RfcProposal> {
@@ -2447,6 +2531,7 @@ export class LocalFsStore implements Store {
         to: "*",
         ref: id,
         payload: { rfcId: id, title, voters, deciders },
+        ...attachActorMeta(input.createdBy, input.actorMeta),
       });
       return proposal;
     });
@@ -2455,6 +2540,7 @@ export class LocalFsStore implements Store {
   async commentRfc(input: {
     rfcId: string;
     role: RoleId | "SYSTEM";
+    actorMeta?: SystemActorMeta;
     preferred: string;
     rationale: string;
     replyTo?: string | null;
@@ -2686,6 +2772,7 @@ export class LocalFsStore implements Store {
           replyTo,
           kind,
         },
+        ...attachActorMeta(input.role, input.actorMeta),
       });
       // the commenter has by definition seen everything up to
       // and including their own comment. Advance their read cursor so
@@ -3724,7 +3811,27 @@ export class LocalFsStore implements Store {
 
   // ---- helpers ------------------------------------------------------------
 
+  /**
+   * Resolve a relative path under the layer to an absolute path on
+   * disk, routing via `classifyPath`:
+   *
+   *   - user-tree paths (`config.yaml`, `roles/<id>.md`,
+   *     `state/project_state.md`, `project.json`, `VERSION`,
+   *     `.gitignore`, `protocol/**`) → `this.userRoot`.
+   *   - central-tree paths (`state/task_board.yaml`, `comms/**`,
+   *     `rfcs/**`, `worklog/**`, `locks/**`) → `this.centralRoot`.
+   *
+   * In v2 single-root mode the two roots are identical, so the
+   * classifier still runs but both branches collapse to the same path
+   * — behaviour identical to pre-PR9.1 code.
+   *
+   * `resolveInside` is applied per-tree, so a path that would escape
+   * one root cannot accidentally escape the other (`..` segments are
+   * still rejected as before).
+   */
   private abs(rel: string): string {
-    return resolveInside(this.root, rel);
+    const scope = classifyPath(rel);
+    const root = scope === "user" ? this.userRoot : this.centralRoot;
+    return resolveInside(root, rel);
   }
 }

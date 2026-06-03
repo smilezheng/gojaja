@@ -91,3 +91,102 @@ Out of scope:
   persistent prompt area, not via this layer.
 - Per-role behaviour. Generic rules use `reportsTo` and `owns` from
   the role's `config.yaml` entry instead.
+
+## Body text safely (long form)
+
+Any flag carrying a multi-line message body — `--message`,
+`--rationale`, `--description` — pays the standard CLI shell-quoting
+tax. zsh and bash both perform command substitution on backticks and
+`$(...)` inside double quotes, so a literal Markdown fenced code
+block in a `--message "..."` value executes the embedded commands.
+See [postmortem-2026-06-02-shell-eval.md](../postmortem-2026-06-02-shell-eval.md)
+for the resulting damage (state file truncation, force-pushed empty
+branches, mis-advanced task statuses).
+
+`gojaja` follows the `git commit` shape exactly. Per body flag,
+three channels are accepted in this priority order:
+
+1. **Inline** — `--flag <text>` with a literal string. Safe iff the
+   string contains no backticks, no `$`, and you used single quotes
+   (or escaped every `` ` `` and `$` under double quotes). Best for
+   short one-liners.
+2. **Explicit stdin** — `--flag -` OR bare `--flag` (boolean parse).
+   gojaja reads `process.stdin` to EOF. Combine with a quoted heredoc
+   to get full shell-eval immunity:
+
+   ```bash
+   gojaja report --to X --message - <<'EOF'
+   any backticks ` and $ vars stay literal inside <<'EOF'.
+   the closing 'EOF' MUST be single-quoted (or escaped) — bare
+   <<EOF still expands ${} (though not backticks/$()).
+   EOF
+   ```
+
+   Pipes have the same shape: `cat draft.md | gojaja ... --flag -`.
+3. **Interactive editor** — flag absent AND stdin is a TTY AND
+   `$EDITOR` / `$VISUAL` is set. gojaja writes a seeded temp file
+   under `${TMPDIR}/gojaja-edit/`, spawns the editor with `stdio:
+   inherit`, then reads the saved buffer back (lines starting with
+   `#` are stripped, mirroring git). Save+quit sends; quit-without-
+   save aborts with a clean USAGE. The temp file is deleted before
+   the call returns.
+
+Channels are **opt-in**, not auto-detected. A common subtle bug in
+the older design was: "if `--flag` is absent and stdin is non-TTY,
+slurp stdin." That works in heredoc / pipe environments but deadlocks
+in CI/test runners that inherit a non-TTY stdin which never closes.
+gojaja therefore requires an explicit `-` sentinel, a bare `--flag`,
+or a TTY+EDITOR to read stdin. Absent flag in a non-TTY non-EDITOR
+environment is a USAGE error pointing at the safe heredoc form.
+
+For OPTIONAL multi-line fields (e.g. `rfc new --description`), the
+same opt-in shape applies but absence returns "" (default) instead of
+throwing. Never opens `$EDITOR` for optional fields — surprise editor
+prompts on omitted optional flags are worse than implicit empties.
+
+## SYSTEM bypass is now explicit (`--as-system`)
+
+Before PR9, commands that accepted a `RoleId | "SYSTEM"` actor
+(`report`, `task new` / `task assign`, `rfc new`, `rfc comment`,
+`state edit`) defaulted to `actor=SYSTEM` whenever `GOJAJA_SESSION`
+was unset. The intent was "the human owner running the CLI directly,
+without claiming a role". The bug was: `GOJAJA_SESSION` is just an
+environment variable. An agent process can `unset GOJAJA_SESSION` in
+one shell line and instantly inherit SYSTEM authority — bypassing
+every `owns` / `mustNotEdit` gate, mis-attributing actions as
+"from the project owner" in the audit log, and side-stepping the
+`role delete` "no session" guard.
+
+PR9 SYSTEM-1 closes this. The new rules:
+
+1. **GOJAJA_SESSION set** → actor = the role on that session.
+   A stale/invalid token still throws a hard auth error; never a
+   silent fall-through to SYSTEM.
+2. **GOJAJA_SESSION unset AND `--as-system` passed** → actor =
+   `SYSTEM`. The flag is the explicit human intent signal. The
+   command proceeds and writes `from: SYSTEM` to the audit event.
+3. **GOJAJA_SESSION unset AND `--as-system` NOT passed** → USAGE
+   error with a hint pointing at both legitimate paths
+   (`gojaja claim <role>` for agents, `--as-system` for the human).
+
+A live session **always wins**: an agent that includes `--as-system`
+"just in case" does NOT escalate past their own role's ownership
+gate. The flag is consulted only when no session exists.
+
+The flag is reserved for the human user performing bootstrap or
+repair. If you're an agent reading this, you should never type
+`--as-system` — claim a role and inherit `owns` from `config.yaml`.
+
+This is **not** a complete fix. An agent that wants to escalate can
+still type `--as-system` itself. The gate raises the bar from "any
+agent at any time" to "an agent that intentionally types a
+privileged flag", which (a) makes accidental escalation by an LLM
+generating shell strings much less likely, (b) leaves an explicit
+`--as-system` trail in audit history that a grep can find,
+(c) catches "I forgot to claim a role" cases that would previously
+silently bypass every ownership gate.
+
+A more principled fix — a real `OWNER` first-class role that the
+human user claims like any other agent — is on the roadmap for
+v3.1.0. Until then, treat `--as-system` events with the same
+skepticism you would any other unauthenticated input.

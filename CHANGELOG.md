@@ -8,6 +8,259 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v1.x; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### PR9 SYSTEM-2 — forensic metadata on SYSTEM events
+
+Companion to SYSTEM-1. With `--as-system` now the explicit gateway
+to actor=SYSTEM, the audit log needs enough trace to identify WHICH
+process invoked it — `from: "SYSTEM"` by itself doesn't say "the
+human owner from the laptop" vs "some agent process that managed to
+run the flag". SYSTEM-2 adds the missing trace.
+
+**Schema additions.** `src/core/types.ts`:
+
+  - New `SystemActorMeta` interface: `{ pid, ppid, cwd, hostname,
+    user, tty }`. All fields are strings (or numbers) with sentinel
+    fallbacks (`"(cwd-unavailable)"`, etc.) so a corrupt-meta
+    capture never blocks a legitimate SYSTEM operation.
+  - New optional `Event.actorMeta?: SystemActorMeta` field.
+    Populated only when `from === "SYSTEM"`; role-bearing events
+    intentionally omit it (their trace lives in
+    `comms/sessions/<role>.json`, which already carries `pid` +
+    `host`).
+
+**Helper.** New `src/cli/util/system-meta.ts` exports
+`gatherSystemMeta()`. Collects current-process fields with no side
+effects. TTY detection prefers `$SSH_TTY` (remote shell), falls
+back to `"(local)"` for an interactive terminal, then
+`"(non-tty)"` for pipes / heredocs / agent shells — enough
+discrimination for audit without platform-specific syscalls.
+
+**Store wiring.** `Store` interface gains `actorMeta?` on every
+event-emitting actor-bearing input: `publishReport`, `createTask`,
+`assignTask`, `setTaskStatus`, `createRfc`, `commentRfc`,
+`deleteRole`. `writeStateFile` did NOT gain the field — it doesn't
+currently emit events; the field will be added in the same PR as
+the planned `STATE_UPDATED` event surface.
+
+`LocalFsStore` gets a new `attachActorMeta(actor, meta)` helper
+that returns `{ actorMeta: meta }` only when actor is `"SYSTEM"`
+AND meta was provided. Every `recordEventInternal({...})` call in
+a SYSTEM-capable code path now spreads this helper, so role events
+NEVER end up with stale meta even if a buggy caller passes one.
+
+**CLI wiring.** `report` / `task` / `rfc` command handlers now
+collect `actorMeta = actor === "SYSTEM" ? gatherSystemMeta() :
+undefined` after `resolveActor` returns, then pass it to the
+relevant Store input. `task.ts`'s `actorRole` helper became the
+central seam carrying `{ root, actor, actorMeta }`.
+
+**Tests.** New `tests/system-meta.test.ts` (9 cases): helper
+shape, pid/cwd equality with the current process, end-to-end
+`actorMeta` on `REPORT` / `TASK_CREATED` / `TASK_ASSIGNED` /
+`RFC_CREATED` / `RFC_COMMENT` for SYSTEM actors, and explicit
+negative assertions that role-bearing events never carry meta —
+including the "session always beats `--as-system`" SYSTEM-1
+invariant re-checked here at the event-shape level. 490 → 499.
+
+**Threat-model note.** SYSTEM-2 doesn't *prevent* escalation
+(agents could spoof their own ppid via execve trickery), but it
+turns "an agent ran something as SYSTEM" from an undetectable
+event into a forensically-distinguishable one. Combined with
+SYSTEM-1's explicit-flag requirement, accidental escalation by LLM-
+generated shell strings is now nearly impossible (the LLM must
+generate both the `--as-system` flag and survive the post-hoc
+pid/cwd audit pointing back to the agent shell).
+
+### PR9 SYSTEM-1 — explicit `--as-system` required for actor=SYSTEM (breaking)
+
+Closes a real escalation path baked into the original v2 design:
+commands that accept a `RoleId | "SYSTEM"` actor (`report`,
+`task new` / `task assign`, `rfc new`, `rfc comment`,
+`state edit`) used to default to `actor=SYSTEM` whenever
+`GOJAJA_SESSION` was unset. The "no env var → SYSTEM" rule was
+trivially bypassable: any agent process can `unset GOJAJA_SESSION`
+in one shell line and inherit SYSTEM authority — bypassing every
+`owns` / `mustNotEdit` gate, mis-attributing actions as "from the
+project owner" in the audit log.
+
+**New gate.** `src/cli/identity.ts`'s `resolveActor` now takes an
+`{ allowSystemBypass?: boolean }` option. Resolution rules:
+
+  - GOJAJA_SESSION set → actor = the session's role (unchanged).
+  - GOJAJA_SESSION unset AND `allowSystemBypass === true` →
+    actor = SYSTEM.
+  - GOJAJA_SESSION unset AND `allowSystemBypass !== true` → USAGE
+    error pointing at both legitimate paths.
+
+A live session always beats the flag: an agent including
+`--as-system` "just in case" does NOT escalate past their role's
+ownership gate.
+
+**CLI surface.** `src/cli/argv.ts` adds `as-system` to
+`BOOLEAN_FLAGS` (so a stray positional after it can't be silently
+consumed). Five command handlers were updated to parse
+`boolFlag(args.flags, "as-system")` and forward it:
+
+  - `gojaja report --to <role> --message <text> [--as-system]`
+  - `gojaja state edit --file <path> ... [--as-system]`
+  - `gojaja task new [--as-system]`, `gojaja task assign [--as-system]`
+  - `gojaja rfc new [--as-system]`, `gojaja rfc comment [--as-system]`
+
+Structured RFC verbs (`pre-decide`, `ack`, `object`, `decide`,
+`reject`, `revise`, `edit`, `link-task`, `unlink-task`) already
+required a real session (`resolveIdentity({ requireSession: true })`);
+they were not affected by SYSTEM-1.
+
+`role create` / `role delete` are unchanged in this PR; they
+already had their own (different) SYSTEM rules and will be
+re-gated in SYSTEM-3.
+
+**Migration for users.** Anyone running the CLI by hand without a
+GOJAJA_SESSION must now add `--as-system` to those commands.
+Example diffs in user shells:
+
+```diff
+- gojaja report --to Backend --message "ship it"
++ gojaja report --to Backend --message "ship it" --as-system
+
+- gojaja state edit --file state/project_state.md --content "..."
++ gojaja state edit --file state/project_state.md --content "..." --as-system
+```
+
+Agent automation (anything running with a real GOJAJA_SESSION) is
+**unchanged** — the gate only triggers when no session exists.
+
+**Docs.** `gojaja --help` Messaging section gains an `--as-system`
+explainer; `docs/HANDBOOK.md` gains a "SYSTEM bypass is now
+explicit" section with the full threat model. Embedded
+`COLLABORATION_HANDBOOK` is untouched (already at 14 KB budget;
+agents read the long-form section if they need it).
+
+**Tests.** New `tests/system-gate.test.ts` (12 cases): three
+scenarios (refuse without flag / accept with flag / accept with
+session) × the five gated commands, plus a session-wins-over-flag
+invariant. `tests/identity.test.ts` rewritten for the new
+resolveActor contract (4 → 5 cases). `tests/next-hint.test.ts` and
+`tests/state-edit.test.ts` had three fixtures updated to opt in to
+`as-system: true` where they previously relied on implicit SYSTEM.
+476 → 491.
+
+### PR9.1 — split-mode path routing for the v3 layout
+
+First implementation step on RFC-0001 (central root for runtime state).
+Lays the routing groundwork without yet changing what `gojaja init`
+writes — that's PR9.2's scope.
+
+**`src/core/path-routing.ts`** (new module) exports
+`classifyPath(rel) → "user" | "central"` and the convenience
+`isSplitMode(userRoot, centralRoot)`. The classifier hard-codes the
+**user** set per RFC-0001 §2.6 (`VERSION`, `project.json`,
+`config.yaml`, `.gitignore`, `state/project_state.md`, `roles/**`,
+`protocol/**`); everything else defaults to **central** so future
+runtime additions can't accidentally leak into git without an
+explicit decision.
+
+**`src/core/local-fs-store.ts`** picks up an optional `centralRoot`
+in `LocalFsStoreOptions`. When set, `abs(rel)` consults the
+classifier and resolves against the matching tree
+(`this.userRoot` or `this.centralRoot`); `resolveInside` still
+applies per-tree, so traversal guards stay intact. When omitted,
+both logical scopes collapse to the same path and the entire
+codebase keeps its byte-identical v2 single-root behaviour. The
+constructor's `rootDescription` reports `user=... central=...` in
+split mode so audit / doctor output stays diagnosable.
+
+`projectRoot()` (the directory containing `.gojaja/`, used by the
+deliverable file gate) keeps returning `dirname(userRoot)` — the
+user tree always sits next to the project source code on disk in
+both v2 and v3, which is what the deliverable check needs.
+
+**Tests.** `tests/path-routing.test.ts` (17 cases) covers the
+classifier table: every documented user-tree path, every documented
+central-tree subtree, the default-to-central rule for unknown
+paths, and normalisation (leading `./`, backslash separators).
+`tests/split-store.test.ts` (15 cases) boots a real `LocalFsStore`
+with `userRoot !== centralRoot`, exercises `initialise()`,
+`createRole`, `createTask`, `publishWorklog`, and `claimSession`,
+and asserts each artifact lands on the correct physical tree.
+Existing 444 tests pass without modification (single-root mode is
+the regression contract). Total suite: 476/476.
+
+**Not in this PR (queued for PR9.2 → PR9.7):** `gojaja init` still
+writes the v2 layout — nothing in the CLI surface constructs a
+split store yet. PR9.2 wires `gojaja init` to mint a ULID, write
+`project.json` to the user tree, and pass `centralRoot` into
+`LocalFsStore`.
+
+### PR8u — safe multi-line input for body flags (`--message` / `--rationale` / `--description`)
+
+Closes a real foot-gun: `gojaja report --to X --message "..."` with
+backticks or `$(...)` in the message body causes the shell to execute
+the embedded commands BEFORE gojaja sees the argument. zsh and bash
+both perform command substitution on `` ` ` `` and `$(...)` inside
+double quotes; agents writing Markdown fenced code blocks into a
+message would silently run the contents. See
+[`postmortem-2026-06-02-shell-eval.md`](./postmortem-2026-06-02-shell-eval.md)
+for the resulting damage (state-file truncation, force-pushed empty
+branches, mis-advanced task statuses).
+
+**New channel chain** (per body flag, in priority order):
+
+1. **Inline** — `--flag <text>` unchanged. Same as before.
+2. **Explicit stdin** — `--flag -` OR bare `--flag` (boolean parse)
+   slurps `process.stdin` to EOF. Mirrors `git commit -F -`. The
+   safe pattern is a quoted heredoc:
+   ```bash
+   gojaja report --to X --message - <<'EOF'
+   any backticks ` and $ vars are literal inside <<'EOF'
+   EOF
+   ```
+3. **Interactive `$EDITOR`** — flag absent AND stdin is a TTY AND
+   `$EDITOR` / `$VISUAL` / `$GIT_EDITOR` is set. Seeds a temp file
+   under `${TMPDIR}/gojaja-edit/<ulid>.txt` with `#`-prefixed
+   instructions (stripped on read), spawns the editor with `stdio:
+   inherit`, reads the saved buffer back, deletes the temp file.
+   Matches `git commit` without `-m`.
+
+stdin is **opt-in**, not auto-detected on flag absence. The older
+"if non-TTY then slurp stdin" rule deadlocks CI / test runners that
+inherit an unclosed non-TTY stdin. The explicit `-` sentinel keeps
+every code path bounded.
+
+**Coverage.** Body flags converted:
+
+  - `report --message`, `worklog --message`.
+  - `rfc comment / add-option / pre-decide / withdraw-pre-decision /
+    object / decide / reject / revise / edit --rationale` — 9 sites.
+  - `rfc new --description` (optional variant: absence = `""`, no
+    `$EDITOR` surprise).
+
+Non-body flags (`--title`, `--to`, `--option`, `--task`, ...) are
+unchanged; they're short identifiers with no shell-eval surface. For
+the rare multi-line non-body case, `--flag "$(cat foo.md)"` is safe —
+the shell evaluates `$(cat foo.md)` once before argv is built and the
+result is passed as a literal argument (no double parse).
+
+New module: `src/cli/util/text-input.ts` exporting `requireText`,
+`resolveOptionalText`, `readAllStdin`, `openEditorForBody`. The
+existing private `readStdin` inside `state edit` was deduped onto the
+shared `readAllStdin` (state edit's auto-detect semantics retained
+for backward compatibility — its callers were never bitten because
+the only writer was a deliberate `cat ... | gojaja state edit ...`).
+
+**Docs.** README gains a "Multi-line message bodies" section; the
+embedded `COLLABORATION_HANDBOOK` adds a hard-don't bullet (handbook
+size budget bumped 12 → 14 KB, one step on the historical ladder);
+`docs/HANDBOOK.md` gains a long-form "Body text safely" section
+documenting all three channels.
+
+**Tests.** New `tests/text-input.test.ts` (18 cases) covering the
+three channels, the never-hang invariant for "absent flag + non-TTY +
+no editor", and the dangerous-input-as-literal protection. All
+existing 426 tests pass without modification (the inline path that
+all existing callers use is byte-identical to `requireString`).
+Total suite: 444/444.
+
 ## [1.0.0] — 2026-05-31
 
 First public npm release. Prior development is documented under

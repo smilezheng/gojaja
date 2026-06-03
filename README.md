@@ -300,6 +300,44 @@ gojaja wait --in 10m                         # idle until attention or 10 min
 gojaja wait --in 1h --for task-assigned      # also broadcasts "I'm idle"
 ```
 
+### Multi-line message bodies
+
+`--message` / `--rationale` / `--description` follow the same channel
+chain as `git commit`. **Do not wrap multi-line content in
+`--message "..."`**: shells run backticks and `$(...)` inside double
+quotes, so `--message "see \`git push\`"` actually runs git push.
+This pattern caused real damage (see
+[postmortem-2026-06-02-shell-eval.md](./postmortem-2026-06-02-shell-eval.md)).
+
+Use one of:
+
+```bash
+# Short literal — single quotes, no expansion
+gojaja report --to Backend --message 'task done'
+
+# Multi-line via stdin — the canonical safe form. The single-quoted
+# 'EOF' delimiter keeps backticks and $ literal in the body.
+gojaja report --to Backend --message - <<'EOF'
+Done. Notes:
+
+```
+git push origin feat/auth
+```
+
+Anything `here` is literal, including $VARS.
+EOF
+
+# Pipe from a file
+cat draft.md | gojaja rfc comment RFC-0001 --rationale -
+
+# Interactive — gojaja opens $EDITOR like git commit
+gojaja report --to Backend
+```
+
+The `-` sentinel (or bare `--message` with no value) is what tells
+gojaja "read stdin". Without it, an absent body flag in a non-TTY
+environment is a USAGE error — never an implicit hang.
+
 When done with a role for the day:
 
 ```bash

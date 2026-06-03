@@ -72,21 +72,51 @@ export async function resolveIdentity(
 
 /**
  * Helper for commands that accept either an authenticated agent (with
- * `GOJAJA_SESSION` set) OR a bare human invocation (no session → `"SYSTEM"`
- * bypass for bootstrap / repair).
+ * `GOJAJA_SESSION` set) OR a bare human invocation that has explicitly
+ * opted into SYSTEM via the `--as-system` flag.
  *
- * Critical semantic: if `GOJAJA_SESSION` is SET, resolution MUST succeed.
- * A stale or invalid token does NOT silently fall through to SYSTEM,
- * which would otherwise bypass every ownership check. The previous
- * pattern (`try { resolveIdentity(...) } catch { return "SYSTEM" }`) was
- * a silent privilege escalation in the face of token expiry.
+ * Resolution:
+ *   1. `GOJAJA_SESSION` set → resolve to the role on that session
+ *      (`resolveIdentity` already refuses stale/invalid tokens; that
+ *      remains a hard auth failure, never a silent fall-through).
+ *   2. `GOJAJA_SESSION` unset AND `allowSystemBypass === true` →
+ *      return `"SYSTEM"`.
+ *   3. `GOJAJA_SESSION` unset AND `allowSystemBypass !== true` →
+ *      USAGE error pointing at the two valid paths.
+ *
+ * Why `--as-system` is required (PR9 SYSTEM-1 hardening): the previous
+ * "no session → SYSTEM" default treated absence of an env var as the
+ * trust boundary. Agent processes can unset their own env vars in one
+ * shell line, which collapses the boundary to nothing. Requiring an
+ * explicit flag forces the caller to spell out the privileged intent,
+ * which (a) raises the cost of accidental escalation by the LLM
+ * generating shell commands, (b) makes SYSTEM use trivially grep-able
+ * in agent history / audit logs, (c) catches "I forgot to claim a
+ * role" cases that would otherwise silently bypass every
+ * ownership gate.
+ *
+ * See `postmortem-2026-06-02-shell-eval.md` §8.10 + the SYSTEM audit
+ * in `docs/HANDBOOK.md` for the full threat model.
  */
 export async function resolveActor(
   store: Store,
+  opts: { allowSystemBypass?: boolean } = {},
 ): Promise<{ actor: RoleId | "SYSTEM" }> {
   if (process.env.GOJAJA_SESSION) {
     const { role } = await resolveIdentity(store, { requireSession: true });
     return { actor: role };
   }
-  return { actor: "SYSTEM" };
+  if (opts.allowSystemBypass) {
+    return { actor: "SYSTEM" };
+  }
+  throw new UsageError(
+    "GOJAJA_SESSION is not set, and --as-system was not passed.\n" +
+      "Either:\n" +
+      "  1. Claim a role first: `gojaja claim <role>` (then export\n" +
+      "     GOJAJA_SESSION) — the normal agent path.\n" +
+      "  2. Run with explicit project-owner intent: re-invoke with\n" +
+      "     `--as-system`. This bypasses ownership gates and records\n" +
+      "     the operation as actor=SYSTEM in the audit log; reserved\n" +
+      "     for the human user performing bootstrap or repair.",
+  );
 }

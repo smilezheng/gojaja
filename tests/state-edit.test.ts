@@ -307,6 +307,7 @@ describe("gojaja state edit CLI — flag-exclusion matrix (PR8f-B)", () => {
       await runState(args({
         file: "state/project_state.md",
         replace: "world",
+        "as-system": true,
         with: "moon",
         root: ctx.projectRoot,
       }));

@@ -42,6 +42,11 @@ const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "no-mark-seen",
   "force-incomplete",
   "no-open",
+  // PR9 SYSTEM-1: explicit project-owner bypass for ownership gates.
+  // Boolean-only so a stray positional after it can't be silently
+  // consumed (e.g. `gojaja report --as-system --to X` must keep "X"
+  // as the --to value, not promote it to --as-system's argument).
+  "as-system",
 ]);
 
 /**

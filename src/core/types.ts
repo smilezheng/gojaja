@@ -57,6 +57,35 @@ export interface Event {
   ref?: string;
   /** Structured payload; shape depends on `type`. */
   payload: Record<string, unknown>;
+  /**
+   * PR9 SYSTEM-2 forensic metadata.
+   *
+   * Populated ONLY when `from === "SYSTEM"`. Role-bearing events
+   * (`from: <RoleId>`) intentionally omit this — the matching
+   * session record under `comms/sessions/<role>.json` already
+   * carries `pid` + `host` and is the authoritative trace.
+   *
+   * For SYSTEM events there is no session record to look up, so
+   * the trace must live inline. Captured at command-handler entry:
+   *   - `pid`: the gojaja process pid.
+   *   - `ppid`: parent process pid (the shell that invoked it).
+   *   - `cwd`: process cwd at the time of the call.
+   *   - `hostname`: `os.hostname()`.
+   *   - `user`: the OS username (`os.userInfo().username` or
+   *     `$USER`); useful when two humans share a workstation.
+   *   - `tty`: best-effort terminal signal (`$SSH_TTY`,
+   *     `"(local)"`, or `"(non-tty)"`); see `gatherSystemMeta`.
+   */
+  actorMeta?: SystemActorMeta;
+}
+
+export interface SystemActorMeta {
+  pid: number;
+  ppid: number;
+  cwd: string;
+  hostname: string;
+  user: string;
+  tty: string;
 }
 
 /** Per-role consumer cursor. */

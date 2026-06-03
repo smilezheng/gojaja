@@ -3,7 +3,9 @@ import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveActor, resolveIdentity } from "../identity";
 import { nextLoopHint } from "../next-hint";
-import type { RfcComment, RoleId } from "../../core/types";
+import { requireText, resolveOptionalText } from "../util/text-input";
+import { gatherSystemMeta } from "../util/system-meta";
+import type { RfcComment, RoleId, SystemActorMeta } from "../../core/types";
 
 function splitList(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -31,11 +33,23 @@ function parseOptions(raw: string | undefined) {
   return out;
 }
 
-async function actorRole(args: ParsedArgs): Promise<{ root: string; actor: RoleId | "SYSTEM" }> {
+async function actorRole(args: ParsedArgs): Promise<{
+  root: string;
+  actor: RoleId | "SYSTEM";
+  actorMeta: SystemActorMeta | undefined;
+}> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
-  const { actor } = await resolveActor(store);
-  return { root, actor };
+  // PR9 SYSTEM-1: explicit --as-system required for bare-human invocations.
+  // Structured RFC verbs (decide, ack, object, pre-decide, ...) already
+  // reject SYSTEM via resolveIdentity({requireSession: true}); this gate
+  // only affects rfc new (creation by the project owner is a legitimate
+  // bootstrap path).
+  const asSystem = boolFlag(args.flags, "as-system");
+  const { actor } = await resolveActor(store, { allowSystemBypass: asSystem });
+  // PR9 SYSTEM-2: forensic metadata for SYSTEM-actor events.
+  const actorMeta = actor === "SYSTEM" ? gatherSystemMeta() : undefined;
+  return { root, actor, actorMeta };
 }
 
 async function runRfcNew(args: ParsedArgs): Promise<number> {
@@ -48,7 +62,12 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
     );
   }
   const title = requireString(args.flags, "title");
-  const description = optionalString(args.flags, "description") ?? "";
+  // --description is optional (soft-warn below if empty). It accepts
+  // inline OR a non-TTY stdin payload (heredoc/pipe) so RFC bodies
+  // containing Markdown fenced blocks don't need to be escaped through
+  // double-quoted shell strings. We never open $EDITOR for an optional
+  // field; absence keeps the existing "empty description" semantics.
+  const description = await resolveOptionalText(args.flags, "description");
   const voters = splitList(optionalString(args.flags, "voters"));
   const deciders = splitList(optionalString(args.flags, "deciders"));
   if (deciders.length === 0) {
@@ -63,11 +82,11 @@ async function runRfcNew(args: ParsedArgs): Promise<number> {
   const relatedTasks = splitList(optionalString(args.flags, "task"));
   const deadline = optionalString(args.flags, "deadline") ?? null;
   const json = boolFlag(args.flags, "json");
-  const { root, actor } = await actorRole(args);
+  const { root, actor, actorMeta } = await actorRole(args);
   const store = await openStoreOrThrow(root);
   const proposal = await store.createRfc({
     slug, title, voters, deciders, options, deadline,
-    createdBy: actor, description, relatedTasks,
+    createdBy: actor, description, relatedTasks, actorMeta,
   });
   if (json) {
     process.stdout.write(JSON.stringify({ status: "created", proposal }) + "\n");
@@ -107,22 +126,28 @@ async function runRfcComment(args: ParsedArgs): Promise<number> {
     );
   }
   const preferred = optionalString(args.flags, "option") ?? "";
-  const rationale = requireString(args.flags, "rationale");
+  const rationale = await requireText(args.flags, "rationale");
   const replyTo = optionalString(args.flags, "reply-to") ?? null;
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
   // Plain discussion comments accept SYSTEM (a human running the CLI
-  // without GOJAJA_SESSION) symmetrically with `rfc new`. Structured
-  // kinds (pre-decide / ack / object) still require a session — those
-  // commands continue to use `resolveIdentity({ requireSession: true })`.
-  const { actor } = await resolveActor(store);
+  // can leave context on an RFC they opened) symmetrically with
+  // `rfc new`, but per SYSTEM-1 this now requires explicit
+  // `--as-system`. Structured kinds (pre-decide / ack / object)
+  // continue to require a real session via
+  // `resolveIdentity({ requireSession: true })`.
+  const asSystem = boolFlag(args.flags, "as-system");
+  const { actor } = await resolveActor(store, { allowSystemBypass: asSystem });
+  // PR9 SYSTEM-2: stamp forensic metadata for SYSTEM-actor comments.
+  const actorMeta = actor === "SYSTEM" ? gatherSystemMeta() : undefined;
   const comment = await store.commentRfc({
     rfcId,
     role: actor,
     preferred,
     rationale,
     replyTo,
+    actorMeta,
   });
   if (json) {
     process.stdout.write(JSON.stringify({ status: "commented", comment }) + "\n");
@@ -146,7 +171,7 @@ async function runRfcAddOption(args: ParsedArgs): Promise<number> {
     );
   }
   const optionRaw = requireString(args.flags, "option");
-  const rationale = requireString(args.flags, "rationale");
+  const rationale = await requireText(args.flags, "rationale");
   const parsed = parseOptions(optionRaw);
   if (parsed.length !== 1) {
     throw new UsageError("--option must be a single <id>:<summary> entry.");
@@ -181,7 +206,7 @@ async function runRfcPreDecide(args: ParsedArgs): Promise<number> {
     );
   }
   const chosenOption = requireString(args.flags, "option");
-  const rationale = requireString(args.flags, "rationale");
+  const rationale = await requireText(args.flags, "rationale");
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
@@ -245,7 +270,7 @@ async function runRfcObject(args: ParsedArgs): Promise<number> {
       "Usage: gojaja rfc object <rfc-id> --rationale <text> [--option <preferred-opt>]",
     );
   }
-  const rationale = requireString(args.flags, "rationale");
+  const rationale = await requireText(args.flags, "rationale");
   const preferredOption = optionalString(args.flags, "option") ?? "";
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
@@ -272,7 +297,7 @@ async function runRfcWithdrawPreDecision(args: ParsedArgs): Promise<number> {
       "Usage: gojaja rfc withdraw-pre-decision <rfc-id> --rationale <text>",
     );
   }
-  const rationale = requireString(args.flags, "rationale");
+  const rationale = await requireText(args.flags, "rationale");
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
@@ -304,7 +329,7 @@ async function runRfcDecide(args: ParsedArgs): Promise<number> {
   // invariant against the proposal; we just forward what the caller
   // gave (or null) and let it return the right error message.
   const chosenOption = optionalString(args.flags, "option") ?? null;
-  const rationale = requireString(args.flags, "rationale");
+  const rationale = await requireText(args.flags, "rationale");
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
@@ -328,7 +353,7 @@ async function runRfcReject(args: ParsedArgs): Promise<number> {
   if (!rfcId) {
     throw new UsageError("Usage: gojaja rfc reject <rfc-id> --rationale <text>");
   }
-  const rationale = requireString(args.flags, "rationale");
+  const rationale = await requireText(args.flags, "rationale");
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
@@ -352,7 +377,7 @@ async function runRfcRevise(args: ParsedArgs): Promise<number> {
       "Usage: gojaja rfc revise <rfc-id> --rationale <text>",
     );
   }
-  const rationale = requireString(args.flags, "rationale");
+  const rationale = await requireText(args.flags, "rationale");
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
@@ -380,7 +405,7 @@ async function runRfcEdit(args: ParsedArgs): Promise<number> {
         "[--options A:summary,B:summary] [--deadline <iso>]",
     );
   }
-  const rationale = requireString(args.flags, "rationale");
+  const rationale = await requireText(args.flags, "rationale");
   const title = optionalString(args.flags, "title");
   const description = optionalString(args.flags, "description");
   const optionsRaw = optionalString(args.flags, "options");

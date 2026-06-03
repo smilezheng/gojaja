@@ -1,10 +1,12 @@
-import { boolFlag, optionalString, requireString, type ParsedArgs } from "../argv";
+import { boolFlag, optionalString, type ParsedArgs } from "../argv";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveIdentity } from "../identity";
 import { nextLoopHint } from "../next-hint";
+import { requireText } from "../util/text-input";
 
 export async function runWorklog(args: ParsedArgs): Promise<number> {
-  const message = requireString(args.flags, "message");
+  // --message: inline, stdin, or $EDITOR — see requireText.
+  const message = await requireText(args.flags, "message");
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);

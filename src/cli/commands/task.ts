@@ -11,10 +11,12 @@ import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveActor } from "../identity";
 import { nextLoopHint } from "../next-hint";
+import { gatherSystemMeta } from "../util/system-meta";
 import {
   TASK_STATUSES,
   type Deliverable,
   type RoleId,
+  type SystemActorMeta,
   type Task,
   type TaskAsset,
   type TaskStatus,
@@ -100,16 +102,26 @@ function parseReviewers(rawArgs: string[] | undefined): string[] {
     .filter((r) => r.length > 0);
 }
 
-async function actorRole(args: ParsedArgs): Promise<{ root: string; actor: RoleId | "SYSTEM" }> {
+async function actorRole(args: ParsedArgs): Promise<{
+  root: string;
+  actor: RoleId | "SYSTEM";
+  actorMeta: SystemActorMeta | undefined;
+}> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
-  // Tasks may be created by an agent (with GOJAJA_SESSION) or by the human
-  // running CLI manually before any role has claimed a session. Both
-  // are valid; resolveActor distinguishes "no session at all" (SYSTEM
-  // bypass) from "stale/invalid GOJAJA_SESSION" (propagated as USAGE error
-  // — must NOT silently fall through to SYSTEM).
-  const { actor } = await resolveActor(store);
-  return { root, actor };
+  // Tasks may be created by an agent (with GOJAJA_SESSION) or by a
+  // human running the CLI manually. Bare-human invocations now must
+  // pass `--as-system` to bypass ownership of `state/task_board.yaml`
+  // (PR9 SYSTEM-1) — a missing session by itself is no longer the
+  // SYSTEM signal. `task assign --as-system` is in particular the
+  // intended escape hatch for the project owner to reassign tasks
+  // during bootstrap; agents should claim a role with task-board
+  // ownership instead.
+  const asSystem = boolFlag(args.flags, "as-system");
+  const { actor } = await resolveActor(store, { allowSystemBypass: asSystem });
+  // PR9 SYSTEM-2: collect forensic metadata for SYSTEM-actor events.
+  const actorMeta = actor === "SYSTEM" ? gatherSystemMeta() : undefined;
+  return { root, actor, actorMeta };
 }
 
 async function runTaskNew(args: ParsedArgs): Promise<number> {
@@ -124,7 +136,7 @@ async function runTaskNew(args: ParsedArgs): Promise<number> {
   const tags = parseTags(args.rawArgs);
   const reviewers = parseReviewers(args.rawArgs);
   const json = boolFlag(args.flags, "json");
-  const { root, actor } = await actorRole(args);
+  const { root, actor, actorMeta } = await actorRole(args);
   const store = await openStoreOrThrow(root);
   const task = await store.createTask({
     title,
@@ -138,6 +150,7 @@ async function runTaskNew(args: ParsedArgs): Promise<number> {
     deliverables,
     tags,
     reviewers,
+    actorMeta,
   });
   if (json) {
     process.stdout.write(JSON.stringify({ status: "created", task }) + "\n");
@@ -160,9 +173,9 @@ async function runTaskAssign(args: ParsedArgs): Promise<number> {
     throw new UsageError("Usage: gojaja task assign <task-id> --to <role>");
   }
   const json = boolFlag(args.flags, "json");
-  const { root, actor } = await actorRole(args);
+  const { root, actor, actorMeta } = await actorRole(args);
   const store = await openStoreOrThrow(root);
-  const task = await store.assignTask({ taskId, newOwner, actor });
+  const task = await store.assignTask({ taskId, newOwner, actor, actorMeta });
   if (json) {
     process.stdout.write(JSON.stringify({ status: "assigned", task }) + "\n");
   } else {
@@ -190,13 +203,14 @@ async function runTaskStatus(args: ParsedArgs): Promise<number> {
   const newStatus = newStatusRaw as TaskStatus;
   const json = boolFlag(args.flags, "json");
   const forceIncomplete = boolFlag(args.flags, "force-incomplete");
-  const { root, actor } = await actorRole(args);
+  const { root, actor, actorMeta } = await actorRole(args);
   const store = await openStoreOrThrow(root);
   const task = await store.setTaskStatus({
     taskId,
     newStatus,
     actor,
     forceIncomplete,
+    actorMeta,
   });
   if (json) {
     process.stdout.write(JSON.stringify({ status: "updated", task }) + "\n");

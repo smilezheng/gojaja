@@ -123,9 +123,25 @@ describe("resolveActor — strict GOJAJA_SESSION semantics", () => {
     await fsp.rm(ctx.root, { recursive: true, force: true });
   });
 
-  it("returns SYSTEM when GOJAJA_SESSION is unset", async () => {
+  it("throws USAGE when GOJAJA_SESSION is unset and allowSystemBypass is false (PR9 SYSTEM-1)", async () => {
+    // SYSTEM-1: missing session is no longer an implicit SYSTEM signal.
+    // The caller must opt in to the bypass explicitly. This closes the
+    // hole where any agent process could `unset GOJAJA_SESSION` to
+    // promote itself to SYSTEM authority.
     const { resolveActor } = await import("../src/cli/identity");
-    const { actor } = await resolveActor(ctx.store);
+    await expect(resolveActor(ctx.store)).rejects.toMatchObject({
+      code: "USAGE",
+    });
+    await expect(
+      resolveActor(ctx.store, { allowSystemBypass: false }),
+    ).rejects.toMatchObject({ code: "USAGE" });
+  });
+
+  it("returns SYSTEM when GOJAJA_SESSION is unset and allowSystemBypass is true", async () => {
+    const { resolveActor } = await import("../src/cli/identity");
+    const { actor } = await resolveActor(ctx.store, {
+      allowSystemBypass: true,
+    });
     expect(actor).toBe("SYSTEM");
   });
 
@@ -137,14 +153,34 @@ describe("resolveActor — strict GOJAJA_SESSION semantics", () => {
     expect(actor).toBe("PM");
   });
 
+  it("returns the role even with allowSystemBypass=true when a session is present", async () => {
+    // A live session always wins. `--as-system` is ignored when
+    // GOJAJA_SESSION is set, so a careless agent that includes
+    // `--as-system` "just in case" does NOT escalate past their
+    // own role's ownership gate.
+    const { resolveActor } = await import("../src/cli/identity");
+    const s = await ctx.store.claimSession("PM", 60);
+    process.env.GOJAJA_SESSION = s.sessionId;
+    const { actor } = await resolveActor(ctx.store, {
+      allowSystemBypass: true,
+    });
+    expect(actor).toBe("PM");
+  });
+
   it("regression: bogus GOJAJA_SESSION must NOT silently downgrade to SYSTEM", async () => {
     // The previous pattern was `try { resolveIdentity(...) } catch
     // { actor = "SYSTEM" }`, which gave a stale token full ownership
     // bypass. resolveActor must propagate the USAGE error instead.
+    // SYSTEM-1 reinforces this: even with allowSystemBypass=true, a
+    // stale token still throws (the bypass only kicks in when the
+    // env var is UNSET, not when it's set-but-bad).
     const { resolveActor } = await import("../src/cli/identity");
     process.env.GOJAJA_SESSION = "01HXBOGUSXBOGUSXBOGUSXBOG1";
     await expect(resolveActor(ctx.store)).rejects.toMatchObject({
       code: "USAGE",
     });
+    await expect(
+      resolveActor(ctx.store, { allowSystemBypass: true }),
+    ).rejects.toMatchObject({ code: "USAGE" });
   });
 });

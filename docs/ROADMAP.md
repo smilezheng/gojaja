@@ -389,6 +389,81 @@ edges (cursor races, TSV corruption, global lock, slug traversal).
 
 ### Planned, in priority order
 
+- **PR8u — safe multi-line input for body flags (done).**
+  - `--message` / `--rationale` / `--description` follow a
+    git-commit-style channel chain: inline string → explicit stdin
+    (`--flag -` or bare `--flag`, slurps `process.stdin` to EOF) →
+    interactive `$EDITOR` when stdin is a TTY. stdin is opt-in, not
+    auto-detected, so CI / test runners with unclosed non-TTY stdin
+    never deadlock.
+  - Eliminates the postmortem-2026-06-02 class of shell-eval bug:
+    backticks and `$(...)` inside `--message "..."` no longer reach
+    a context where the shell evaluates them, because the safe path
+    is a quoted heredoc whose body is shell-literal.
+  - Converted 11 call sites (`report`, `worklog`, 9 `rfc --rationale`
+    forms, `rfc new --description`). `state edit --content` already
+    had stdin auto-detect; refactored onto the shared helper.
+  - New module `src/cli/util/text-input.ts` (`requireText`,
+    `resolveOptionalText`, `readAllStdin`, `openEditorForBody`).
+  - Handbook gains a hard-don't bullet (size budget 12 → 14 KB,
+    one step on the historical ladder); README + `docs/HANDBOOK.md`
+    gain long-form "Body text safely" guidance.
+  - 18 new vitest cases (`tests/text-input.test.ts`); 426 → 444.
+
+- **PR9 — central root for runtime state (RFC-0001).**
+  - See [docs/RFC-0001-central-root.md](./RFC-0001-central-root.md)
+    for the full design.
+  - Splits the on-disk layout into a small git-tracked
+    `<project>/.gojaja/` (project id, config, role briefs,
+    `project_state.md` — ~4 files) and a per-user / per-machine
+    `~/.gojaja/projects/<id>/` containing everything else
+    (`task_board.yaml`, the event stream, sessions, RFC threads,
+    worklog, locks). The split-line rule is "does a fresh clone need
+    this BEFORE the team runs?" — yes → user tree, no → central.
+  - Structural fix for postmortem §8.2 / §8.3 / §8.7 / §8.10b — five
+    distinct corruption modes all caused by mixing mutable
+    coordination state with immutable version control. Mitigation by
+    rule ("never `git add -A` when state is dirty") proved
+    insufficient in practice (§8.10b happened 3× in one sprint).
+  - Multi-worktree gets fixed for free: N worktrees of the same repo
+    share one central tree via the in-git `project.json` ULID, so
+    `git checkout` is no longer a coordination-disrupting global
+    action. Postmortem §8.3 obviated.
+  - Multi-machine sync is explicitly out of scope; the historical
+    "git-synced task board" promise is revoked. `HttpStore` (v2.x
+    deferred) remains the proper solution; `gojaja backup / restore`
+    is the opportunistic short-term answer.
+  - Sub-PRs (sequencing in the RFC):
+    - **PR9.0 — RFC freeze.** Pure docs. *(done)*
+    - **PR9.1 — split-mode routing.** *(done)* `src/core/path-routing.ts`
+      classifier (`classifyPath(rel) → "user" | "central"`) closes
+      the "user" set (`VERSION`, `project.json`, `config.yaml`,
+      `.gitignore`, `state/project_state.md`, `roles/**`,
+      `protocol/**`) and defaults everything else to central.
+      `LocalFsStore` accepts `centralRoot` in
+      `LocalFsStoreOptions`; when set, `abs(rel)` consults the
+      classifier and routes per-write to either tree. Omitted
+      `centralRoot` keeps single-root behaviour byte-identical to
+      v2 (both branches collapse to the same path). 32 new vitest
+      cases (17 routing + 15 live-write integration); 444 → 476.
+    - **PR9.2 — `gojaja init` writes the new shape;**
+      `SCHEMA_VERSION → 3.0.0`.
+    - **PR9.3 — `gojaja migrate`** one-shot v2 → v3 walker;
+      idempotent, preserves event ULIDs.
+    - **PR9.4 — `gojaja project show / list / link / unlink /
+      rename`** subcommand group.
+    - **PR9.5 — `gojaja backup / restore`** + `gojaja history
+      --since <ulid>` if not earlier.
+    - **PR9.6 — `gojaja reset`** updated for two-tree shape with
+      `~/.gojaja/trash/` soft-delete (TTL 7d).
+    - **PR9.7 — docs sweep**: SCHEMA / DESIGN / AGENTS / README /
+      HANDBOOK / prompts for v3 layout; migration cookbook in
+      CHANGELOG.
+  - v3.0.0 cuts after PR9.7 green on CI + a soak run. The previously
+    planned PR8w "worktree-aware mode" is descoped — worktree
+    isolation falls out of the central root automatically and no
+    longer needs CLI surface.
+
 - **PR8k — org-hierarchy ergonomics (planned).**
   - Reverse `directReports` computed field on `roleReminder` so a
     manager role knows "who reports to me" without scanning

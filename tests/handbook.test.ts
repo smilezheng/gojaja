@@ -122,15 +122,17 @@ describe("COLLABORATION_HANDBOOK", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("stays within a tight size budget (<12 KB of UTF-8)", () => {
+  it("stays within a tight size budget (<14 KB of UTF-8)", () => {
     // The handbook ships into the host's persistent prompt area —
     // CLAUDE.md insertion in particular wants ~200 lines total
-    // (Anthropic's guidance), so the handbook gets a hard <12 KB cap
-    // here, well under the historical 8/10/12/14/16/18/20 KB ladder.
-    // PR8q compressed the body by ~60% via table layout, removal of
-    // PR-version markers, and dropping rationale paragraphs in favour
-    // of the long-form policy in docs/HANDBOOK.md.
-    expect(Buffer.byteLength(COLLABORATION_HANDBOOK, "utf8")).toBeLessThan(12 * 1024);
+    // (Anthropic's guidance), so the handbook gets a hard cap here.
+    // Historical ladder: 8/10/12/14/16/18/20 KB; this step climbs one
+    // rung (12→14) because PR8u landed the "Body text safely"
+    // shell-eval guidance — a load-bearing rule whose absence has
+    // produced concrete prod damage (see postmortem-2026-06-02-
+    // shell-eval.md). PR8q's table compression of report/worklog/RFC
+    // remains in place; no rationale paragraphs were re-added.
+    expect(Buffer.byteLength(COLLABORATION_HANDBOOK, "utf8")).toBeLessThan(14 * 1024);
   });
 });
 

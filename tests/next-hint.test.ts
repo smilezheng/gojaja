@@ -187,6 +187,10 @@ describe("nextLoopHint", () => {
           title: "seed task",
           owner: "Backend",
           root: ctx.root,
+          // SYSTEM-1: explicit bypass now required for bare-human
+          // (no GOJAJA_SESSION) invocations. The test still asserts
+          // the no-hint behaviour for SYSTEM actors.
+          "as-system": true,
         }),
       );
       expect(cap.stdout).toContain("Created T-");
@@ -270,6 +274,8 @@ describe("nextLoopHint", () => {
         args(["comment", proposal.id], {
           rationale: "from the user",
           root: ctx.root,
+          // SYSTEM-1: bare-human invocation must opt in.
+          "as-system": true,
         }),
       );
       expect(cap.stdout).toContain("Recorded comment");

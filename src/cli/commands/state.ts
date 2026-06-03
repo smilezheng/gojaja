@@ -3,6 +3,7 @@ import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveActor } from "../identity";
 import { nextLoopHint } from "../next-hint";
+import { readAllStdin } from "../util/text-input";
 
 /**
  * `gojaja state <subcommand>` — operations on `state/*` files.
@@ -26,19 +27,6 @@ export async function runState(args: ParsedArgs): Promise<number> {
           "  gojaja state edit --file state/<path> [--content <text> | --append <text> | --replace <old> --with <new> [--batch]]",
       );
   }
-}
-
-async function readStdin(): Promise<string> {
-  if (process.stdin.isTTY) return "";
-  return new Promise((resolve, reject) => {
-    let buf = "";
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => {
-      buf += chunk;
-    });
-    process.stdin.on("end", () => resolve(buf));
-    process.stdin.on("error", reject);
-  });
 }
 
 /**
@@ -67,11 +55,14 @@ async function runStateEdit(args: ParsedArgs): Promise<number> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
 
-  // Identity: agent invocations (GOJAJA_SESSION set) get their gated role;
-  // bare human invocations bypass via "SYSTEM" (see Store.requireOwnership).
-  // A stale/invalid GOJAJA_SESSION must NOT silently downgrade to SYSTEM —
-  // that would be privilege escalation against the ownership gate.
-  const { actor } = await resolveActor(store);
+  // Identity: agent invocations (GOJAJA_SESSION set) get their gated
+  // role; bare human invocations bypass via SYSTEM only when they
+  // pass `--as-system` (PR9 SYSTEM-1). `state edit` is the highest-
+  // privilege gate-bypass surface (any path under `state/` becomes
+  // writable), so making SYSTEM explicit here was the most important
+  // single hardening step.
+  const asSystem = boolFlag(args.flags, "as-system");
+  const { actor } = await resolveActor(store, { allowSystemBypass: asSystem });
 
   // Decide which mode the caller asked for. We look at the *presence*
   // of each flag rather than its value so an empty string still counts
@@ -129,7 +120,7 @@ async function runStateEdit(args: ParsedArgs): Promise<number> {
   } else {
     mode = "overwrite";
     let content = optionalString(args.flags, "content");
-    if (content === undefined) content = await readStdin();
+    if (content === undefined) content = await readAllStdin();
     if (typeof content !== "string") content = "";
     result = await store.writeStateFile({
       actor,

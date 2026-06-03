@@ -131,6 +131,29 @@ Messaging (agent, requires GOJAJA_SESSION):
       Broadcast progress note. Use for visible work that did not
       already emit a structured event (doc edited, migration ran).
 
+  Multi-line bodies safely: any --message / --rationale /
+  --description flag accepts inline OR an explicit stdin channel.
+  Shells expand backticks and $(...) inside double quotes — so
+  --message "see \`git push\`" actually runs git push. Use one of:
+      --message 'short literal'       # single quotes; no expansion
+      --message - <<'EOF' ... EOF     # stdin; quoted EOF keeps literal
+      cat draft.md | gojaja ... --message -
+      gojaja report --to X            # interactive: opens $EDITOR
+  The '-' sentinel (or bare --message) tells gojaja to read stdin.
+  See: postmortem-2026-06-02-shell-eval.md.
+
+  --as-system flag (project owner only):
+      A bare 'gojaja report' / 'task new' / 'rfc new' / 'rfc comment'
+      / 'state edit' invocation with no GOJAJA_SESSION refuses by
+      default (PR9 SYSTEM-1). The historic "no session -> SYSTEM"
+      implicit bypass was an unintended escalation path: any agent
+      could 'unset GOJAJA_SESSION' to gain SYSTEM authority. To act
+      as SYSTEM (the project-owner channel into the team), pass
+      --as-system explicitly. Audits will record actor=SYSTEM and
+      pid / cwd / hostname (SYSTEM-2). Agents must claim a role
+      first and inherit ownership from their role config; --as-system
+      is reserved for the human user performing bootstrap or repair.
+
 Task board (creators of new tasks need state/task_board.yaml write
 access; status transitions follow per-task permissions below):
   task new --title <text> [--owner <role>] [--priority P0|P1|P2|P3]

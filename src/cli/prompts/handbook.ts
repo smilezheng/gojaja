@@ -282,4 +282,8 @@ waiver" — only your worklog can.
   ask the user. NOT an invitation to use \`--force\`.
 - Don't self-assign by calling \`gojaja task assign <id> --to <yourself>\`.
   Tasks are push-assigned by the task-board owner or the user.
+- Don't put multi-line content in \`--message "..."\` /
+  \`--rationale "..."\`. Shells expand backticks and \`$\` inside double
+  quotes; use \`--message -\` + a \`<<'EOF'\` heredoc, or omit the flag
+  in a TTY for \`\$EDITOR\`.
 `;

@@ -13,6 +13,7 @@ import type {
   RoleConfig,
   RoleId,
   SessionInfo,
+  SystemActorMeta,
   Task,
   TaskAsset,
   TaskBoard,
@@ -154,6 +155,13 @@ export interface Store {
     to: RoleId;
     ref?: string;
     message: string;
+    /**
+     * PR9 SYSTEM-2 forensic metadata. Required (in practice) when
+     * `from === "SYSTEM"`; ignored otherwise (role-bearing events
+     * trace via the session record). CLI handlers populate this from
+     * `gatherSystemMeta()` whenever they resolve actor=SYSTEM.
+     */
+    actorMeta?: SystemActorMeta;
   }): Promise<Event>;
 
   /**
@@ -257,6 +265,8 @@ export interface Store {
   deleteRole(input: {
     id: RoleId;
     actor: RoleId | "SYSTEM";
+    /** PR9 SYSTEM-2 forensic metadata for SYSTEM-actor events. */
+    actorMeta?: SystemActorMeta;
   }): Promise<{ role: RoleId; removedSessions: number }>;
 
   // ---- event projection ---------------------------------------------------
@@ -334,6 +344,8 @@ export interface Store {
     deliverables?: Deliverable[];
     tags?: string[];
     // reviewers?: RoleId[];
+    /** PR9 SYSTEM-2 forensic metadata for SYSTEM-actor events. */
+    actorMeta?: SystemActorMeta;
   }): Promise<Task>;
 
   /**
@@ -346,6 +358,8 @@ export interface Store {
     taskId: string;
     newOwner: RoleId;
     actor: RoleId | "SYSTEM";
+    /** PR9 SYSTEM-2 forensic metadata for SYSTEM-actor events. */
+    actorMeta?: SystemActorMeta;
   }): Promise<Task>;
 
   /**
@@ -365,6 +379,8 @@ export interface Store {
     actor: RoleId | "SYSTEM";
     /** bypass file-deliverable gate; emits an audit event. */
     forceIncomplete?: boolean;
+    /** PR9 SYSTEM-2 forensic metadata for SYSTEM-actor events. */
+    actorMeta?: SystemActorMeta;
   }): Promise<Task>;
 
   /** Read a single task; throws UsageError if id unknown. */
@@ -416,6 +432,8 @@ export interface Store {
     description?: string;
     /** linked task ids. Validated against task board. */
     relatedTasks?: string[];
+    /** PR9 SYSTEM-2 forensic metadata for SYSTEM-actor events. */
+    actorMeta?: SystemActorMeta;
   }): Promise<RfcProposal>;
 
   /**
@@ -464,6 +482,8 @@ export interface Store {
     rationale: string;
     replyTo?: string | null;
     kind?: RfcCommentKind;
+    /** PR9 SYSTEM-2 forensic metadata for SYSTEM-actor events. */
+    actorMeta?: SystemActorMeta;
   }): Promise<RfcComment>;
 
   /**
