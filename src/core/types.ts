@@ -88,6 +88,30 @@ export interface SystemActorMeta {
   tty: string;
 }
 
+/**
+ * Contents of `<project>/.gojaja/project.json` (PR9.2).
+ *
+ * The single file that ties a project on disk to its central-root
+ * tree under `~/.gojaja/projects/<id>/`. Git-tracked, so every clone
+ * / worktree of the same repository inherits the same `id` and
+ * therefore resolves to the same central tree (RFC-0001 §2.3).
+ *
+ *   - `id`: ULID minted once at `gojaja init` time; immutable
+ *     (rename a project's name; never its id).
+ *   - `name`: human-readable label, typically the project directory
+ *     basename at init time. Used by `gojaja project list` /
+ *     `gojaja watch`'s dashboard; not load-bearing.
+ *   - `schema`: on-disk schema version. v3.x projects carry
+ *     `"3.0.0"` (or `"3.x.y-<tag>"` for pre-releases). v2 projects
+ *     do not have this file; the `VERSION` text file is their
+ *     marker.
+ */
+export interface ProjectJson {
+  id: string;
+  name: string;
+  schema: string;
+}
+
 /** Per-role consumer cursor. */
 export interface CursorState {
   role: RoleId;

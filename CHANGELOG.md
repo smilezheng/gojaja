@@ -8,6 +8,71 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v1.x; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### PR9.2 — `gojaja init` writes the v3 two-tree layout (breaking)
+
+First user-visible bite of RFC-0001 (central root for runtime
+state). New projects initialised by `gojaja@3.0.0+` get the split
+layout; v2 projects continue to open in single-root mode through
+the deprecation window (PR9.3 ships the migrator).
+
+**What changed.** Every fresh `gojaja init`:
+
+  1. Mints a fresh ULID as the project id.
+  2. Computes `centralRoot = $GOJAJA_HOME/projects/<ULID>/`
+     (defaults to `~/.gojaja/projects/<ULID>/`).
+  3. Constructs a split-mode `LocalFsStore` (`userRoot` + central),
+     PR9.1's plumbing wired up to the CLI for the first time.
+  4. `store.initialise("3.0.0")` populates both trees per the
+     classifier (PR9.1):
+       - **User tree** (`<project>/.gojaja/`, git-tracked):
+         `VERSION`, `project.json`, `config.yaml`,
+         `state/project_state.md`, `roles/`, `.gitignore`.
+       - **Central tree** (`~/.gojaja/projects/<ULID>/`,
+         per-machine, never in git): `state/task_board.yaml`,
+         `comms/{events,sessions,cursors,pending,heartbeats}/`,
+         `rfcs/`, `worklog/`, `locks/`.
+  5. Writes the `project.json` marker
+     `{ id, name, schema: "3.0.0" }` to the user tree.
+
+**Resolution on subsequent invocations.** `openStoreOrThrow` reads
+`<project>/.gojaja/project.json` to recover the ULID, derives the
+central root via the same `centralRootForProject(id)` function init
+used, and constructs the split-mode store. v2 projects (no
+project.json) fall through to single-root mode without warning.
+
+**`GOJAJA_HOME` env var.** New global override for the per-machine
+root. Default: `~/.gojaja/`. Tests use this to isolate from the
+developer's real home dir; production users can set it to redirect
+state to a different volume (e.g. an external SSD).
+
+**Surface additions.**
+
+  - `src/cli/central-root.ts` (new) — `gojajaHome()`,
+    `centralRootForProject(id)`, `projectJsonPath(userRoot)`,
+    `readProjectJson(userRoot)`, `writeProjectJson(userRoot, data,
+    {allowOverwrite?})`, `resolveCentralRoot(userRoot)`.
+  - `src/core/types.ts` — new `ProjectJson` interface
+    (`{ id, name, schema }`).
+  - `SCHEMA_VERSION` bumped from `"2.0.0-manifest-filter"` to
+    `"3.0.0"`.
+  - `performInit` return type adds `projectId` + `centralRoot`.
+    `runInit` JSON output adds the same fields.
+
+**Tests.** New `tests/init-v3.test.ts` (7 cases) exercises:
+ULID + schema written into project.json, unique ULID per init,
+user-tree contains only the contracts, central-tree contains the
+runtime dirs (and nothing else), idempotency on re-init, and
+end-to-end `openStoreOrThrow` round-trip (a task created via the
+re-opened store hits the central `task_board.yaml`, a role
+created hits the user `roles/`). Plus a backward-compat test that
+hand-builds a v2 layer and verifies single-root mode keeps
+working. All 507 pre-existing tests pass without modification —
+they construct `LocalFsStore` directly without a `centralRoot`,
+which keeps single-root v2 behaviour. 507 → 514.
+
+**Not in this PR.** `gojaja migrate` (v2 → v3 walker) is PR9.3 —
+v2 users get a deprecation pointer there until the migrator ships.
+
 ### PR9 SYSTEM-3 — `role create` / `role delete` ownership gate (breaking)
 
 Closes the last of the three SYSTEM-class issues identified by the

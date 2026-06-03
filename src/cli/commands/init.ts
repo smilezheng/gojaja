@@ -5,6 +5,12 @@ import { LocalFsStore } from "../../core/local-fs-store";
 import { LAYER_DIRNAME, SCHEMA_VERSION } from "../runtime";
 import type { ParsedArgs } from "../argv";
 import { boolFlag, optionalString } from "../argv";
+import { freshId } from "../../core/ids";
+import {
+  centralRootForProject,
+  writeProjectJson,
+} from "../central-root";
+import type { ProjectJson } from "../../core/types";
 
 export type GitState =
   | { kind: "clean" }
@@ -36,6 +42,9 @@ export interface InitInspection {
 
 export async function inspectInitState(root: string): Promise<InitInspection> {
   const layerDir = path.join(root, LAYER_DIRNAME);
+  // Both v2 and v3 projects carry VERSION under the user tree, so
+  // a single-root probe is the right check for "already
+  // initialised". project.json (the v3 marker) is supplemental.
   const store = new LocalFsStore(layerDir);
   const alreadyInitialised = await store.isInitialised();
   const git = alreadyInitialised
@@ -70,12 +79,29 @@ export class AlreadyInitialisedError extends Error {
   }
 }
 
+export interface PerformInitResult {
+  layerDir: string;
+  version: string;
+  /** PR9.2: the v3 project ULID minted at init time. */
+  projectId: string;
+  /** PR9.2: the per-machine central root assigned to this project. */
+  centralRoot: string;
+}
+
 export async function performInit(
   root: string,
   opts: { force?: boolean } = {},
-): Promise<{ layerDir: string; version: string }> {
+): Promise<PerformInitResult> {
   const layerDir = path.join(root, LAYER_DIRNAME);
-  const store = new LocalFsStore(layerDir);
+  // PR9.2: every fresh init now mints a v3 layout. ULID is generated
+  // here, used to derive the central tree path, and recorded in the
+  // project.json marker under the user tree (the only piece of the
+  // v3 layout that travels with git). Subsequent gojaja invocations
+  // re-derive `centralRoot` by reading project.json — see
+  // `openStoreOrThrow`.
+  const projectId = freshId();
+  const centralRoot = centralRootForProject(projectId);
+  const store = new LocalFsStore(layerDir, { centralRoot });
   if (await store.isInitialised()) {
     throw new AlreadyInitialisedError(layerDir);
   }
@@ -86,7 +112,21 @@ export async function performInit(
     }
   }
   await store.initialise(SCHEMA_VERSION);
-  return { layerDir, version: SCHEMA_VERSION };
+  // project.json must land AFTER store.initialise — initialise
+  // creates the user tree on disk, so writing project.json there is
+  // safe at this point.
+  const project: ProjectJson = {
+    id: projectId,
+    name: path.basename(root),
+    schema: SCHEMA_VERSION,
+  };
+  await writeProjectJson(layerDir, project);
+  return {
+    layerDir,
+    version: SCHEMA_VERSION,
+    projectId,
+    centralRoot,
+  };
 }
 
 /**
@@ -218,10 +258,23 @@ export async function runInit(args: ParsedArgs): Promise<number> {
         status: "initialised",
         root: result.layerDir,
         version: result.version,
+        projectId: result.projectId,
+        centralRoot: result.centralRoot,
       }) + "\n",
     );
   } else {
-    process.stdout.write(`Initialised gojaja layer (v${result.version}) at ${result.layerDir}\n`);
+    process.stdout.write(
+      `Initialised gojaja layer (v${result.version}) at ${result.layerDir}\n` +
+        `  project id:    ${result.projectId}\n` +
+        `  central root:  ${result.centralRoot}\n` +
+        `\n` +
+        `<project>/.gojaja/ (git-tracked) carries:\n` +
+        `  VERSION, project.json, config.yaml, roles/, state/project_state.md\n` +
+        `Runtime state (task board, events, sessions, RFCs, worklog, locks)\n` +
+        `lives in the central root above — never committed. Cloning this\n` +
+        `project on another machine? Each clone gets its own central tree\n` +
+        `(see RFC-0001).\n`,
+    );
   }
   return 0;
 }

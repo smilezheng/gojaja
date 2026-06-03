@@ -2,12 +2,28 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { LocalFsStore } from "../core/local-fs-store";
 import { NotInitializedError } from "../core/errors";
+import {
+  centralRootForProject,
+  readProjectJson,
+} from "./central-root";
 
 const PACKAGE_VERSION = require("../../package.json").version as string;
 export const CLI_VERSION: string = PACKAGE_VERSION;
 
-/** The on-disk schema version embedded in the .gojaja/VERSION file. */
-export const SCHEMA_VERSION = "2.0.0-manifest-filter";
+/**
+ * The on-disk schema version stamped into `.gojaja/VERSION` by
+ * `gojaja init`.
+ *
+ * v3.0.0 splits the layer into a small git-tracked
+ * `<project>/.gojaja/` tree (carrying VERSION + project.json +
+ * config.yaml + roles/<id>.md + state/project_state.md) and a
+ * per-user / per-machine central tree at
+ * `~/.gojaja/projects/<project-id>/` carrying everything else (the
+ * task board, event stream, sessions, RFCs, worklog, locks). See
+ * RFC-0001 for the design and `gojaja migrate` for the v2 → v3
+ * walker.
+ */
+export const SCHEMA_VERSION = "3.0.0";
 
 export const LAYER_DIRNAME = ".gojaja";
 
@@ -46,13 +62,26 @@ export function layerRoot(projectRoot: string): string {
 }
 
 export async function openStoreOrThrow(projectRoot: string): Promise<LocalFsStore> {
-  const store = new LocalFsStore(layerRoot(projectRoot));
+  const userRoot = layerRoot(projectRoot);
+  // v3 detection: `<project>/.gojaja/project.json` marks a project
+  // that uses the central-root split (RFC-0001). v2 projects don't
+  // carry this file; they fall through to single-root mode below.
+  const project = await readProjectJson(userRoot);
+  const opts = project
+    ? { centralRoot: centralRootForProject(project.id) }
+    : undefined;
+  const store = new LocalFsStore(userRoot, opts);
   if (!(await store.isInitialised())) {
-    throw new NotInitializedError(layerRoot(projectRoot));
+    throw new NotInitializedError(userRoot);
   }
   return store;
 }
 
 export function openStoreUnchecked(projectRoot: string): LocalFsStore {
+  // Synchronous form is best-effort; callers using this path are
+  // pre-init helpers (e.g. `gojaja reset`'s preview). They get a
+  // single-root store here; if the project turns out to be v3 the
+  // caller can re-resolve via `openStoreOrThrow` once it's safe
+  // to do async I/O.
   return new LocalFsStore(layerRoot(projectRoot));
 }

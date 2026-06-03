@@ -32,7 +32,12 @@ Usage:
 
 Setup (you, in your shell — runs once per project unless noted):
   init [--root <path>]
-      Initialise a .gojaja/ layer in the current project.
+      Initialise a .gojaja/ layer in the current project. PR9.2: v3
+      layout. Mints a ULID, writes <project>/.gojaja/project.json
+      (git-tracked marker), and creates a per-machine central tree
+      at ~/.gojaja/projects/<ULID>/ for the task board, event stream,
+      sessions, RFCs, worklog, and locks. See RFC-0001. The
+      ~/.gojaja/ location is overridable via the GOJAJA_HOME env var.
   role create <id> [<title>] [--description <text>] [--owns <a,b>]
                               [--reports-to <r1,r2>] [--must-not-edit <a,b>]
                               [--as-system]
