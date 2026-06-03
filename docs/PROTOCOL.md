@@ -5,11 +5,29 @@ way. [SCHEMA](./SCHEMA.md) — files referenced here.
 [HANDBOOK](./HANDBOOK.md) — when (policy) to use each tool documented
 below. [RFC](./RFC.md) — narrative walkthrough of the RFC lifecycle
 with a worked example (this doc is the wire spec; that doc shows the
-flow).
+flow). [RFC-0001](./RFC-0001-central-root.md) — v3 storage split.
 
 This document is the contract between an LLM agent window and the
 coordination layer. The wire-level invariants here are what `gojaja`
 enforces; anything not enforced here is convention only.
+
+**v3 layout note.** Path references in this doc (e.g.
+`comms/events/<ulid>.json`, `state/task_board.yaml`) describe
+relative paths under the layer; the physical root depends on the
+classifier in `src/core/path-routing.ts`. In v3 user-tree paths
+(`config.yaml`, `roles/`, `state/project_state.md`,
+`project.json`) live at `<project>/.gojaja/`; central-tree paths
+(everything else: events, sessions, task board, RFCs, worklog,
+locks) live at `~/.gojaja/projects/<project-id>/`. In v2 both
+collapse to `<project>/.gojaja/`. The wire-level shape of each
+file is unchanged across versions.
+
+**SYSTEM events.** Events with `from: "SYSTEM"` (project-owner
+bootstrap path via `--as-system`) now carry a top-level
+`actorMeta: { pid, ppid, cwd, hostname, user, tty }` field so
+post-hoc audit can identify the originating process. Role-bearing
+events omit `actorMeta` — their trace is in the matching session
+record.
 
 ## Identities
 

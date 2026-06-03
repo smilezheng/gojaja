@@ -50,8 +50,26 @@ pnpm dlx gojaja watch
 ## Mental model (three sentences)
 
 1. **The CLI is the source of truth, not chat.** Anything that needs to outlive a conversation goes through `gojaja`.
-2. **`.gojaja/` is a shared blackboard with strict ownership.** Each role's `owns` declares which files it may write; the CLI refuses cross-role edits. You can `git diff` to see what changed.
+2. **The layer is split: contracts in your repo, runtime in `~/.gojaja/`.** `<project>/.gojaja/` keeps the slow-changing contracts (project id, role briefs, ownership config, project_state) — git-tracked. Runtime state (task board, events, sessions, RFCs, worklog, locks) lives at `~/.gojaja/projects/<id>/` and never touches git. Same project across two clones / worktrees on one machine → same coordination tree.
 3. **Agents run a loop you do not micromanage.** You set up roles and write project state; agents fetch their inbox, do work, log it, and idle. You only chat with them.
+
+---
+
+## v3 vs v2
+
+`gojaja@3.0.0` ships the central-root split described above. If you initialised a project against an earlier release (anything `2.x`), upgrade like this:
+
+```bash
+# from the project root, with no GOJAJA_SESSION exported
+gojaja migrate              # dry-run preview
+gojaja migrate --execute    # actually move runtime state to ~/.gojaja/
+# after you've verified your team can still work, optionally:
+gojaja migrate --execute --cleanup    # remove the v2 source files
+```
+
+The walker is idempotent and keeps the v2 source files as a safety net by default. See [RFC-0001](./docs/RFC-0001-central-root.md) for the design rationale and [CHANGELOG](./CHANGELOG.md) `PR9.3` for the migration details.
+
+Bare-human commands now require an explicit `--as-system` flag where they previously defaulted to `actor=SYSTEM` on a missing `GOJAJA_SESSION`. This affects `gojaja report --to`, `task new`, `task assign`, `rfc new`, `rfc comment`, `state edit`, `role create`, `role delete`. Agents working through a claimed session are unaffected — `--as-system` is the project-owner flag.
 
 ---
 
@@ -118,11 +136,13 @@ This creates `.gojaja/` with the coordination state and is safe to commit to git
 
 ### Step 2 — Register roles, then fill in their contracts
 
+You bootstrap roles with `--as-system` (v3 SYSTEM-1 gate). Once at least one role owns `config.yaml`, that role can mint further roles from its own session — the delegated HR pattern.
+
 ```bash
-gojaja role create PM      "Product Manager"   --owns "state/project_state.md,state/task_board.yaml"
-gojaja role create TL      "Tech Lead"         --owns "state/architecture.md"
-gojaja role create Backend "Backend Engineer"
-gojaja role create QA      "Quality Assurance"
+gojaja role create PM      "Product Manager"   --owns "state/project_state.md,state/task_board.yaml" --as-system
+gojaja role create TL      "Tech Lead"         --owns "state/architecture.md" --as-system
+gojaja role create Backend "Backend Engineer"  --as-system
+gojaja role create QA      "Quality Assurance" --as-system
 ```
 
 Each `role create` writes a `.gojaja/roles/<id>.md` template with two placeholder sections: **Role description** and **Responsibilities**, both marked `TBD`. **Open each file and fill them in** — they are the agent's primary self-introduction. `gojaja role list` flags rows that still contain TBD; `gojaja activate` refuses to proceed until they are filled.

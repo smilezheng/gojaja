@@ -7,15 +7,25 @@ Cross-references: [SCHEMA](./SCHEMA.md) — on-disk file formats.
 [PROTOCOL](./PROTOCOL.md) — agent-facing contract.
 [HANDBOOK](./HANDBOOK.md) — policy layer (when to use which tool).
 [ROADMAP](./ROADMAP.md) — what is implemented vs deferred.
+[RFC-0001](./RFC-0001-central-root.md) — v3 storage split rationale.
 
 ## What this layer is for
 
 A coordination substrate for **N LLM-agent windows that each play a role
 inside one project** (PM, TL, Backend, Frontend, QA, DevOps, ...). The agents
-do not talk to each other directly; they read and write files inside a
-project-local `.gojaja/` directory. The framework's job is to make
-those reads and writes safe, ordered, recoverable, and auditable so the
-agents can behave like a real working team without a server.
+do not talk to each other directly; they read and write files in the
+shared on-disk layer. The framework's job is to make those reads and
+writes safe, ordered, recoverable, and auditable so the agents can
+behave like a real working team without a server.
+
+Starting in v3 (PR9), the layer is split into a small git-tracked
+user tree (`<project>/.gojaja/`: project id, role briefs, ownership
+config, project_state) and a per-user / per-machine central tree
+(`~/.gojaja/projects/<id>/`: task board, events, sessions, RFCs,
+worklog, locks). See [RFC-0001](./RFC-0001-central-root.md) for
+the design rationale; [SCHEMA.md](./SCHEMA.md) for the concrete
+file map; this doc concentrates on the cross-cutting architecture
+(events, ownership, locking, sessions) which is layout-independent.
 
 Concretely the layer provides:
 

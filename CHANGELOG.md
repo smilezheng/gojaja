@@ -8,6 +8,36 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v1.x; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### PR9.7 — docs sweep for v3
+
+Documentation pass for the v3 layout. No code changes, no test
+changes — purely docs.
+
+  - `docs/SCHEMA.md` retitled to v3.0.0. Adds a top-level "v3
+    splits the layer into two trees" section + the new on-disk
+    map (user tree + central tree + `~/.gojaja/{config.json,
+    projects/, trash/}`). Documents `project.json`'s shape and
+    cross-references RFC-0001. Keeps the v2 layout described
+    as legacy, supported through the deprecation window.
+  - `docs/DESIGN.md` opening rewritten to note the v3 storage
+    split + forward-pointer to RFC-0001. Cross-cutting
+    architecture (events / ownership / locking / sessions) is
+    unchanged.
+  - `docs/PROTOCOL.md` gains a v3 layout note explaining that
+    relative paths are layout-independent: the wire-level shape
+    of each file is unchanged across v2/v3, only its physical
+    root differs. Documents the new `actorMeta` field on
+    SYSTEM events.
+  - `AGENTS.md` working rules updated for v3 layout + SYSTEM-1
+    `--as-system` requirement + SYSTEM-2 `actorMeta` + SYSTEM-3
+    `role create/delete` ownership gate.
+  - `README.md` adds a "v3 vs v2" section with the
+    `gojaja migrate` one-liner, the safety-net default
+    walkthrough, and a `--as-system` brief. Role-create
+    quickstart examples now pass `--as-system` explicitly.
+
+530 → 530 (no test changes).
+
 ### PR9.6 — `gojaja reset` adapts to the v3 two-tree layout
 
 For v3 projects, `reset` now also removes the central tree at

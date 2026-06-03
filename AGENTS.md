@@ -28,9 +28,28 @@ project. Do not commit a `.gojaja/` directory at the repo root.
   `src/core/paths.ts` and `src/core/role-id.ts`. No ad-hoc regexes in
   command code.
 - The on-disk schema version is `SCHEMA_VERSION` in
-  `src/cli/runtime.ts`. Bump it together with any breaking change to
-  the layout written by `LocalFsStore.initialise`, and update
-  [docs/SCHEMA.md](./docs/SCHEMA.md) in the same PR.
+ `src/cli/runtime.ts`. Current: `3.0.0` (v3 two-tree layout per
+ [RFC-0001](./docs/RFC-0001-central-root.md)). Bump it together
+ with any breaking change to the layout written by
+ `LocalFsStore.initialise`, and update [docs/SCHEMA.md](./docs/SCHEMA.md)
+ in the same PR.
+- v3 splits the layer into a small git-tracked user tree at
+ `<project>/.gojaja/` (project.json, config.yaml, roles/<id>.md,
+ state/project_state.md) and a per-user central tree at
+ `~/.gojaja/projects/<id>/` (task board, events, sessions, RFCs,
+ worklog, locks). Path routing is decided by `classifyPath` in
+ `src/core/path-routing.ts`; new mutable surfaces default to
+ central unless they're a fresh-clone contract. v2 single-root
+ layouts still open via `openStoreOrThrow` (no `project.json`
+ marker) for the deprecation window.
+- SYSTEM is no longer an implicit default. Any command that emits
+ an event with `from: SYSTEM` requires explicit `--as-system` at
+ the CLI layer (`resolveActor` in `src/cli/identity.ts`).
+ `role create` / `role delete` also accept a delegated session
+ owning `config.yaml`. SYSTEM events carry `actorMeta` (pid /
+ cwd / user / hostname / tty / ppid) so audit can identify the
+ originating process. See CHANGELOG `PR9 SYSTEM-1`/`-2`/`-3` for
+ the threat model.
 - Every typed error class has a stable exit code (see
   [docs/DESIGN.md → Errors](./docs/DESIGN.md#errors-and-exit-codes)).
   Do not invent new ad-hoc `process.exit(7)` calls; subclass

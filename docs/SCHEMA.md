@@ -1,58 +1,106 @@
-# On-Disk Schema (v2.0.0)
+# On-Disk Schema (v3.0.0)
 
 Cross-references: [DESIGN](./DESIGN.md) — architecture rationale.
 [PROTOCOL](./PROTOCOL.md) — how agents use these files.
+[RFC-0001](./RFC-0001-central-root.md) — the v2 → v3 split rationale
+and design freeze. [PLAN-v3](./PLAN-v3.md) — release plan.
 
-This document is the source of truth for what `.gojaja/` looks like.
+This document is the source of truth for what gojaja writes to disk.
 The on-disk version is recorded in the top-level `VERSION` file. Any
 breaking change to a path, file name, or JSON shape requires bumping
 `SCHEMA_VERSION` in `src/cli/runtime.ts` together with this document.
 
 **Reads are unrestricted, writes are mediated.** Anything under
-`.gojaja/` can be read directly by any process — the layer is a
-shared blackboard, and the agent host already has a file-read tool.
-There is therefore no `gojaja read-state` command (it would only
-add token cost). Writes go through `gojaja` (or `Store`) so that
+the layer can be read directly by any process — gojaja is a shared
+blackboard, and the agent host already has a file-read tool. There
+is therefore no `gojaja read-state` command (it would only add
+token cost). Writes go through `gojaja` (or `Store`) so that
 ownership, atomicity, and the event-stream audit can be enforced.
 
-## Top-level layout
+## v3 splits the layer into two trees
+
+PR9 (RFC-0001) split the historical single `.gojaja/` directory
+into two physical trees:
+
+  - **User tree** at `<project>/.gojaja/` — git-tracked, slow-
+    changing. Holds the project contracts a fresh clone needs
+    before the first command runs: VERSION, project.json,
+    config.yaml, roles/<id>.md, state/project_state.md,
+    .gitignore, and optionally protocol/.
+  - **Central tree** at `~/.gojaja/projects/<project-id>/`
+    (overridable via `$GOJAJA_HOME`) — per-user, per-machine,
+    NEVER committed. Holds all runtime / mutable state: the task
+    board, the event stream, sessions, RFCs, worklogs, and
+    locks.
+
+The two trees are linked by `<project>/.gojaja/project.json`'s
+`id` ULID — the only piece of the v3 layout that travels with
+git. Every git worktree of the same project resolves to the same
+central tree via the same project.json, so co-located agents
+share coordination state without git ever touching it.
+
+The classifier in `src/core/path-routing.ts` decides at compile
+time which tree each relative path under the layer belongs to.
+See its source for the closed "user" set and the default-central
+rule for everything else.
+
+## v3 layout (current)
 
 ```
-.gojaja/
-  VERSION                              ← schema version, plain text
-  config.yaml                          ← project config (roles, ownership, RFC counter)
-  audit.log                            ← JSONL audit trail (planned)
+<project>/.gojaja/                          USER TREE — git-tracked
+  VERSION                                   schema version, plain text
+  project.json                              {"id": ULID, "name": str, "schema": str}
+  config.yaml                               roles + owns + mustNotEdit + RFC counter
+  .gitignore                                excludes runtime ephemera from earlier v2 commits
+  protocol/                                 optional, human-authored protocol docs
+  roles/<role>.md                           role contract, one file per role
+  state/
+    project_state.md                        human-authored project overview
 
-  protocol/                            ← human-authored protocol docs
-  roles/<role>.md                      ← role contract, one file per role
-  state/                               ← shared writable state (atomic)
-    project_state.md
-    architecture.md
-    task_board.yaml
-    decisions.md
-    risks.yaml
-  rfcs/RFC-NNNN-<slug>/                ← one directory per RFC
-    proposal.yaml                       ← carries status, description, relatedTasks, etc.
-    comments.yaml                       ← append-only threaded ledger of comments
-    decision.json                       ← present once a decider has acted
-  worklog/<role>/<ulid>.md             ← one entry file per worklog entry
+~/.gojaja/projects/<project-id>/            CENTRAL TREE — per-user, never in git
+  state/
+    task_board.yaml                         mutable runtime
+    architecture.md                         (legacy, by convention)
+    decisions.md                            (legacy, by convention)
+    risks.yaml                              (legacy, by convention)
+  rfcs/RFC-NNNN-<slug>/                     one directory per RFC
+    proposal.yaml                           status, description, relatedTasks, etc.
+    comments.yaml                           append-only threaded ledger
+    decision.json                           present once decided
+  worklog/<role>/<ulid>.md                  one entry file per worklog entry
   comms/
-    events/<ulid>.json                  ← immutable event stream
-    cursors/<role>.json                 ← per-role event-stream consumer cursor
-    cursors/<role>/rfc-<rfc-id>.json    ← per-role-per-RFC read marker for unreadComments
-    pending/<role>/<ack-token>.json     ← outstanding manifests
-    sessions/<role>.json                ← role lease metadata
-    heartbeats/<role>.json              ← (planned) external watcher input
-  locks/<key>.lock                     ← short-lived file lock records
+    events/<ulid>.json                      immutable event stream
+    cursors/<role>.json                     per-role event-stream consumer cursor
+    cursors/<role>/rfc-<rfc-id>.json        per-role-per-RFC read marker
+    pending/<role>/<ack-token>.json         outstanding manifests
+    pending/<role>/wait.json                wait state
+    sessions/<role>.json                    role lease metadata
+    heartbeats/<role>.json                  external watcher input (planned)
+  locks/<key>.lock                          short-lived file lock records
+
+~/.gojaja/                                  THE GLOBAL ROOT
+  config.json                               global gojaja prefs (planned)
+  projects/<id>/                            see above
+  trash/<id>-<ISO-TS>/                      gojaja reset soft-delete bucket
 ```
 
-What `LocalFsStore.initialise` creates today: every directory listed
-above, plus `VERSION`, a seeded `config.yaml` with an empty `roles` map,
-a seeded `state/task_board.yaml` with `nextId: 0`, and a TBD skeleton
-at `state/project_state.md`. The other state files
-(`architecture.md`, `decisions.md`, `risks.yaml`) are listed here as
-the conventional locations the project will populate over time; they
-are not created up front.
+What `gojaja init` (v3) creates today: both trees plus every
+directory listed above, `VERSION` containing `3.0.0`,
+`project.json` with a freshly-minted ULID, a seeded
+`config.yaml` with an empty `roles` map, a seeded
+`state/task_board.yaml` with `nextId: 0`, and a TBD skeleton at
+`state/project_state.md`. Other conventional files
+(`architecture.md`, `decisions.md`, `risks.yaml`) are listed here
+as locations the project will populate over time; they are not
+created up front.
+
+## v2 layout (legacy, still supported through the deprecation window)
+
+v2 projects do not have a `project.json`; everything lives in a
+single `<project>/.gojaja/` tree. `openStoreOrThrow` detects v2
+by the absence of project.json and opens the store in
+single-root mode. v2 layouts can be migrated to v3 via
+`gojaja migrate`; see CHANGELOG `PR9.3` for the walker.
 
 > **`state/project_state.md` is auto-created as a TBD skeleton.** The
 > skeleton has three sections (Vision, Milestones, Acceptance criteria),
@@ -70,11 +118,34 @@ Plain text, no trailing whitespace beyond a single newline. `gojaja
 init` writes the current `SCHEMA_VERSION` constant, e.g.:
 
 ```
-2.0.0-manifest-filter
+3.0.0
 ```
 
 Read with `gojaja version`. A check that refuses to run against a
 layer whose schema is newer than the CLI's own is planned.
+
+## `project.json` (v3 marker)
+
+```json
+{
+  "id": "01JZ9X7T8K3MAB2N3P4Q5R6S",
+  "name": "skills-host",
+  "schema": "3.0.0"
+}
+```
+
+  - `id`: the ULID minted once at `gojaja init` time. Immutable —
+    rename a project (`gojaja project rename`, PR9.4 planned)
+    never the id. Cross-machine: each `git clone` of a v3
+    repository inherits the same id (because project.json is git-
+    tracked) and resolves to a per-machine central tree at
+    `~/.gojaja/projects/<id>/`.
+  - `name`: human-readable label, typically the project root
+    basename at init time. Not load-bearing; used by `gojaja
+    project show` / `gojaja watch`'s dashboard.
+  - `schema`: on-disk schema version. v3 projects carry `"3.0.0"`
+    (or `"3.x.y-<tag>"` for pre-releases). v2 projects do not
+    have this file; the `VERSION` text file is their marker.
 
 ## `config.yaml`
 
