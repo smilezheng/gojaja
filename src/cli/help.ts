@@ -602,10 +602,14 @@ export const COMMAND_HELP: Record<string, string> = {
       the Actions panel so a LAN-shared dashboard stays read-only.
       Ctrl-C to stop.`,
 
-  reset: `  gojaja reset [--dry-run] [--confirm <basename>]
+  reset: `  gojaja reset [--dry-run] [--confirm <basename>] [--purge]
       Remove everything gojaja installed: .gojaja/, the Cursor rule, and
-      the managed block in CLAUDE.md / AGENTS.md. Preview unless
-      --confirm <project-basename>. No GOJAJA_SESSION in the shell.`,
+      the managed block in CLAUDE.md / AGENTS.md. PR9.6: v3 projects
+      also archive the central tree (~/.gojaja/projects/<ULID>/) to
+      ~/.gojaja/trash/<ULID>-<TS>/ (recoverable). --purge hard-deletes
+      the central tree without trash — irrecoverable, explicit opt-in.
+      Preview unless --confirm <project-basename>. No GOJAJA_SESSION
+      in the shell.`,
 
   version: `  gojaja version [--json]
       Print the CLI and on-disk schema version.`,

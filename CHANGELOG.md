@@ -8,6 +8,35 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v1.x; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### PR9.6 — `gojaja reset` adapts to the v3 two-tree layout
+
+For v3 projects, `reset` now also removes the central tree at
+`~/.gojaja/projects/<ULID>/`. By default it MOVES the tree to a
+trash bucket under `~/.gojaja/trash/<ULID>-<ISO-TS>/` for a
+soft-delete window (recoverable by hand for at least 7d before any
+future sweep). `--purge` skips trash and hard-deletes the central
+tree — irrecoverable, explicit opt-in only.
+
+`buildPlan` reads `<project>/.gojaja/project.json` to find the
+ULID; if absent (v2 layer) or if the central tree no longer exists
+on this machine (e.g. a fresh clone that never ran a command),
+that step is skipped silently. Preview / `--confirm` workflow
+unchanged.
+
+`RemovedItem` gains two new kinds: `central-tree-trash` (with
+`movedTo` pointing at the trash destination) and
+`central-tree-purge`. JSON output reflects them faithfully for
+scripts.
+
+Trash directories use a filesystem-safe ISO timestamp
+(`2026-06-03T18-15-22Z`) so repeated resets of the same project
+id never collide.
+
+Tests: new `tests/reset-v3.test.ts` (4 cases). Existing
+`tests/reset.test.ts` (14 cases) passes without modification — its
+fixtures are v2 layers (no project.json), so the v3 branch is
+inert. 526 → 530.
+
 ### PR9.3 — `gojaja migrate` v2 → v3 walker
 
 Companion to PR9.2: gives existing v2 users a one-command path

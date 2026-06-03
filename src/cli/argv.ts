@@ -50,6 +50,11 @@ const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   // PR9.3 `gojaja migrate` flags.
   "execute",
   "cleanup",
+  // PR9.6 `gojaja reset --purge`: skip the trash, hard-delete the
+  // central tree. Default keeps the central tree under
+  // ~/.gojaja/trash/<id>-<ts>/ as a 7d soft-delete window.
+  "purge",
+  "dry-run",
 ]);
 
 /**

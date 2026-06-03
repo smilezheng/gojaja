@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { boolFlag, optionalString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, LAYER_DIRNAME } from "../runtime";
+import { gojajaHome, readProjectJson } from "../central-root";
 import {
   RUNTIME_MARKER_BEGIN as CLAUDE_MARKER_BEGIN,
   RUNTIME_MARKER_END as CLAUDE_MARKER_END,
@@ -21,10 +22,26 @@ interface MarkerFilePlan {
   willDelete: boolean;
 }
 
+interface CentralTreePlan {
+  /** Source directory (`~/.gojaja/projects/<id>/`). */
+  path: string;
+  /** Project id read from project.json. */
+  projectId: string;
+  /** Trash destination (`~/.gojaja/trash/<id>-<ts>/`), or null when --purge. */
+  trashTarget: string | null;
+}
+
 interface ResetPlan {
   layerDir: string | null;
   cursorRule: string | null;
   markerFiles: MarkerFilePlan[];
+  /**
+   * PR9.6: central tree to remove for v3 projects. Null for v2
+   * projects (no project.json) or for projects where the central
+   * tree no longer exists on this machine (e.g. a fresh clone that
+   * never ran a command).
+   */
+  centralTree: CentralTreePlan | null;
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -34,6 +51,15 @@ async function pathExists(p: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Filesystem-safe ISO timestamp: `2026-06-03T18-15-22Z`. Used to
+ * disambiguate trash directories when the same project id has been
+ * reset multiple times (rare but harmless to support).
+ */
+function isoTimestampForFs(d: Date): string {
+  return d.toISOString().replace(/:/g, "-").replace(/\.\d+/, "");
 }
 
 /**
@@ -64,7 +90,10 @@ function stripRuntimeBlock(text: string): string {
   return joined.replace(/\n{3,}/g, "\n\n");
 }
 
-async function buildPlan(projectRoot: string): Promise<ResetPlan> {
+async function buildPlan(
+  projectRoot: string,
+  opts: { purge: boolean; trashTimestamp: string },
+): Promise<ResetPlan> {
   const layer = path.join(projectRoot, LAYER_DIRNAME);
   const cursor = path.join(projectRoot, CURSOR_RULE_REL);
 
@@ -81,10 +110,36 @@ async function buildPlan(projectRoot: string): Promise<ResetPlan> {
     }
   }
 
+  // PR9.6: v3 projects carry a central tree under
+  // ~/.gojaja/projects/<id>/. Read project.json (only present
+  // on v3 layers) to find it; v2 projects skip this branch.
+  let centralTree: CentralTreePlan | null = null;
+  if (await pathExists(layer)) {
+    const project = await readProjectJson(layer);
+    if (project) {
+      const centralPath = path.join(gojajaHome(), "projects", project.id);
+      if (await pathExists(centralPath)) {
+        const trashTarget = opts.purge
+          ? null
+          : path.join(
+              gojajaHome(),
+              "trash",
+              `${project.id}-${opts.trashTimestamp}`,
+            );
+        centralTree = {
+          path: centralPath,
+          projectId: project.id,
+          trashTarget,
+        };
+      }
+    }
+  }
+
   return {
     layerDir: (await pathExists(layer)) ? layer : null,
     cursorRule: (await pathExists(cursor)) ? cursor : null,
     markerFiles,
+    centralTree,
   };
 }
 
@@ -99,13 +154,35 @@ async function rmDirIfEmpty(dir: string): Promise<void> {
 
 interface RemovedItem {
   path: string;
-  kind: "layer-dir" | "cursor-rule" | "marker-block" | "marker-file-delete";
+  kind:
+    | "layer-dir"
+    | "cursor-rule"
+    | "marker-block"
+    | "marker-file-delete"
+    | "central-tree-trash"
+    | "central-tree-purge";
+  /** For central-tree-trash, where the data was moved to. */
+  movedTo?: string;
 }
 
 function planToRemovedList(plan: ResetPlan): RemovedItem[] {
   const out: RemovedItem[] = [];
   if (plan.layerDir) out.push({ path: plan.layerDir, kind: "layer-dir" });
   if (plan.cursorRule) out.push({ path: plan.cursorRule, kind: "cursor-rule" });
+  if (plan.centralTree) {
+    if (plan.centralTree.trashTarget) {
+      out.push({
+        path: plan.centralTree.path,
+        kind: "central-tree-trash",
+        movedTo: plan.centralTree.trashTarget,
+      });
+    } else {
+      out.push({
+        path: plan.centralTree.path,
+        kind: "central-tree-purge",
+      });
+    }
+  }
   for (const mf of plan.markerFiles) {
     out.push({
       path: mf.path,
@@ -131,8 +208,15 @@ export async function runReset(args: ParsedArgs): Promise<number> {
   const confirm = optionalString(args.flags, "confirm");
   const dryRun = boolFlag(args.flags, "dry-run");
   const json = boolFlag(args.flags, "json");
+  // PR9.6: by default the v3 central tree is MOVED to
+  // ~/.gojaja/trash/<id>-<ts>/ rather than removed outright. --purge
+  // skips trash and hard-deletes — irrecoverable, the explicit user
+  // opt-in. v2 projects ignore both flags (no central tree to
+  // handle).
+  const purge = boolFlag(args.flags, "purge");
+  const trashTimestamp = isoTimestampForFs(new Date());
 
-  const plan = await buildPlan(projectRoot);
+  const plan = await buildPlan(projectRoot, { purge, trashTimestamp });
   const items = planToRemovedList(plan);
 
   if (items.length === 0) {
@@ -189,6 +273,29 @@ export async function runReset(args: ParsedArgs): Promise<number> {
 
   // Execute the plan.
   const removed: RemovedItem[] = [];
+  // Central tree first: move (or purge) BEFORE the user tree is
+  // touched. If the user re-runs `gojaja init` in the same project
+  // immediately after, the central tree is already gone / archived
+  // so we won't accidentally collide on a stale ULID's directory.
+  if (plan.centralTree) {
+    if (plan.centralTree.trashTarget) {
+      await fsp.mkdir(path.dirname(plan.centralTree.trashTarget), {
+        recursive: true,
+      });
+      await fsp.rename(plan.centralTree.path, plan.centralTree.trashTarget);
+      removed.push({
+        path: plan.centralTree.path,
+        kind: "central-tree-trash",
+        movedTo: plan.centralTree.trashTarget,
+      });
+    } else {
+      await fsp.rm(plan.centralTree.path, { recursive: true, force: true });
+      removed.push({
+        path: plan.centralTree.path,
+        kind: "central-tree-purge",
+      });
+    }
+  }
   if (plan.layerDir) {
     await fsp.rm(plan.layerDir, { recursive: true, force: true });
     removed.push({ path: plan.layerDir, kind: "layer-dir" });
