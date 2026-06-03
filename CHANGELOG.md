@@ -6,7 +6,87 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Tracking v1.x; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
+Currently empty. Future v3.0.x work lands here.
+
+## [3.0.0] — 2026-06-03
+
+Major release. **Breaking** — see migration guidance below.
+
+This release closes the postmortem-2026-06-02 incidents through
+two coordinated lines of work:
+
+  - **Central root for runtime state** (RFC-0001): the historical
+    single `.gojaja/` directory splits into a small git-tracked
+    user tree at `<project>/.gojaja/` and a per-user / per-machine
+    central tree at `~/.gojaja/projects/<id>/`. Mutable
+    coordination state (task board, events, sessions, RFCs,
+    worklog, locks) no longer competes with git for the same
+    files. See postmortem §8.10b for the class of bug this kills
+    structurally; previously rule-based mitigation ("don't `git
+    add -A` when state is dirty") proved insufficient.
+  - **SYSTEM bypass hardening**: the implicit "no `GOJAJA_SESSION`
+    → actor=SYSTEM" rule was a one-line escalation path for any
+    agent process. v3 replaces it with `--as-system` (explicit),
+    `actorMeta` (forensic), and an ownership gate for
+    `role create / delete`. See postmortem §8.10 / §8.1.
+
+### Highlights
+
+  - `gojaja init` writes the v3 two-tree layout out of the box.
+  - `gojaja migrate` walks v2 projects onto v3 (idempotent;
+    keeps source files as a safety net by default).
+  - `gojaja reset` archives the central tree to
+    `~/.gojaja/trash/<id>-<TS>/` for soft-delete; `--purge` for
+    irrecoverable hard-delete.
+  - `--as-system` flag required for project-owner intent on
+    `report`, `task new` / `assign`, `rfc new` / `comment`,
+    `state edit`, `role create` / `delete`.
+  - Multi-line body flags (`--message`, `--rationale`,
+    `--description`) accept `--flag -` + heredoc / pipe / $EDITOR
+    so backticks and `$(...)` inside Markdown fenced blocks no
+    longer execute as shell commands. Eliminates the bug class
+    documented in `postmortem-2026-06-02-shell-eval.md`.
+
+### Migration from 2.x
+
+```bash
+# from each v2 project root, in a shell with no GOJAJA_SESSION
+gojaja migrate                     # dry-run preview
+gojaja migrate --execute           # actually copy state to ~/.gojaja/
+# verify your agents still work, then:
+gojaja migrate --execute --cleanup # remove the v2 source files
+```
+
+Bare-human commands that previously worked without a session
+gain `--as-system`:
+
+```diff
+- gojaja role create PM "Product Manager"
++ gojaja role create PM "Product Manager" --as-system
+
+- gojaja report --to Backend --message "..."
++ gojaja report --to Backend --message "..." --as-system
+
+- gojaja state edit --file state/project_state.md --content "..."
++ gojaja state edit --file state/project_state.md --content "..." --as-system
+```
+
+Agent automation running with a claimed `GOJAJA_SESSION` is
+unaffected.
+
+### Detailed changes
+
+The component-by-component story is recorded in the per-PR
+entries below: **PR9.7** (docs sweep) → **PR9.6** (reset two-
+tree) → **PR9.3** (migrate walker) → **PR9 SYSTEM-3** (role
+create/delete gate) → **PR9.2** (init v3 layout) → **PR9
+SYSTEM-2** (actorMeta) → **PR9 SYSTEM-1** (`--as-system` flag) →
+**PR9.1** (split-mode routing) → **PR8u** (multi-line input
+safety). RFC-0001 freezes the design rationale.
+
+498 vitest cases at the start of the v3 cycle → 530 at release.
+Typecheck + lint clean. Schema version `2.0.0-manifest-filter`
+→ `3.0.0`.
 
 ### PR9.7 — docs sweep for v3
 

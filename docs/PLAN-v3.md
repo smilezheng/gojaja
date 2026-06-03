@@ -1,6 +1,6 @@
 # v3.0.0 Release Plan
 
-> Status: **In progress** (PR8u, PR9.0, PR9.1 done; A → H pending)
+> Status: **Released** (v3.0.0; all milestones done)
 > Last updated: 2026-06-03
 > Cross-references: [RFC-0001](./RFC-0001-central-root.md),
 > [ROADMAP](./ROADMAP.md), [CHANGELOG](../CHANGELOG.md),
@@ -34,7 +34,7 @@ we'd then have to revisit.
 | E | **PR9.3: `gojaja migrate` v2 → v3** | One-shot walker. Default = dry-run; `--execute` copies; `--cleanup` removes user-tree sources. Idempotent (`MIGRATE_ALREADY_V3`). Preserves event ULIDs (file copies, no renumbering). | ~250 + tests | 1 | **done** |
 | F | **PR9.6: `gojaja reset` adapts to two trees** | Removes user tree; moves central tree to `~/.gojaja/trash/<id>-<ts>/` (recoverable for ~7d before any future sweep). `--purge` skips trash for irrecoverable hard-delete. v2 projects unaffected. | ~150 + tests | 0.5 | **done** |
 | G | **PR9.7: docs sweep** | SCHEMA bumped to v3.0.0 (two-tree layout + project.json reference); DESIGN + PROTOCOL gain v3 forward pointers; AGENTS.md learns the new working rules; README adds v3 vs v2 + migrate + SYSTEM-1 brief. `gojaja init -h` / `migrate -h` / `reset -h` already updated in earlier milestones. | ~400 docs diff | 1 | **done** |
-| H | **v3.0.0 cut** | `package.json` 1.x → 3.0.0; `CHANGELOG[3.0.0]` top section; final typecheck/test/lint; `npm publish --dry-run`. | ~50 diff | 0.3 | pending |
+| H | **v3.0.0 cut** | `package.json` 1.x → 3.0.0; `CHANGELOG[3.0.0]` top section; final typecheck/test/lint; `npm publish --dry-run`. | ~50 diff | 0.3 | **done** |
 
 **Total**: ~1300 LOC + ~200 tests + ~500 docs ≈ 5–6 sessions to
 `v3.0.0-rc`.
@@ -125,6 +125,11 @@ Append-only. One line per milestone transition.
   caller passes one. 9 new tests in `tests/system-meta.test.ts`;
   490 → 499. typecheck + lint clean. Next: C (SYSTEM-3 role
   create/delete ownership gate).
+- 2026-06-03 — **v3.0.0 cut.** package.json 1.0.0 → 3.0.0;
+  CHANGELOG gains the `[3.0.0]` top section with the migration
+  guide and PR breakdown. Full suite 530/530 green; typecheck +
+  lint clean. All A–H milestones done. Tagged at the commit
+  that lands this entry.
 - 2026-06-03 — Milestone G (PR9.7) done. Documentation sweep
   for v3: SCHEMA.md retitled to v3.0.0 with the two-tree layout
   + project.json reference; DESIGN.md and PROTOCOL.md gain
