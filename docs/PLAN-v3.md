@@ -29,7 +29,7 @@ we'd then have to revisit.
 |---|---|---|---|---|---|
 | A | **SYSTEM-1: `--as-system` flag** | Reject implicit "GOJAJA_SESSION unset → SYSTEM" actor default. Every command that today calls `resolveActor` requires either a session OR explicit `--as-system`. Cascade update to ~30 test fixtures. | ~150 + 30 fixture diffs | 0.5–1 | **done** |
 | B | **SYSTEM-2: forensic metadata** | SYSTEM events gain `pid`, `ppid`, `tty`, `cwd`, `hostname`, `user` fields via `Event.actorMeta?`. Post-hoc audit can identify the originating process. Role events deliberately omit (their trace lives in the session record). | ~80 + tests | 0.3 | **done** |
-| C | **SYSTEM-3: role create / delete gate** | `role create` becomes ownership-gated (owner of `config.yaml` OR `--as-system`). `role delete` migrates from "GOJAJA_SESSION must be unset" to "owner of `config.yaml` session". PR8m baked in. | ~100 + tests | 0.5 | pending |
+| C | **SYSTEM-3: role create / delete gate** | `role create` becomes ownership-gated (owner of `config.yaml` OR `--as-system`). `role delete` migrates from "GOJAJA_SESSION must be unset" to the same gate. ROLE_DELETED carries actual actor. PR8m baked in. | ~100 + tests | 0.5 | **done** |
 | D | **PR9.2: `gojaja init` writes v3 shape** | Mint ULID; write `<project>/.gojaja/project.json`; create `~/.gojaja/projects/<ulid>/`; construct split-mode `LocalFsStore`; `SCHEMA_VERSION → 3.0.0`. `discoverProjectRoot` reads `project.json` first, falls back to `VERSION` for v2 detection. | ~250 + tests | 1 | pending |
 | E | **PR9.3: `gojaja migrate` v2 → v3** | One-shot walker. `--dry-run` (default), `--execute`, `--cleanup`. Idempotent. Preserves event ULIDs. Without `--cleanup`, leaves v2 files in place as a safety net. | ~250 + tests | 1 | pending |
 | F | **PR9.6: `gojaja reset` adapts to two trees** | Removes user tree; moves central tree to `~/.gojaja/trash/<id>-<ts>/` (TTL 7d soft-delete). `gojaja reset --purge` skips trash. | ~150 + tests | 0.5 | pending |
@@ -125,3 +125,13 @@ Append-only. One line per milestone transition.
   caller passes one. 9 new tests in `tests/system-meta.test.ts`;
   490 → 499. typecheck + lint clean. Next: C (SYSTEM-3 role
   create/delete ownership gate).
+- 2026-06-03 — Milestone C (SYSTEM-3) done. `Store.createRole`
+  gains optional `actor` (defaults to SYSTEM for backward compat
+  with ~75 pre-PR9 test fixtures); `Store.deleteRole` relaxes
+  "SYSTEM only" to "SYSTEM OR config.yaml owner". `runRoleCreate`
+  and `runRoleDelete` both accept `--as-system` and resolve actor
+  via SYSTEM-1's gate. `ROLE_DELETED` now records the actual actor
+  (was hardcoded SYSTEM). 8 new tests in `tests/role-gate.test.ts`
+  cover both commands × four gate paths. 3 pre-existing fixtures
+  updated (`role-cli`, `role-delete`). 499 → 507. typecheck + lint
+  clean. Next: D (PR9.2 gojaja init writes v3 shape).

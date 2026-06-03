@@ -1478,6 +1478,8 @@ export class LocalFsStore implements Store {
     owns?: string[];
     reportsTo?: RoleId[];
     mustNotEdit?: string[];
+    actor?: RoleId | "SYSTEM";
+    actorMeta?: SystemActorMeta;
   }): Promise<RoleConfig> {
     validateRoleId(input.id);
     const title = input.title ?? `${input.id} Agent`;
@@ -1485,6 +1487,18 @@ export class LocalFsStore implements Store {
     const owns = input.owns ?? [];
     const reportsTo = (input.reportsTo ?? []).map((r) => validateRoleId(r));
     const mustNotEdit = input.mustNotEdit ?? [];
+
+    // PR9 SYSTEM-3: ownership-gate role creation. Defaults to
+    // "SYSTEM" so the ~75 pre-PR9 test fixtures that call
+    // store.createRole({...}) without an `actor` keep working —
+    // they are by construction bootstrap-style fixtures. The CLI
+    // layer always provides an actor (resolved via the SYSTEM-1
+    // `--as-system` gate), so the missing-actor default is reachable
+    // only from internal callers.
+    const actor: RoleId | "SYSTEM" = input.actor ?? "SYSTEM";
+    if (actor !== "SYSTEM") {
+      await this.requireOwnership(actor, Paths.configFile);
+    }
 
     return this.withLock("roles-create", async () => {
       const roleMdPath = this.abs(rolePaths(input.id).roleFile);
@@ -1578,15 +1592,17 @@ export class LocalFsStore implements Store {
     actorMeta?: SystemActorMeta;
   }): Promise<{ role: RoleId; removedSessions: number }> {
     validateRoleId(input.id);
-    // Role deletion is a project-governance act, not a per-role
-    // operation. Restrict to SYSTEM (no GOJAJA_SESSION) so an agent that
-    // somehow acquired a session for any role cannot wipe another
-    // role out from under it. The user runs this from their shell.
+    // PR9 SYSTEM-3: role deletion is now ownership-gated symmetric
+    // with `createRole`. Allowed actors:
+    //   - SYSTEM (project-owner bypass via `--as-system`); OR
+    //   - a role whose `owns` list contains `config.yaml` (the
+    //     delegated HR / Admin pattern — same gate as create).
+    // Any other actor raises ForbiddenError. This replaces the
+    // previous "GOJAJA_SESSION must be unset" rule, which leaked
+    // the trust boundary to an env var that agents could
+    // trivially unset.
     if (input.actor !== "SYSTEM") {
-      throw new ForbiddenError(
-        `Role deletion is restricted to project owners (SYSTEM). ` +
-          `Run \`gojaja role delete ${input.id}\` from a shell without GOJAJA_SESSION set.`,
-      );
+      await this.requireOwnership(input.actor, Paths.configFile);
     }
     return this.withLock("roles-create", async () => {
       // Step 1: remove from config.yaml under the shared config lock.
@@ -1631,11 +1647,11 @@ export class LocalFsStore implements Store {
       // event in events.log.
       await this.recordEventInternal({
         type: "ROLE_DELETED",
-        from: "SYSTEM",
+        from: input.actor,
         to: "*",
         ref: input.id,
         payload: { roleId: input.id, removedSessions },
-        ...attachActorMeta("SYSTEM", input.actorMeta),
+        ...attachActorMeta(input.actor, input.actorMeta),
       });
       return { role: input.id, removedSessions };
     });

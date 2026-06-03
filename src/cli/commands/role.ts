@@ -1,6 +1,8 @@
 import { boolFlag, optionalString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
+import { resolveActor } from "../identity";
+import { gatherSystemMeta } from "../util/system-meta";
 import type { Store } from "../../core/store";
 import type { RoleId } from "../../core/types";
 
@@ -53,6 +55,14 @@ async function runRoleCreate(args: ParsedArgs): Promise<number> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
 
+  // PR9 SYSTEM-3: role creation is ownership-gated symmetric with
+  // every other actor-bearing command. The default (no session,
+  // no flag) refuses; the project owner uses `--as-system`; a role
+  // delegated config.yaml ownership uses its session as usual.
+  const asSystem = boolFlag(args.flags, "as-system");
+  const { actor } = await resolveActor(store, { allowSystemBypass: asSystem });
+  const actorMeta = actor === "SYSTEM" ? gatherSystemMeta() : undefined;
+
   const roleConfig = await store.createRole({
     id,
     title,
@@ -60,6 +70,8 @@ async function runRoleCreate(args: ParsedArgs): Promise<number> {
     owns,
     reportsTo,
     mustNotEdit,
+    actor,
+    actorMeta,
   });
 
   // The freshly-rendered roles/<id>.md contains TBD placeholders for
@@ -188,23 +200,29 @@ async function runRoleDelete(args: ParsedArgs): Promise<number> {
   const id = args.positional[1];
   if (!id) {
     throw new UsageError(
-      "Usage: gojaja role delete <id>\n" +
-        "  Project-governance operation; must be run from a shell with no GOJAJA_SESSION exported.",
+      "Usage: gojaja role delete <id> [--as-system]\n" +
+        "  Project-governance operation. Either run with `--as-system`\n" +
+        "  (project-owner bypass) or claim a role whose --owns list\n" +
+        "  includes 'config.yaml' (the delegated HR / Admin pattern).",
     );
   }
   const json = boolFlag(args.flags, "json");
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const store = await openStoreOrThrow(root);
-  // role delete is restricted to SYSTEM at the store layer; we don't
-  // call resolveIdentity / resolveActor here because GOJAJA_SESSION must be
-  // unset for this to succeed and we want a clear error path if not.
-  if (typeof process.env.GOJAJA_SESSION === "string" && process.env.GOJAJA_SESSION.length > 0) {
-    throw new UsageError(
-      "`role delete` must be run from a shell with no GOJAJA_SESSION exported. " +
-        "Run `unset GOJAJA_SESSION` (or open a fresh shell) and try again.",
-    );
-  }
-  const { role, removedSessions } = await store.deleteRole({ id, actor: "SYSTEM" });
+  // PR9 SYSTEM-3: role deletion is ownership-gated symmetric with
+  // `role create`. The prior "GOJAJA_SESSION must be unset" rule is
+  // gone — that was a leaky boundary an agent could trivially
+  // bypass by unsetting its own env var. SYSTEM is now an explicit
+  // opt-in via `--as-system`, and a role delegated `config.yaml`
+  // ownership can delete as itself.
+  const asSystem = boolFlag(args.flags, "as-system");
+  const { actor } = await resolveActor(store, { allowSystemBypass: asSystem });
+  const actorMeta = actor === "SYSTEM" ? gatherSystemMeta() : undefined;
+  const { role, removedSessions } = await store.deleteRole({
+    id,
+    actor,
+    actorMeta,
+  });
 
   if (json) {
     process.stdout.write(

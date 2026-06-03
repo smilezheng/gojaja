@@ -35,8 +35,13 @@ Setup (you, in your shell — runs once per project unless noted):
       Initialise a .gojaja/ layer in the current project.
   role create <id> [<title>] [--description <text>] [--owns <a,b>]
                               [--reports-to <r1,r2>] [--must-not-edit <a,b>]
+                              [--as-system]
       Register a role. Writes roles/<id>.md (with TBD sections you must
       fill in) and adds the role to config.yaml. Re-run to add more.
+      PR9 SYSTEM-3: ownership-gated. Either run with --as-system
+      (project-owner bootstrap path) or claim a role whose --owns
+      list includes 'config.yaml' (the HR / Admin delegation
+      pattern).
 
       --owns gates which shared state files UNDER .gojaja/ the role may
         write via gojaja (repo source is the agent's own job, not gated
@@ -55,10 +60,14 @@ Setup (you, in your shell — runs once per project unless noted):
   role show <id>
       Print the role's config.yaml entry and the full roles/<id>.md.
       Agents should run this on activation to learn who they are.
-  role delete <id>
-      Project-governance op (SYSTEM only — no GOJAJA_SESSION in the shell).
-      Removes the role from config.yaml, deletes roles/<id>.md, and
-      invalidates any live session. Open task assignments are left in
+  role delete <id> [--as-system]
+      Project-governance op. PR9 SYSTEM-3: ownership-gated symmetric
+      with role create. Either --as-system OR a session for a role
+      whose --owns includes 'config.yaml'. Replaces the prior
+      "GOJAJA_SESSION must be unset" rule (the env-var presence was
+      not a real trust boundary). Removes the role from config.yaml,
+      deletes roles/<id>.md, and invalidates any live session. Open
+      task assignments are left in
       place; recreating the same id reinherits them.
   prompt --target agents|claude|cursor|generic [--write]
                        [--force-rewrite] [--no-handbook] [--json]
@@ -482,10 +491,11 @@ export const COMMAND_HELP: Record<string, string> = {
   role: `  gojaja role create <id> [<title>] [--owns a,b] [--reports-to r1,r2] [--must-not-edit a,b]
   gojaja role list
   gojaja role show <id>
-  gojaja role delete <id>          (SYSTEM only — no GOJAJA_SESSION in the shell)
+  gojaja role delete <id> [--as-system]
       Manage roles. 'create' writes config.yaml + a roles/<id>.md
       contract (fill its TBD sections). 'delete' also invalidates any
-      live session for the role.`,
+      live session for the role. PR9 SYSTEM-3 gates both: either
+      --as-system or a session for a role owning config.yaml.`,
 
   prompt: `  gojaja prompt --target agents|claude|cursor|generic [--write]
                 [--force-rewrite] [--no-handbook] [--json]

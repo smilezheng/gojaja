@@ -164,7 +164,16 @@ describe("gojaja role delete (CLI)", () => {
     await ctx.store.claimSession("Backend", 60);
     const cap = captureStdout();
     try {
-      const code = await runRole(args(["delete", "Backend"], { root: ctx.projectRoot }));
+      // SYSTEM-3: role delete is now ownership-gated. The bare-human
+      // path uses --as-system (replaces the prior "GOJAJA_SESSION must
+      // be unset" rule). A delegated role with config.yaml ownership
+      // is the other valid path; see split-test below.
+      const code = await runRole(
+        args(["delete", "Backend"], {
+          root: ctx.projectRoot,
+          "as-system": true,
+        }),
+      );
       expect(code).toBe(0);
       expect(cap.stdout).toContain("Deleted role 'Backend'");
       expect(cap.stdout).toContain("Invalidated 1 live session");
@@ -172,13 +181,19 @@ describe("gojaja role delete (CLI)", () => {
     } finally { cap.release(); }
   });
 
-  it("refuses to run when GOJAJA_SESSION is exported, with a clear hint to unset it", async () => {
-    process.env.GOJAJA_SESSION = "01HXSOMESESSIONXSOMETHING1";
+  it("refuses to run when GOJAJA_SESSION is exported but the role lacks config.yaml ownership", async () => {
+    // SYSTEM-3 transition: the prior rule was "GOJAJA_SESSION must be
+    // unset"; the new rule is "actor must own config.yaml OR be
+    // SYSTEM". A live session for a role without config.yaml in its
+    // owns list still refuses, but now via ForbiddenError (FORBIDDEN
+    // exit code 9) rather than USAGE.
+    const s = await ctx.store.claimSession("Backend", 60);
+    process.env.GOJAJA_SESSION = s.sessionId;
     const cap = captureStdout();
     try {
       await expect(
         runRole(args(["delete", "Backend"], { root: ctx.projectRoot })),
-      ).rejects.toMatchObject({ code: "USAGE" });
+      ).rejects.toMatchObject({ code: "FORBIDDEN" });
     } finally { cap.release(); }
   });
 });

@@ -41,9 +41,14 @@ describe("gojaja help text (PR8e rewrite)", () => {
     expect(HELP_TEXT).toContain("README.md");
   });
 
-  it("flags the role delete command and its SYSTEM-only restriction", () => {
+  it("flags the role delete command and its SYSTEM-3 ownership gate", () => {
+    // PR9 SYSTEM-3 replaced the "SYSTEM only — no GOJAJA_SESSION"
+    // rule with a unified ownership-of-config.yaml gate. The help
+    // text should mention both legitimate paths: --as-system and
+    // the delegated role pattern.
     expect(HELP_TEXT).toContain("role delete");
-    expect(HELP_TEXT).toContain("SYSTEM only");
+    expect(HELP_TEXT).toContain("--as-system");
+    expect(HELP_TEXT).toContain("config.yaml");
   });
 });
 

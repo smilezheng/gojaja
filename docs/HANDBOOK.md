@@ -190,3 +190,45 @@ A more principled fix — a real `OWNER` first-class role that the
 human user claims like any other agent — is on the roadmap for
 v3.1.0. Until then, treat `--as-system` events with the same
 skepticism you would any other unauthenticated input.
+
+### PR9 SYSTEM-3: `role create` / `role delete` ownership gate
+
+`role create` historically had **no** authorisation gate. Any caller
+in any session could mint new roles with arbitrary `owns` lists —
+including `owns: ["*"]`, which gave the newly-minted role unlimited
+ownership-gate bypass. The asymmetric "`role delete` requires
+GOJAJA_SESSION to be unset" rule meant the only protection against
+role spoofing was env-var hygiene, which (per SYSTEM-1's analysis)
+isn't real.
+
+SYSTEM-3 unifies both commands behind a single ownership-of-
+`config.yaml` gate:
+
+- **`role create`** now requires either `--as-system` (project-
+  owner bootstrap) OR a session for a role whose `owns` list
+  contains `config.yaml` (the **delegated HR / Admin pattern**).
+  Any other actor is `FORBIDDEN`.
+- **`role delete`** uses the same gate. The prior "GOJAJA_SESSION
+  must be unset" rule is gone; `--as-system` is the equivalent
+  explicit form, and a delegated owner of `config.yaml` can also
+  delete (symmetric with create).
+
+The delegated pattern lets a project hand off role management to an
+agent (e.g. an HR agent) once the project owner has bootstrapped
+it:
+
+```bash
+# Project owner bootstraps HR with config.yaml ownership.
+gojaja role create HR --owns 'config.yaml' --as-system
+
+# HR claims its session and can now mint additional roles itself.
+eval "$(gojaja claim HR --eval)"
+gojaja role create Backend --owns 'services/api/**'
+gojaja role create Mobile  --owns 'apps/mobile/**'
+```
+
+`ROLE_DELETED` audit events now record the actual actor
+(`from: <RoleId>` or `from: SYSTEM`), not a hardcoded `SYSTEM`.
+Combined with SYSTEM-2's `actorMeta`, an agent that managed to run
+`role delete --as-system` leaves a pid/cwd/hostname trail in the
+audit log pointing back to its own process.

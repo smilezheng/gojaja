@@ -8,6 +8,78 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Tracking v1.x; see [docs/ROADMAP](./docs/ROADMAP.md) for PR sequencing.
 
+### PR9 SYSTEM-3 — `role create` / `role delete` ownership gate (breaking)
+
+Closes the last of the three SYSTEM-class issues identified by the
+postmortem audit: `role create` had no authorisation gate at all
+(any caller in any session could mint roles with arbitrary `owns`,
+including `["*"]` for total escalation), and `role delete`'s
+"GOJAJA_SESSION must be unset" rule was the same env-var-as-trust-
+boundary problem SYSTEM-1 fixed elsewhere. Both unified behind a
+single ownership-of-`config.yaml` gate.
+
+**New rules.** Both commands accept:
+  - `--as-system` (project-owner bootstrap, requires no live
+    GOJAJA_SESSION; SYSTEM-1's gate applies); OR
+  - a session for a role whose `owns` list contains `config.yaml`
+    (the **delegated HR / Admin pattern**; PR8m roadmap baked in
+    here).
+
+Any other actor raises `ForbiddenError` (exit code 9). The audit
+log records the actual actor on `ROLE_DELETED` (previously
+hardcoded to `SYSTEM`), so a delegated deletion is distinguishable
+from a project-owner one.
+
+**Store surface.** `Store.createRole` gains optional
+`actor?: RoleId | "SYSTEM"` (defaults to `"SYSTEM"` for backward
+compatibility with the ~75 pre-PR9 test fixtures that call
+`store.createRole({...})` without an actor). Non-default actors run
+through `requireOwnership(actor, "config.yaml")`. `Store.deleteRole`
+relaxes the "actor !== SYSTEM throws" check to the same
+`requireOwnership` gate; ROLE_DELETED's `from` now reflects the
+actor.
+
+**CLI changes.** `runRoleCreate` adds the `--as-system` flag and
+threads `actor` + `actorMeta` to the store. `runRoleDelete` drops
+its hardcoded `process.env.GOJAJA_SESSION` check entirely; uses
+`resolveActor` like every other gated command. Help / handbook
+docs updated.
+
+**Migration for users.**
+
+```diff
+- gojaja role create PM "Product Manager"
++ gojaja role create PM "Product Manager" --as-system
+```
+
+```diff
+- # had to unset GOJAJA_SESSION first
+- gojaja role delete Backend
++ gojaja role delete Backend --as-system
+```
+
+Or, once a `config.yaml` owner is bootstrapped:
+
+```bash
+gojaja role create HR --owns 'config.yaml' --as-system
+eval "$(gojaja claim HR --eval)"
+gojaja role create Backend --owns 'services/api/**'   # no --as-system needed
+gojaja role delete OldRole
+```
+
+Agent automation that already had a `GOJAJA_SESSION` for the role
+owning `config.yaml` works unchanged.
+
+**Tests.** New `tests/role-gate.test.ts` (8 cases): each of the
+four gate paths (refuse / SYSTEM / forbidden non-owner / delegated
+owner) × {create, delete}. Three pre-existing fixtures
+(`role-cli.test.ts` ×2, `role-delete.test.ts` ×1) opted into
+`as-system: true` where they previously relied on the prior
+implicit / env-var-based rule. The "refuses GOJAJA_SESSION is
+exported" delete test was rewritten as "refuses a session for a
+role lacking config.yaml ownership" — same intent, new error
+shape (USAGE → FORBIDDEN). 499 → 507 (+8).
+
 ### PR9 SYSTEM-2 — forensic metadata on SYSTEM events
 
 Companion to SYSTEM-1. With `--as-system` now the explicit gateway

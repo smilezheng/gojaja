@@ -47,7 +47,9 @@ describe("gojaja role (CLI: TBD nags)", () => {
     try {
       const code = await runRole(args(
         ["create", "PM", "Product Manager"],
-        { root: ctx.projectRoot },
+        // SYSTEM-3: role create is now ownership-gated. Tests run
+        // with no GOJAJA_SESSION so opt into the SYSTEM bypass.
+        { root: ctx.projectRoot, "as-system": true },
       ));
       expect(code).toBe(0);
       expect(cap.stdout).toContain("TODO");
@@ -63,7 +65,7 @@ describe("gojaja role (CLI: TBD nags)", () => {
     try {
       await runRole(args(
         ["create", "PM", "Product Manager"],
-        { root: ctx.projectRoot, json: true },
+        { root: ctx.projectRoot, json: true, "as-system": true },
       ));
       const parsed = JSON.parse(cap.stdout);
       expect(parsed.needsFill).toBe(true);

@@ -247,6 +247,22 @@ export interface Store {
     owns?: string[];
     reportsTo?: RoleId[];
     mustNotEdit?: string[];
+    /**
+     * PR9 SYSTEM-3 ownership gate (defaults to `"SYSTEM"` for
+     * backward compatibility with the ~75 call sites in tests that
+     * pre-date the gate). Non-SYSTEM actors must have `config.yaml`
+     * in their `owns` list; otherwise `ForbiddenError`.
+     *
+     * The agent-delegation flow (PR8m baked in here) is:
+     *   1. Project owner runs `gojaja role create HR --as-system
+     *      --owns config.yaml` once.
+     *   2. HR claims the role and can now mint further roles by
+     *      running `gojaja role create <id> ...` from its own
+     *      session.
+     */
+    actor?: RoleId | "SYSTEM";
+    /** Forensic metadata for SYSTEM-actor invocations. */
+    actorMeta?: SystemActorMeta;
   }): Promise<RoleConfig>;
 
   /** Read the markdown role contract; throws ENOENT-like UsageError. */
@@ -260,7 +276,16 @@ export interface Store {
    *
    * Emits a `ROLE_DELETED` system event.
    *
+   * **PR9 SYSTEM-3 ownership gate.** `actor` must either be
+   * `"SYSTEM"` (project-owner bypass via `--as-system`) OR a role
+   * whose `owns` list includes `config.yaml`. Any other actor
+   * raises `ForbiddenError`. The prior "GOJAJA_SESSION must be
+   * unset" rule (enforced at the CLI layer) is replaced by this
+   * symmetric gate, so a delegated role (e.g. HR with
+   * `--owns config.yaml`) can delete roles too.
+   *
    * @throws UsageError if `id` is not currently registered.
+   * @throws ForbiddenError if the actor lacks `config.yaml` ownership.
    */
   deleteRole(input: {
     id: RoleId;
