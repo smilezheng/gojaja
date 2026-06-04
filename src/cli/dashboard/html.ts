@@ -732,29 +732,46 @@ export const DASHBOARD_HTML = `<!doctype html>
     // Snapshot current selection so re-renders during typing do not
     // wipe what the user just picked.
     var ids = roles.map(function(r){ return r.id; });
-    // [elementId, emptyOptionLabel]: rep-to / act-role start blank so
-    // the operator must explicitly pick a recipient; task-owner keeps
-    // "(unassigned)".
+    // [elementId, emptyOptionLabel, allowBroadcast]: rep-to / act-role
+    // start blank so the operator must explicitly pick a recipient;
+    // task-owner keeps "(unassigned)". rep-to additionally offers
+    // a top-of-list "@All — broadcast (SYSTEM)" entry as the v3.0.x
+    // SYSTEM-broadcast surface; selecting it sends to="*" via the
+    // existing /api/report endpoint, which the server posts as
+    // from="SYSTEM" (the dashboard's Send Report panel is always a
+    // project-owner action — see the section header).
     [
-      ["rep-to", "(select role)"],
-      ["task-owner", "(unassigned)"],
-      ["act-role", "(select role)"],
+      ["rep-to", "(select role)", true],
+      ["task-owner", "(unassigned)", false],
+      ["act-role", "(select role)", false],
     ].forEach(function(spec){
       var sel = document.getElementById(spec[0]);
       if(!sel) return;
       var prev = sel.value;
       var emptyLabel = spec[1];
+      var allowBroadcast = spec[2];
       var opts;
       if(ids.length === 0){
         opts = emptyLabel === "(unassigned)"
           ? '<option value="">(unassigned)</option>'
           : '<option value="">(no roles yet — Create role first)</option>';
       } else {
-        opts = '<option value="">'+esc(emptyLabel)+'</option>' +
-          ids.map(function(id){ return '<option value="'+esc(id)+'">'+esc(id)+'</option>'; }).join("");
+        opts = '<option value="">'+esc(emptyLabel)+'</option>';
+        if(allowBroadcast){
+          opts += '<option value="*">' +
+                  '@All — broadcast (SYSTEM)' +
+                  '</option>';
+        }
+        opts += ids.map(function(id){
+          return '<option value="'+esc(id)+'">'+esc(id)+'</option>';
+        }).join("");
       }
       if(sel.innerHTML !== opts){ sel.innerHTML = opts; }
-      if(prev && ids.indexOf(prev) >= 0){ sel.value = prev; }
+      // Preserve a prior selection if it's still a valid pick. "*"
+      // (broadcast) is valid only on rep-to.
+      var stillValid = (prev === "*" && allowBroadcast) ||
+                       (prev && ids.indexOf(prev) >= 0);
+      if(stillValid){ sel.value = prev; }
     });
   }
 

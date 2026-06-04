@@ -37,8 +37,12 @@ export async function runReport(args: ParsedArgs): Promise<number> {
   if (json) {
     process.stdout.write(JSON.stringify({ status: "reported", event }) + "\n");
   } else {
+    // v3.0.x SYSTEM broadcast: render `to: "*"` as "broadcast" so
+    // the human output reads naturally; the event itself keeps
+    // `to: "*"` for audit and downstream consumers.
+    const dest = to === "*" ? "broadcast (all roles)" : `to ${to}`;
     process.stdout.write(
-      `Reported ${event.id} from ${actor} to ${to}` +
+      `Reported ${event.id} from ${actor} ${dest}` +
         (ref ? ` (ref=${ref})` : "") +
         `.\n` +
         nextLoopHint({ json, actor }),

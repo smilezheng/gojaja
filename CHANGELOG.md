@@ -6,6 +6,45 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### v3.0.x — SYSTEM broadcast announcements (`report --to '*'`)
+
+`gojaja report` gains a broadcast recipient: passing `--to '*'`
+(together with `--as-system`) emits a REPORT event with `to: "*"`
+that lands in every role's manifest. The watch dashboard's Send
+Report panel surfaces the same capability via a new top-of-list
+`"@All — broadcast (SYSTEM)"` dropdown entry.
+
+**Permission model.** Only SYSTEM may broadcast. Peers
+(`from: <RoleId>`) calling `publishReport` with `to: "*"` are
+refused with USAGE pointing at `worklog` (the existing
+team-visible progress channel) as the right tool. The asymmetry
+mirrors real org shapes: only the project owner sends
+"everyone, listen up" notices; team-mates use worklog to surface
+their own progress.
+
+**Surface changes.**
+
+  - `Store.publishReport`'s `to` parameter type widened from
+    `RoleId` to `RoleId | "*"`. The new branch skips both
+    `validateRoleId(to)` (since `"*"` isn't a valid role id) and
+    the registered-role check; the `from === "SYSTEM"` precondition
+    is enforced inside the store, so peers cannot reach the
+    broadcast path even by hand-crafting the call.
+  - `runReport` CLI handler unchanged at the call site (the
+    string passes through); user-facing output renders
+    `to === "*"` as `"broadcast (all roles)"` for legibility.
+  - Watch dashboard's `fillRoleSelects` now takes a per-select
+    `allowBroadcast` flag; `rep-to` opts in, `task-owner` and
+    `act-role` do not (broadcasting doesn't make sense for task
+    ownership or per-window activation).
+
+**Tests.** New `tests/broadcast.test.ts` (7 cases) pins the four
+gate paths: SYSTEM + `*` succeeds, peer + `*` rejects, SYSTEM +
+typo recipient still rejects via the registered-role check,
+CLI end-to-end `--to '*' --as-system` works, the SYSTEM-1 gate
+fires before the broadcast check when `--as-system` is missing,
+and a live peer session cannot escalate to broadcast. 534 → 541.
+
 ### v3.0.x — task status `Ready` renamed to `Pending` (silent dual-read)
 
 The "queued, not yet started" status is now spelled `Pending`. The

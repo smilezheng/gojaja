@@ -1186,7 +1186,7 @@ export class LocalFsStore implements Store {
 
   async publishReport(input: {
     from: RoleId | "SYSTEM";
-    to: RoleId;
+    to: RoleId | "*";
     ref?: string;
     message: string;
     actorMeta?: SystemActorMeta;
@@ -1196,19 +1196,40 @@ export class LocalFsStore implements Store {
     // request at a specific role. Symmetric with `rfc new` / `rfc
     // comment` / `task new` / `state edit`'s SYSTEM paths.
     if (input.from !== "SYSTEM") validateRoleId(input.from);
-    validateRoleId(input.to);
     if (typeof input.message !== "string" || input.message.length === 0) {
       throw new UsageError("Report message must be a non-empty string.");
     }
-    // PROTOCOL.md promises that reports to unknown recipients are
-    // refused. Without this the typo `--to Forntend` silently emits an
-    // event no one will ever read.
-    const config = await this.readConfig();
-    if (!config.roles[input.to]) {
-      throw new UsageError(
-        `Unknown recipient role '${input.to}'. ` +
-          `Known roles: ${Object.keys(config.roles).sort().join(", ") || "(none)"}.`,
-      );
+    // v3.0.x: a SYSTEM caller may broadcast to all roles by
+    // passing `to: "*"` (`gojaja report --to '*' --as-system`).
+    // Peers (`from: <RoleId>`) cannot broadcast — they must address
+    // a specific recipient, mirroring the team-shape constraint
+    // ("only the project owner sends company-wide announcements").
+    // Worklog remains the peer-side broadcast channel for progress
+    // notes; announcements are a different semantic.
+    const isBroadcast = input.to === "*";
+    if (isBroadcast) {
+      if (input.from !== "SYSTEM") {
+        throw new UsageError(
+          `Only SYSTEM (project owner via --as-system) may broadcast ` +
+            `reports to all roles. Role '${input.from}' must address ` +
+            `a specific recipient, or use 'gojaja worklog' for ` +
+            `team-visible progress notes.`,
+        );
+      }
+      // Skip both validateRoleId (which would reject "*") AND the
+      // registered-role check (the broadcast doesn't target one).
+    } else {
+      validateRoleId(input.to);
+      // PROTOCOL.md promises that reports to unknown recipients are
+      // refused. Without this the typo `--to Forntend` silently emits
+      // an event no one will ever read.
+      const config = await this.readConfig();
+      if (!config.roles[input.to]) {
+        throw new UsageError(
+          `Unknown recipient role '${input.to}'. ` +
+            `Known roles: ${Object.keys(config.roles).sort().join(", ") || "(none)"}.`,
+        );
+      }
     }
     return this.recordEventInternal({
       type: "REPORT",

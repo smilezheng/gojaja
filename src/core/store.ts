@@ -146,13 +146,17 @@ export interface Store {
      * Sender. Accepts `"SYSTEM"` so a human running the CLI without
      * `GOJAJA_SESSION` can leave a directed message to a role
      * (symmetric with `rfc new` / `rfc comment` / `task new` /
-     * `state edit`'s SYSTEM paths). The recipient `to` must still be
-     * a registered role — humans send TO roles, not as roles, and
-     * the receiver always knows whether the directive came from a
-     * peer agent or from the project owner.
+     * `state edit`'s SYSTEM paths).
      */
     from: RoleId | "SYSTEM";
-    to: RoleId;
+    /**
+     * Recipient. Either a registered role id, or `"*"` for a
+     * broadcast announcement to every role. Broadcast is restricted
+     * to `from === "SYSTEM"` (v3.0.x SYSTEM-broadcast feature);
+     * peers must address a specific role or use `worklog` for the
+     * team-visible progress channel.
+     */
+    to: RoleId | "*";
     ref?: string;
     message: string;
     /**
