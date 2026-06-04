@@ -191,7 +191,12 @@ describe("performMigrate: execution", () => {
   });
 
   it("--cleanup removes the central-classified files from the user tree", async () => {
-    const result = await performMigrate(ctx.projectRoot, { cleanup: true });
+    // Tests use tmpdirs (not git repos); --force bypasses the
+    // cleanup-time git-state gate added in v3.0.x T1.
+    const result = await performMigrate(ctx.projectRoot, {
+      cleanup: true,
+      force: true,
+    });
     expect(result.cleanedUp).toBeGreaterThan(0);
     const userTb = path.join(result.layerDir, Paths.taskBoardFile);
     expect(await exists(userTb)).toBe(false);
@@ -208,8 +213,14 @@ describe("performMigrate: execution", () => {
   });
 
   it("re-running --cleanup on an already-migrated layer is a no-op cleanup pass", async () => {
-    const first = await performMigrate(ctx.projectRoot, { cleanup: true });
-    const again = await performMigrate(ctx.projectRoot, { cleanup: true });
+    const first = await performMigrate(ctx.projectRoot, {
+      cleanup: true,
+      force: true,
+    });
+    const again = await performMigrate(ctx.projectRoot, {
+      cleanup: true,
+      force: true,
+    });
     // Already cleaned → second cleanup finds nothing to remove.
     expect(again.copied).toBe(0);
     expect(again.cleanedUp).toBe(0);
@@ -228,7 +239,10 @@ describe("performMigrate: execution", () => {
   });
 
   it("end-to-end: migrated layer opens via openStoreOrThrow as v3 split-mode", async () => {
-    const result = await performMigrate(ctx.projectRoot, { cleanup: true });
+    const result = await performMigrate(ctx.projectRoot, {
+      cleanup: true,
+      force: true,
+    });
     const store = await openStoreOrThrow(ctx.projectRoot);
     expect(store.rootDescription).toContain("user=");
     expect(store.rootDescription).toContain("central=");
@@ -241,5 +255,93 @@ describe("performMigrate: execution", () => {
     expect(events.some((e) => e.type === "WORKLOG")).toBe(true);
     expect(events.some((e) => e.type === "TASK_CREATED")).toBe(true);
     expect(result.toVersion).toBe("3.0.0");
+  });
+});
+
+/**
+ * v3.0.x T1: cleanup-time git-state gate. Mirrors `gojaja init` and
+ * `gojaja reset`'s posture — destructive ops on a non-git or dirty
+ * project refuse without `--force` so the user has a clean revert
+ * point. Copy-only migration (no `--cleanup`) is unaffected.
+ */
+describe("performMigrate: cleanup git-state gate (T1)", () => {
+  let ctx: Ctx;
+  beforeEach(async () => { ctx = await freshV2Layer(); });
+  afterEach(async () => { await cleanup(ctx); });
+
+  it("refuses --cleanup on a non-git project unless --force", async () => {
+    // tmpdir project is not a git repo.
+    await expect(
+      performMigrate(ctx.projectRoot, { cleanup: true }),
+    ).rejects.toMatchObject({ code: "MIGRATE_GIT_GATE" });
+    // --force bypasses.
+    const result = await performMigrate(ctx.projectRoot, {
+      cleanup: true,
+      force: true,
+    });
+    expect(result.cleanedUp).toBeGreaterThan(0);
+  });
+
+  it("does NOT probe git state when --cleanup is absent (copy-only is safe)", async () => {
+    // Copy-only migration on a non-git tmpdir should succeed
+    // without --force, because nothing is being deleted.
+    const result = await performMigrate(ctx.projectRoot);
+    expect(result.copied).toBeGreaterThan(0);
+    expect(result.cleanedUp).toBe(0);
+  });
+});
+
+/**
+ * v3.0.x T2: whitelist-based cleanup. Files placed under
+ * `<project>/.gojaja/` for project-specific reasons (custom
+ * subdirectories, README notes, etc.) are NOT deleted by
+ * `--cleanup` even if `classifyPath` would route them to central.
+ * Cleanup only touches paths gojaja exclusively owns.
+ */
+describe("performMigrate: cleanup whitelist (T2)", () => {
+  let ctx: Ctx;
+  beforeEach(async () => { ctx = await freshV2Layer(); });
+  afterEach(async () => { await cleanup(ctx); });
+
+  it("preserves user files placed under .gojaja/ that aren't on the whitelist", async () => {
+    // The user dropped a custom subdir under .gojaja/ to keep
+    // project-specific notes alongside the layer. Pre-T2 cleanup
+    // would have deleted these (classifyPath defaults unknowns to
+    // central). Post-T2 they survive.
+    const customDir = path.join(ctx.layerDir, "custom-notes");
+    await fsp.mkdir(customDir, { recursive: true });
+    const customFile = path.join(customDir, "design.md");
+    await fsp.writeFile(customFile, "# Project-specific notes\n");
+
+    // Also drop a stray README at the layer root.
+    const customReadme = path.join(ctx.layerDir, "README.md");
+    await fsp.writeFile(customReadme, "Internal docs\n");
+
+    await performMigrate(ctx.projectRoot, { cleanup: true, force: true });
+
+    // Custom files survived.
+    expect(await fsp.stat(customFile).then(() => true).catch(() => false)).toBe(true);
+    expect(await fsp.stat(customReadme).then(() => true).catch(() => false)).toBe(true);
+
+    // Whitelisted files are gone.
+    expect(
+      await fsp.stat(path.join(ctx.layerDir, "state/task_board.yaml"))
+        .then(() => true).catch(() => false),
+    ).toBe(false);
+    expect(
+      await fsp.stat(path.join(ctx.layerDir, "comms"))
+        .then(() => true).catch(() => false),
+    ).toBe(false);
+  });
+
+  it("preserves state/project_state.md (user-tree contract) even though state/task_board.yaml gets deleted", async () => {
+    await performMigrate(ctx.projectRoot, { cleanup: true, force: true });
+    // project_state.md is user-tree per classifyPath; cleanup
+    // never touches it.
+    const psm = path.join(ctx.layerDir, "state/project_state.md");
+    expect(await fsp.stat(psm).then(() => true).catch(() => false)).toBe(true);
+    // task_board.yaml is whitelisted and deleted.
+    const tb = path.join(ctx.layerDir, "state/task_board.yaml");
+    expect(await fsp.stat(tb).then(() => true).catch(() => false)).toBe(false);
   });
 });

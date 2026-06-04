@@ -7,6 +7,7 @@ import {
   performMigrate,
   MigrateNoLayerError,
   MigrateAlreadyV3Error,
+  MigrateGitGateError,
 } from "../migrate";
 
 /**
@@ -32,6 +33,11 @@ export async function runMigrate(args: ParsedArgs): Promise<number> {
   const execute = boolFlag(args.flags, "execute");
   const cleanup = boolFlag(args.flags, "cleanup");
   const json = boolFlag(args.flags, "json");
+  // v3.0.x T1: --force bypasses the cleanup-time git-state gate.
+  // Mirrors `gojaja init` and `gojaja reset`'s posture: a dirty or
+  // non-git work tree refuses cleanup by default because there's
+  // no clean revert path if anything goes wrong.
+  const force = boolFlag(args.flags, "force");
 
   const inspection = await inspectMigrate(root);
 
@@ -49,7 +55,7 @@ export async function runMigrate(args: ParsedArgs): Promise<number> {
   }
 
   try {
-    const result = await performMigrate(root, { cleanup });
+    const result = await performMigrate(root, { cleanup, force });
     if (json) {
       process.stdout.write(
         JSON.stringify({ status: "migrated", result }) + "\n",
@@ -89,6 +95,37 @@ export async function runMigrate(args: ParsedArgs): Promise<number> {
         process.stdout.write(`${err.message}\n`);
       }
       return 0;
+    }
+    if (err instanceof MigrateGitGateError) {
+      if (json) {
+        process.stdout.write(
+          JSON.stringify({
+            status: "git-gate",
+            error: err.message,
+            git: err.git,
+          }) + "\n",
+        );
+      } else {
+        if (err.git.kind === "dirty") {
+          process.stderr.write(
+            `Refusing cleanup: ${err.layerDir.replace(/\.gojaja$/, "")} ` +
+              `has uncommitted git changes.\n\n` +
+              err.git.sample.map((l) => `    ${l}`).join("\n") +
+              (err.git.sample.length >= 10 ? "\n    ...\n" : "\n") +
+              `\nCommit or stash them first so cleanup's deletions land in a\n` +
+              `clean, revertable state. Then re-run\n` +
+              `'gojaja migrate --execute --cleanup' (or '--cleanup' alone).\n` +
+              `(Override with '--force' if you understand the risk.)\n`,
+          );
+        } else {
+          process.stderr.write(
+            `Refusing cleanup: not a git repository. Without version\n` +
+              `control there is no clean way to undo cleanup's deletions.\n` +
+              `Re-run with '--force' to proceed anyway.\n`,
+          );
+        }
+      }
+      return 2;
     }
     throw err;
   }

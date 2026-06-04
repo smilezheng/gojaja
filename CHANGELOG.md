@@ -6,7 +6,78 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-(Currently empty. v3.0.2 work lands here.)
+### v3.0.x — `gojaja watch` now reads `project.json` (T3 bug fix)
+
+`gojaja watch` previously constructed its `LocalFsStore` via
+`new LocalFsStore(layer)` directly, ignoring the v3
+`<project>/.gojaja/project.json` marker. After
+`gojaja migrate --execute --cleanup` (which moves runtime state
+to `~/.gojaja/projects/<id>/` and removes it from the user tree),
+the dashboard rendered an empty Tasks/Activity/RFCs panel even
+though `gojaja task list` (which routes through `openStoreOrThrow`)
+read the central tree correctly. The two paths diverged at the
+store-construction step.
+
+**Fix.** New `runtime.openStoreUncheckedAsync(projectRoot)` that
+mirrors `openStoreOrThrow`'s project.json + centralRoot resolution
+but does NOT throw on uninitialised projects (watch needs to
+serve an init landing page). Watch's startup uses it.
+
+**Limitation.** The store reference resolves once at `runWatch`
+startup; if `gojaja init` or `gojaja migrate` runs while watch is
+live, restart watch to pick up the new layout. (Future
+improvement: re-resolve per request.)
+
+**Tests.** 2 new cases in `tests/watch.test.ts`: a v3 project
+yields a split-mode store with the right central root and a task
+created via that store is visible in `buildSnapshot()`; a pre-init
+project falls through to single-root mode.
+
+### v3.0.x — `gojaja migrate --cleanup` git-state gate + whitelist deletion (T1, T2)
+
+Two safety improvements to the migrate cleanup phase, motivated
+by user testing.
+
+**T1: git-state gate before cleanup.** `gojaja migrate --execute
+--cleanup` (and standalone `--cleanup`) now refuses on a dirty or
+non-git project unless `--force`. Mirrors the posture of
+`gojaja init` and `gojaja reset`. Copy-only migration is
+unaffected — a dirty work tree isn't a risk if nothing is being
+deleted.
+
+  - New `MigrateGitGateError` class; CLI handler renders the
+    standard "uncommitted changes" sample + suggests
+    `git add -A && git commit` or `--force`.
+  - `inspectGit` shared helper (already used by init / reset)
+    is now imported from `src/cli/util/git-state.ts`.
+
+**T2: whitelist-based cleanup deletion.** Cleanup previously
+walked the entire user tree and unlink'd anything `classifyPath`
+classified as central. The classifier defaults unknown paths to
+"central" (so new runtime surfaces always route there); for
+deletion that meant any user file placed under `.gojaja/`
+(custom subdirectories, internal notes) was a deletion target.
+Cleanup now only touches paths gojaja exclusively owns:
+
+  - **File whitelist** (exact-match):
+    `state/task_board.yaml`,
+    `state/architecture.md`,
+    `state/decisions.md`,
+    `state/risks.yaml`.
+  - **Prefix whitelist** (whole subtree `rm -rf`):
+    `comms/`, `rfcs/`, `worklog/`, `locks/`.
+  - User files placed at e.g. `.gojaja/custom-notes/design.md`
+    or `.gojaja/README.md` are preserved.
+  - Defence in depth: each whitelist match is additionally
+    cross-checked against `classifyPath !== "user"`.
+
+**Tests.** 4 new cases in `tests/migrate.test.ts` cover both
+(refuses on non-git tmpdir without `--force`, copy-only is
+unaffected; preserves user files outside the whitelist;
+preserves `state/project_state.md` while deleting
+`state/task_board.yaml`). 543 → 549.
+
+### v3.0.x — task status `Ready` renamed to `Pending` (silent dual-read)
 
 ## [3.0.1] — 2026-06-04
 

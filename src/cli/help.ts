@@ -38,14 +38,19 @@ Setup (you, in your shell — runs once per project unless noted):
       at ~/.gojaja/projects/<ULID>/ for the task board, event stream,
       sessions, RFCs, worklog, and locks. See RFC-0001. The
       ~/.gojaja/ location is overridable via the GOJAJA_HOME env var.
-  migrate [--execute] [--cleanup]
+  migrate [--execute] [--cleanup] [--force]
       PR9.3 v2 -> v3 walker. Default = dry-run preview. --execute
       copies central-classified files from <project>/.gojaja/ to
       ~/.gojaja/projects/<new-ULID>/, writes project.json, and bumps
       VERSION to 3.0.0. User-tree source files are KEPT as a safety
       net by default. --cleanup also removes them once the new
-      layout is verified. Idempotent: re-running on a v3 layer is a
-      no-op (or a cleanup pass if --cleanup is set).
+      layout is verified, but only paths gojaja exclusively owns
+      (state/task_board.yaml + state/{architecture,decisions,risks}.*
+      + comms/, rfcs/, worklog/, locks/ subtrees); user files
+      placed under .gojaja/ for project-specific reasons are
+      untouched. --cleanup additionally refuses on a dirty / non-git
+      project unless --force (mirrors gojaja init / reset). Idempotent
+      on a v3 layer (or a cleanup pass if --cleanup is set).
   role create <id> [<title>] [--description <text>] [--owns <a,b>]
                               [--reports-to <r1,r2>] [--must-not-edit <a,b>]
                               [--as-system]

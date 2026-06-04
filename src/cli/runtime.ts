@@ -85,3 +85,32 @@ export function openStoreUnchecked(projectRoot: string): LocalFsStore {
   // to do async I/O.
   return new LocalFsStore(layerRoot(projectRoot));
 }
+
+/**
+ * Async, init-tolerant store resolver — like `openStoreOrThrow` but
+ * does NOT throw on an uninitialised layer. Used by `gojaja watch`,
+ * which serves an init landing page when the layer is missing and
+ * therefore must construct a usable store reference even pre-init.
+ *
+ * If `<project>/.gojaja/project.json` exists, returns a v3
+ * split-mode store with the right `centralRoot`. Otherwise returns
+ * a single-root store (v2 layout, or pre-init).
+ *
+ * v3.0.x bug fix: the previous `new LocalFsStore(layer)` shortcut
+ * inside watch ignored project.json entirely, so after `gojaja
+ * migrate --execute --cleanup` (which moves runtime state to
+ * `~/.gojaja/projects/<id>/`) the dashboard saw an empty user
+ * tree even though `gojaja task list` (which goes through
+ * `openStoreOrThrow`) read the central tree correctly. Funnelling
+ * watch through this helper closes the gap.
+ */
+export async function openStoreUncheckedAsync(
+  projectRoot: string,
+): Promise<LocalFsStore> {
+  const userRoot = layerRoot(projectRoot);
+  const project = await readProjectJson(userRoot).catch(() => null);
+  const opts = project
+    ? { centralRoot: centralRootForProject(project.id) }
+    : undefined;
+  return new LocalFsStore(userRoot, opts);
+}

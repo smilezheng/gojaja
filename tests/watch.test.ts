@@ -142,6 +142,85 @@ describe("watch buildSnapshot — healthStatus derivation", () => {
   });
 });
 
+/**
+ * v3.0.x T3 regression: when `gojaja migrate --execute --cleanup`
+ * has moved runtime state from `<project>/.gojaja/` to
+ * `~/.gojaja/projects/<id>/`, `gojaja watch` must construct its
+ * Store via `openStoreUncheckedAsync` (which reads project.json
+ * and routes via centralRoot), not via the bare
+ * `new LocalFsStore(layer)` shortcut.
+ *
+ * The bug pre-fix: watch's snapshot used a single-root store
+ * pointing at the user tree, which after cleanup contains only the
+ * contracts (no task_board.yaml, no events, no rfcs/). The
+ * dashboard rendered an empty Tasks/Activity/RFCs panel even
+ * though `gojaja task list` (which routes through
+ * openStoreOrThrow) found the tasks correctly.
+ */
+describe("watch — store resolution honours project.json (T3)", () => {
+  it("openStoreUncheckedAsync returns a split-mode store for v3 projects", async () => {
+    const baseDir = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-watch-t3-"));
+    const projectRoot = path.join(baseDir, "project");
+    const fakeHome = path.join(baseDir, "home", ".gojaja");
+    await fsp.mkdir(projectRoot, { recursive: true });
+    await fsp.mkdir(fakeHome, { recursive: true });
+    const savedHome = process.env.GOJAJA_HOME;
+    process.env.GOJAJA_HOME = fakeHome;
+    try {
+      const { performInit } = await import("../src/cli/commands/init");
+      const { openStoreUncheckedAsync } = await import("../src/cli/runtime");
+      const initResult = await performInit(projectRoot, { force: true });
+
+      // v3 init created project.json + central tree. The async
+      // resolver MUST pick that up and produce a split-mode store.
+      const store = await openStoreUncheckedAsync(projectRoot);
+      expect(store.rootDescription).toContain("user=");
+      expect(store.rootDescription).toContain("central=");
+      expect(store.rootDescription).toContain(initResult.projectId);
+
+      // End-to-end: a task created via this store should land in
+      // central, and buildSnapshot should find it. This is the
+      // exact path watch goes through in production.
+      await store.createRole({
+        id: "PM",
+        title: "PM",
+        owns: ["state/task_board.yaml"],
+        actor: "SYSTEM",
+      });
+      const t = await store.createTask({
+        title: "from-fix-test",
+        owner: "PM",
+        actor: "PM",
+      });
+      const snap = await buildSnapshot(store, projectRoot, 60_000);
+      expect(snap.tasks.find((x) => x.id === t.id)?.title).toBe("from-fix-test");
+    } finally {
+      if (savedHome === undefined) delete process.env.GOJAJA_HOME;
+      else process.env.GOJAJA_HOME = savedHome;
+      await fsp.rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("openStoreUncheckedAsync falls back to single-root for v2 / pre-init projects", async () => {
+    const baseDir = await fsp.mkdtemp(path.join(os.tmpdir(), "ma-watch-v2-"));
+    const projectRoot = path.join(baseDir, "project");
+    await fsp.mkdir(projectRoot, { recursive: true });
+    try {
+      const { openStoreUncheckedAsync } = await import("../src/cli/runtime");
+      // No project.json, no .gojaja/ at all (pre-init project).
+      const store = await openStoreUncheckedAsync(projectRoot);
+      // Single-root mode keeps the historical one-path
+      // description (no `user=...central=...` prefix).
+      expect(store.rootDescription).not.toContain("user=");
+      expect(store.rootDescription).not.toContain("central=");
+      // store still functional for later isInitialised() probes.
+      expect(await store.isInitialised()).toBe(false);
+    } finally {
+      await fsp.rm(baseDir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ---- HTTP endpoints (write surface, loopback-only) ------------------
 
 describe("watch HTTP server — Actions endpoints (loopback-gated)", () => {

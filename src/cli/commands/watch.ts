@@ -3,7 +3,11 @@ import * as os from "node:os";
 import { spawn } from "node:child_process";
 import { boolFlag, optionalString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
-import { discoverProjectRoot, layerRoot } from "../runtime";
+import {
+  discoverProjectRoot,
+  layerRoot,
+  openStoreUncheckedAsync,
+} from "../runtime";
 import { LocalFsStore } from "../../core/local-fs-store";
 import { DASHBOARD_HTML } from "../dashboard/html";
 import { inspectInitState, performInit } from "./init";
@@ -79,12 +83,21 @@ const STALLED_NO_WAIT_THRESHOLD_MS = 60_000;
 export async function runWatch(args: ParsedArgs): Promise<number> {
   const root = optionalString(args.flags, "root") ?? (await discoverProjectRoot());
   const layer = layerRoot(root);
-  // The store is opened lazily per-request. We keep an
-  // `unchecked`-style instance here so `runWatch` still works
-  // against an uninitialised project (the front-end will steer the
-  // user through `gojaja init` via the dashboard); each handler
-  // gets its own `isInitialised` check before touching anything.
-  const store = new LocalFsStore(layer);
+  // v3.0.x bug fix (T3): use the async resolver so watch picks up
+  // `<project>/.gojaja/project.json` and constructs a split-mode
+  // store for v3 projects. The previous `new LocalFsStore(layer)`
+  // ignored project.json and silently pinned watch to single-root
+  // mode, causing the dashboard to show an empty Tasks/Activity/RFCs
+  // panel after `gojaja migrate --execute --cleanup` (the runtime
+  // state moved to ~/.gojaja/projects/<id>/, but watch was still
+  // reading the user tree).
+  //
+  // Note: this resolves ONCE at startup. If `gojaja init` or
+  // `gojaja migrate` runs while watch is live, restart watch to
+  // pick up the new layout. The /api/init handler below
+  // re-resolves explicitly after performInit succeeds (covers
+  // dashboard-driven init).
+  let store = await openStoreUncheckedAsync(root);
 
   const host = optionalString(args.flags, "host") ?? "127.0.0.1";
   const portRaw = optionalString(args.flags, "port");

@@ -10,7 +10,45 @@ import {
   readProjectJson,
   writeProjectJson,
 } from "./central-root";
+import { inspectGit, type GitState } from "./util/git-state";
 import type { ProjectJson } from "../core/types";
+
+/**
+ * Whitelist of POSIX relative paths under `<project>/.gojaja/` that
+ * `migrate --cleanup` is allowed to remove from the user tree.
+ * Defining this as a closed positive list (rather than "delete every
+ * `classifyPath === central` match") protects user files that may
+ * happen to live under `.gojaja/` for project-specific reasons —
+ * the classifier's default-to-central rule for unknown paths is
+ * intentional for ROUTING (so new runtime surfaces always land in
+ * the central tree), but it would be unsafe for DELETION (any new
+ * gojaja addition or user side-channel could match by accident).
+ *
+ * Each entry is either:
+ *   - `{ kind: "file", relPath }` — exact-match (legacy convention
+ *     files that historically lived in `state/`); OR
+ *   - `{ kind: "prefix", prefix }` — POSIX prefix (subtree that
+ *     gojaja exclusively owns: comms / rfcs / worklog / locks).
+ */
+const CLEANUP_WHITELIST: ReadonlyArray<
+  | { kind: "file"; relPath: string }
+  | { kind: "prefix"; prefix: string }
+> = [
+  // state/ legacy runtime files. project_state.md is user-tree and
+  // never appears here. The four below are central-tree per
+  // SCHEMA.md and either default to central via the classifier
+  // (task_board.yaml) or were noted as "legacy, by convention".
+  { kind: "file", relPath: "state/task_board.yaml" },
+  { kind: "file", relPath: "state/architecture.md" },
+  { kind: "file", relPath: "state/decisions.md" },
+  { kind: "file", relPath: "state/risks.yaml" },
+  // Whole subtrees gojaja owns end-to-end.
+  { kind: "prefix", prefix: "comms/" },
+  { kind: "prefix", prefix: "rfcs/" },
+  { kind: "prefix", prefix: "worklog/" },
+  { kind: "prefix", prefix: "locks/" },
+];
+
 
 /**
  * PR9.3 — `gojaja migrate` walker for v2 → v3.
@@ -101,6 +139,27 @@ export class MigrateAlreadyV3Error extends Error {
 }
 
 /**
+ * Thrown when `--cleanup` is requested but the project's git work
+ * tree is dirty or absent — cleanup deletes files from the user
+ * tree, so without a clean revert point a misclassification or
+ * misjudgement is unrecoverable. `--force` bypasses (mirrors
+ * `gojaja init` / `gojaja reset`'s posture).
+ */
+export class MigrateGitGateError extends Error {
+  readonly code = "MIGRATE_GIT_GATE";
+  constructor(
+    public readonly git: GitState,
+    public readonly layerDir: string,
+  ) {
+    super(
+      git.kind === "dirty"
+        ? `Refusing cleanup: working tree has uncommitted git changes.`
+        : `Refusing cleanup: not a git repository (no clean revert path).`,
+    );
+  }
+}
+
+/**
  * Pre-flight inspection. Reads VERSION + project.json, walks the
  * user tree to enumerate files. Never writes.
  */
@@ -185,16 +244,33 @@ export async function planMigrate(
  * `opts.cleanup === true` also removes the central-classified files
  * from the user tree AFTER all copies have succeeded. The default is
  * false so the user has a fallback for a few sprints; a second run
- * with `--cleanup` deletes them.
+ * with `--cleanup` deletes them. Cleanup additionally checks the git
+ * state — dirty / non-git work trees refuse unless `opts.force` is
+ * set (mirrors `gojaja init` / `gojaja reset`'s safety gate). The
+ * deletion uses the closed `CLEANUP_WHITELIST` of paths gojaja
+ * exclusively owns, never the classifier's open default-to-central
+ * rule (which would risk catching user files placed under
+ * `.gojaja/` for project-specific reasons).
  */
 export async function performMigrate(
   projectRoot: string,
-  opts: { cleanup?: boolean } = {},
+  opts: { cleanup?: boolean; force?: boolean } = {},
 ): Promise<MigrateResult> {
   const inspection = await inspectMigrate(projectRoot);
   if (inspection.action.kind === "no-layer") {
     throw new MigrateNoLayerError(inspection.layerDir);
   }
+
+  // Cleanup-time git-state gate. We probe ONLY when cleanup is
+  // requested — copy-only migrations don't delete anything from the
+  // user tree, so a dirty working copy isn't a risk factor.
+  if (opts.cleanup && !opts.force) {
+    const git = await inspectGit(projectRoot);
+    if (git.kind !== "clean") {
+      throw new MigrateGitGateError(git, inspection.layerDir);
+    }
+  }
+
   if (inspection.action.kind === "already-v3") {
     // Idempotent: re-running on a v3 layer is just a cleanup pass
     // if requested, else a no-op.
@@ -296,34 +372,71 @@ async function* walkRelativeFiles(
 }
 
 /**
- * Delete every file under the user tree whose `classifyPath` says
- * it belongs in central. Used by `--cleanup`. Returns the count of
- * files actually removed. Empty parent directories are pruned
- * post-walk.
+ * Delete every file under the user tree that matches the
+ * `CLEANUP_WHITELIST`. Used by `--cleanup`. Returns the count of
+ * files actually removed. Empty parent directories that were
+ * carrying central content are pruned post-walk.
+ *
+ * Whitelist-based on purpose (v3.0.x T2): the previous
+ * "delete every classifyPath-central file" rule was scary — the
+ * classifier defaults to central for unknown paths, so any file a
+ * user put under `.gojaja/` for project-specific reasons would be
+ * a deletion target. The whitelist restricts deletion to the
+ * runtime surfaces gojaja exclusively owns (state/task_board.yaml
+ * and three legacy `state/` companions; comms/, rfcs/, worklog/,
+ * locks/ subtrees in full).
+ *
+ * Defence in depth: we additionally cross-check `classifyPath` so
+ * any future change that accidentally adds a user-tree path to the
+ * whitelist still won't delete it.
  */
 async function cleanupUserTreeCentralFiles(layerDir: string): Promise<number> {
   let removed = 0;
-  const candidateDirs = new Set<string>();
-  for await (const rel of walkRelativeFiles(layerDir, "")) {
-    if (rel === "project.json" || rel === Paths.versionFile) continue;
-    if (classifyPath(rel) !== "central") continue;
-    const abs = path.join(layerDir, rel);
-    await fsp.unlink(abs);
-    removed += 1;
-    candidateDirs.add(path.dirname(abs));
-  }
-  // Best-effort prune of now-empty directories that were carrying
-  // central content. We walk from longest path to shortest so
-  // nested dirs collapse correctly.
-  const sortedDirs = [...candidateDirs].sort((a, b) => b.length - a.length);
-  for (const dir of sortedDirs) {
-    if (dir === layerDir) continue;
+
+  // Pass 1: explicit "file" whitelist entries — `unlink`-only.
+  // No directory removal here; many of these live under shared
+  // dirs (state/) where other user-tree files (project_state.md)
+  // also live.
+  for (const entry of CLEANUP_WHITELIST) {
+    if (entry.kind !== "file") continue;
+    if (classifyPath(entry.relPath) !== "central") continue;
+    const abs = path.join(layerDir, entry.relPath);
     try {
-      await fsp.rmdir(dir);
+      await fsp.unlink(abs);
+      removed += 1;
     } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== "ENOTEMPTY" && code !== "ENOENT") throw err;
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
   }
+
+  // Pass 2: "prefix" whitelist entries — gojaja owns the whole
+  // subtree. We `rm -rf` the directory so empty companion subdirs
+  // (e.g. comms/cursors/, comms/pending/) collapse along with the
+  // populated ones. Count files actually present before we
+  // delete, so the returned `removed` count reflects user-visible
+  // work done (not e.g. an empty comms/ that init created but was
+  // never used).
+  for (const entry of CLEANUP_WHITELIST) {
+    if (entry.kind !== "prefix") continue;
+    // Strip trailing slash for filesystem path; re-add for the
+    // string-prefix check that classifyPath relies on.
+    const dirRel = entry.prefix.replace(/\/$/, "");
+    if (classifyPath(entry.prefix) !== "central") continue;
+    const abs = path.join(layerDir, dirRel);
+    let count = 0;
+    try {
+      // Count files inside the subtree before removal.
+      for await (const _ of walkRelativeFiles(abs, "")) count += 1;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+    try {
+      await fsp.rm(abs, { recursive: true, force: true });
+      removed += count;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
+
   return removed;
 }
