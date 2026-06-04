@@ -6,6 +6,45 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### v3.0.x — Activity tab as chat bubbles
+
+The watch dashboard's Activity feed was a fixed-column grid that
+single-line-truncated each event at 200 chars. PR8u made multi-
+line `--message - <<'EOF'` the canonical form for body text, so
+agents and SYSTEM both routinely produce multi-line content the
+feed couldn't display.
+
+**New layout.** Each event renders as a chat bubble:
+
+  - **SYSTEM-authored bubbles align right** (the project-owner
+    channel, including `--to '*'` broadcasts from K).
+  - **Member-authored bubbles align left** (peers).
+  - First line of each bubble carries `@<recipient>`; `to === "*"`
+    renders as `@All` so broadcasts read at a glance.
+  - Body below the `@to` header. `white-space: pre-wrap` preserves
+    multi-line, indentation, code blocks. Long lines word-wrap.
+  - Top meta row: `<from>` · `<TYPE>` · optional `<ref>` ·
+    relative-time. Same information density as before; just
+    re-laid-out.
+
+**Backend.** `buildSnapshot`'s `events[]` mapper drops the
+`split('\n')[0].slice(0, 200)` truncation that used to mangle
+multi-line bodies. Full body forwarded; an 8 KB per-event cap
+guards against a pathological payload bloating the state poll.
+
+**CSS.** New classes: `.bubble-row.{from-system, from-member}`
+for alignment; `.bubble.{from-system, from-member}` for fill
+colour (system gets a subtly different blue-tinged background so
+the operator can scan the column from the colour alone);
+`.bubble-meta`, `.bubble-to`, `.bubble-body` for the three
+internal rows; `.at-target.all` styles the `@All` token
+distinctly.
+
+**Tests.** New regression in `tests/watch.test.ts` writes a
+5-line `--message`-style body via `publishReport` and asserts
+`buildSnapshot().events[<id>].message` returns it verbatim
+(line count + content). 542 → 543.
+
 ### v3.0.x — watch RFC detail card
 
 The watch dashboard's RFC list used to be a single line per RFC

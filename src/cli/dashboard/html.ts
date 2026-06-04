@@ -128,13 +128,37 @@ export const DASHBOARD_HTML = `<!doctype html>
   .rfc-decision.rejected .dec-head { color: var(--none); }
   .rfc-decision .dec-body { white-space: pre-wrap; font-size: 12px;
     margin-top: 4px; color: var(--fg); }
-  .feed { max-height: 420px; overflow: auto; }
-  .ev { display: grid; grid-template-columns: 70px 130px 1fr; gap: 10px; padding: 5px 0;
-    border-bottom: 1px solid var(--line); align-items: baseline; }
-  .ev .et { color: var(--dim); font-size: 11px; font-family: ui-monospace, monospace; }
-  .ev .ety { font-size: 11px; }
-  .ev .em { color: var(--dim); }
-  .ev .who { color: var(--fg); }
+  /* Activity tab — chat-bubble layout (v3.0.x M).
+     Member-authored events line up on the left; SYSTEM events
+     (project-owner announcements) line up on the right. Multi-line
+     bodies wrap natively. The first line of each bubble is the
+     "@<recipient>" header (or "@All" for to === "*"); the body
+     starts on the next line so multi-line messages render legibly. */
+  .feed { max-height: 540px; overflow: auto; padding: 8px 0;
+    display: flex; flex-direction: column; gap: 8px; }
+  .bubble-row { display: flex; gap: 8px; align-items: flex-start; }
+  .bubble-row.from-system { justify-content: flex-end; }
+  .bubble-row.from-member { justify-content: flex-start; }
+  .bubble { max-width: 72%; background: var(--panel2);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
+  .bubble.from-system { background: #1d2638; border-color: #2c3e5a; }
+  .bubble-meta { display: flex; gap: 8px; font-size: 11px;
+    color: var(--dim); align-items: baseline; }
+  .bubble-meta .who { color: var(--fg); font-weight: 600; }
+  .bubble.from-system .bubble-meta .who { color: #8cb4ff; }
+  .bubble-meta .ety { font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.5px; padding: 1px 5px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--dim); }
+  .bubble-meta .ref { font-family: ui-monospace, monospace;
+    color: var(--accent); }
+  .bubble-meta .et { font-family: ui-monospace, monospace; }
+  .bubble-to { font-size: 12px; color: var(--dim); }
+  .bubble-to .at-target { color: var(--accent); font-weight: 600; }
+  .bubble-to .at-target.all { color: var(--stale); }
+  .bubble-body { font-size: 13px; color: var(--fg); white-space: pre-wrap;
+    word-wrap: break-word; line-height: 1.45; }
+  .bubble-body.empty { color: var(--dim); font-style: italic; }
   .empty { color: var(--dim); font-style: italic; }
   #err { display: none; background: #3d1418; border: 1px solid #f85149; color: #ffb4ae;
     padding: 8px 12px; border-radius: 8px; margin: 0 16px; }
@@ -641,11 +665,51 @@ export const DASHBOARD_HTML = `<!doctype html>
   function renderFeed(events){
     if(!events.length) return '<div class="empty">No events yet.</div>';
     return events.map(function(e){
-      var who = esc(e.from)+" → "+esc(e.to)+(e.ref?' ('+esc(e.ref)+')':"");
-      var msg = e.message ? '<span class="em"> — '+esc(e.message)+'</span>' : "";
-      return '<div class="ev"><span class="et">'+esc(ago(e.ts))+'</span>'+
-        '<span class="ety">'+esc(e.type)+'</span>'+
-        '<span><span class="who">'+who+'</span>'+msg+'</span></div>';
+      // v3.0.x M: chat-bubble layout. SYSTEM bubbles align right
+      // (project-owner channel); member bubbles align left
+      // (peers). The first line of each bubble is "@<to>" or "@All"
+      // for to === "*"; the body starts on the next line so
+      // multi-line content (heredoc / pipe / editor) renders
+      // legibly without single-line truncation.
+      var isSystem = e.from === "SYSTEM";
+      var rowCls = isSystem ? "bubble-row from-system" : "bubble-row from-member";
+      var bubbleCls = isSystem ? "bubble from-system" : "bubble from-member";
+
+      // @to header. "*" → "@All" (broadcast). Otherwise "@<role>".
+      // For events that are intrinsically broadcasts of a different
+      // sort (WORKLOG, RFC_DECIDED, ...), to === "*" too; we render
+      // them with "@All" uniformly so the reader can tell at a
+      // glance that everyone receives them.
+      var toLabel = e.to === "*"
+        ? '<span class="at-target all">@All</span>'
+        : '<span class="at-target">@'+esc(e.to)+'</span>';
+
+      var refLine = e.ref
+        ? '<span class="ref">'+esc(e.ref)+'</span>' : "";
+
+      var bodyHtml;
+      if(e.message){
+        bodyHtml = '<div class="bubble-body">'+esc(e.message)+'</div>';
+      } else {
+        // No payload message — e.g. TASK_STATUS_CHANGED, RFC_DECIDED.
+        // Render the event type alone so the bubble still carries
+        // info without a body.
+        bodyHtml = '<div class="bubble-body empty">('+esc(e.type)+
+          ' — no message body)</div>';
+      }
+
+      return '<div class="'+rowCls+'">'+
+        '<div class="'+bubbleCls+'">'+
+          '<div class="bubble-meta">'+
+            '<span class="who">'+esc(e.from)+'</span>'+
+            '<span class="ety">'+esc(e.type)+'</span>'+
+            refLine+
+            '<span class="et">'+esc(ago(e.ts))+'</span>'+
+          '</div>'+
+          '<div class="bubble-to">'+toLabel+'</div>'+
+          bodyHtml+
+        '</div>'+
+      '</div>';
     }).join("");
   }
 

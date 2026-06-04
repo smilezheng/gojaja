@@ -299,6 +299,31 @@ describe("watch HTTP server — Actions endpoints (loopback-gated)", () => {
     });
   });
 
+  it("buildSnapshot preserves full multi-line message bodies in events (v3.0.x M)", async () => {
+    // Pre-PR8u worklog and report payloads were typically single
+    // lines; the dashboard's feed mapper used to split on '\n' and
+    // truncate at 200 chars. Post-PR8u (heredoc + --message -)
+    // multi-line is the common case, so the chat-bubble UI needs
+    // the full body. This regression test asserts buildSnapshot
+    // doesn't re-introduce the truncation.
+    const multi =
+      "First line of an owner directive.\n" +
+      "Second line with detail.\n" +
+      "Third line listing follow-ups:\n" +
+      "  1. ship login\n" +
+      "  2. wire analytics";
+    await ctx.store.publishReport({
+      from: "SYSTEM",
+      to: "Backend",
+      message: multi,
+    });
+    const snap = await buildSnapshot(ctx.store, ctx.root, 60_000);
+    const reportEv = snap.events.find((e) => e.type === "REPORT");
+    expect(reportEv).toBeDefined();
+    expect(reportEv?.message).toBe(multi);
+    expect(reportEv?.message?.split("\n").length).toBe(5);
+  });
+
   it("buildSnapshot surfaces each RFC's options + comments + decision (v3.0.x L)", async () => {
     // Direct snapshot test — wires the same data path as the HTTP
     // server but skips the network boundary for clarity. The

@@ -888,21 +888,31 @@ export async function buildSnapshot(
   );
 
   // Newest-first tail of the global event stream = the activity feed.
+  // v3.0.x M: preserve full multi-line message bodies (previously
+  // collapsed to the first line and clipped at 200 chars). Cap at
+  // ~8 KB per event so a single pathological payload can't blow the
+  // poll-response size unbounded. Multi-line is the common case
+  // post-PR8u (heredoc + --message -) and the chat-bubble UI is
+  // designed for it.
   const events = allEvents
     .slice(-EVENT_TAIL)
     .reverse()
-    .map((e) => ({
-      id: e.id,
-      ts: e.ts,
-      type: e.type,
-      from: e.from,
-      to: e.to,
-      ref: e.ref ?? null,
-      message:
-        typeof (e.payload as { message?: unknown })?.message === "string"
-          ? String((e.payload as { message: string }).message).split("\n")[0].slice(0, 200)
-          : null,
-    }));
+    .map((e) => {
+      const raw = (e.payload as { message?: unknown })?.message;
+      const message =
+        typeof raw === "string"
+          ? raw.length > 8192 ? raw.slice(0, 8192) + "…[truncated]" : raw
+          : null;
+      return {
+        id: e.id,
+        ts: e.ts,
+        type: e.type,
+        from: e.from,
+        to: e.to,
+        ref: e.ref ?? null,
+        message,
+      };
+    });
 
   return {
     project: { root, version, generatedAt: new Date(now).toISOString() },
