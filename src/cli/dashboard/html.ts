@@ -49,6 +49,17 @@ export const DASHBOARD_HTML = `<!doctype html>
     --system-bubble-bg: #ddf4ff;   /* was #1d2638 */
     --system-bubble-border: #80ccff;
     --system-bubble-who: #0550ae;  /* was #8cb4ff */
+    /* v3.0.x T11: per-category event-type pill colours. Applied
+       to the .ety chip in the bubble-meta row so the operator
+       can distinguish a REPORT from a WORKLOG from an RFC_* at a
+       glance. Same hue family as the rest of the palette
+       (accent/live/stale already exist) plus one new purple for
+       RFCs because they have their own narrative colour. */
+    --type-report: var(--accent);   /* communication */
+    --type-worklog: var(--live);    /* progress signal */
+    --type-task: var(--stale);      /* task action (amber) */
+    --type-rfc: #8250df;            /* RFC narrative (purple) */
+    --type-role: var(--dim);        /* governance (muted) */
     --err-bg: #ffebe9;             /* was #3d1418 */
     --err-border: #cf222e;         /* was #f85149 */
     --err-fg: #82071e;             /* was #ffb4ae */
@@ -192,13 +203,28 @@ export const DASHBOARD_HTML = `<!doctype html>
     border: 1px solid var(--line); border-radius: 10px;
     padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
   .bubble.from-system { background: var(--system-bubble-bg); border-color: var(--system-bubble-border); }
+  /* v3.0.x T10: dashed divider between the bubble's meta row
+     (sender + event-type pill + ref + timestamp) and the body
+     half (@to + message text). Visually separates "envelope" from
+     "letter". Dashed (rather than solid) so it doesn't fight the
+     bubble's solid outer border. */
   .bubble-meta { display: flex; gap: 8px; font-size: 11px;
-    color: var(--dim); align-items: baseline; }
+    color: var(--dim); align-items: baseline;
+    border-bottom: 1px dashed var(--line);
+    padding-bottom: 6px; margin-bottom: 6px; }
   .bubble-meta .who { color: var(--fg); font-weight: 600; }
   .bubble.from-system .bubble-meta .who { color: var(--system-bubble-who); }
+  /* Default event-type pill — overridden per-category below
+     (v3.0.x T11) so each event class reads at a glance. */
   .bubble-meta .ety { font-size: 10px; text-transform: uppercase;
     letter-spacing: 0.5px; padding: 1px 5px; border-radius: 999px;
-    border: 1px solid var(--line); color: var(--dim); }
+    border: 1px solid var(--line); color: var(--dim);
+    font-weight: 600; }
+  .bubble-meta .ety.type-report  { color: var(--type-report);  border-color: var(--type-report);  }
+  .bubble-meta .ety.type-worklog { color: var(--type-worklog); border-color: var(--type-worklog); }
+  .bubble-meta .ety.type-task    { color: var(--type-task);    border-color: var(--type-task);    }
+  .bubble-meta .ety.type-rfc     { color: var(--type-rfc);     border-color: var(--type-rfc);     }
+  .bubble-meta .ety.type-role    { color: var(--type-role);    border-color: var(--type-role);    }
   .bubble-meta .ref { font-family: ui-monospace, monospace;
     color: var(--accent); }
   .bubble-meta .et { font-family: ui-monospace, monospace; }
@@ -739,6 +765,26 @@ export const DASHBOARD_HTML = `<!doctype html>
     }).join("");
   }
 
+  /* v3.0.x T11: bucket each event's type into one of five visual
+     categories so the .ety pill picks up the matching colour. The
+     categories track narrative role:
+       REPORT   -> communication (blue / accent)
+       WORKLOG  -> progress signal (green / live)
+       TASK_*   -> task action (amber / stale)
+       RFC_*    -> RFC narrative (purple)
+       ROLE_*   -> governance (muted gray)
+     Anything outside these falls through to the default pill
+     (gray on gray) — operational events have already been
+     filtered out at buildSnapshot (T9). */
+  function eventTypeClass(t){
+    if(t === "REPORT") return "type-report";
+    if(t === "WORKLOG") return "type-worklog";
+    if(t.indexOf("TASK_") === 0) return "type-task";
+    if(t.indexOf("RFC_") === 0) return "type-rfc";
+    if(t.indexOf("ROLE_") === 0) return "type-role";
+    return "";
+  }
+
   function renderFeed(events){
     if(!events.length) return '<div class="empty">No events yet.</div>';
     return events.map(function(e){
@@ -775,11 +821,13 @@ export const DASHBOARD_HTML = `<!doctype html>
           ' — no message body)</div>';
       }
 
+      var etyCls = eventTypeClass(e.type);
+      var etyClsAttr = etyCls ? (' '+etyCls) : "";
       return '<div class="'+rowCls+'">'+
         '<div class="'+bubbleCls+'">'+
           '<div class="bubble-meta">'+
             '<span class="who">'+esc(e.from)+'</span>'+
-            '<span class="ety">'+esc(e.type)+'</span>'+
+            '<span class="ety'+etyClsAttr+'">'+esc(e.type)+'</span>'+
             refLine+
             '<span class="et">'+esc(ago(e.ts))+'</span>'+
           '</div>'+

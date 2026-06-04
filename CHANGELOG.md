@@ -6,6 +6,46 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### v3.0.x — watch dashboard chat-bubble polish: dashed divider + colour-coded event types (T10, T11)
+
+Two small visual tweaks on the Activity tab to make the chat
+bubble more scannable.
+
+**T10: dashed divider inside each bubble.** The bubble-meta row
+(sender · event-type pill · ref · timestamp) used to flow
+straight into the recipient line and the message body without
+any separator. A thin dashed line now sits between the meta and
+the body half — the equivalent of the envelope/letter break.
+Single CSS rule: `border-bottom: 1px dashed var(--line)` on
+`.bubble-meta`. Dashed (rather than solid) so it doesn't fight
+the bubble's outer border.
+
+**T11: colour-coded event-type pills.** The `.ety` pill (the
+small uppercase chip showing REPORT / WORKLOG / RFC_NEW etc.)
+now picks up a different colour per category so operators can
+tell apart "someone sent a message" from "someone closed a
+task" from "an RFC moved" at a glance:
+
+  - REPORT    → `--type-report`  (blue, accent — communication)
+  - WORKLOG   → `--type-worklog` (green, live — progress signal)
+  - TASK_*    → `--type-task`    (amber, stale — task action)
+  - RFC_*     → `--type-rfc`     (purple `#8250df`, new token —
+    RFC narrative)
+  - ROLE_*    → `--type-role`    (muted gray — governance)
+
+Operational types (SESSION_*, LOCK_BROKEN, RFC_REPAIRED,
+ROLE_DELETED) don't appear here at all because they were filtered
+out at `buildSnapshot` by T9.
+
+The category mapping is computed at render-time by a small
+`eventTypeClass` helper in `dashboard/html.ts`. Adding a sixth
+category later is one CSS rule plus one branch — the colours
+themselves are CSS tokens so a future theme switch just edits
+`:root`.
+
+Both T10 and T11 are visual; no unit tests added. 550/550 still
+green.
+
 ### v3.0.x — watch dashboard polish: collapsible RFCs, taller Activity, no operational noise (T7, T8, T9)
 
 Three quality-of-life tweaks to the watch dashboard from a real
