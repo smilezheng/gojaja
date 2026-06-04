@@ -6,6 +6,49 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### v3.0.x — activate snippet teaches `git worktree` isolation (T5)
+
+`gojaja activate <role>` now prepends a "Step 0" to the
+chat-paste snippet that tells the agent to put itself in its own
+`git worktree`. This is the recommended pattern for multi-role
+projects: `git checkout` in one window no longer disturbs another
+agent's view of the source.
+
+The trick is that v3 makes worktrees free — every worktree of the
+same project resolves to the same `~/.gojaja/projects/<id>/`
+central tree via `<project>/.gojaja/project.json`'s ULID, so
+coordination state stays unified even when source checkouts are
+isolated. The snippet calls this out explicitly so the agent
+understands why isolation is cheap.
+
+**Snippet shape.** The Step 0 block contains:
+
+  - A one-paragraph rationale (multi-role + shared central tree).
+  - Skip conditions (user already assigned a checkout, single-role
+    project, non-git repo).
+  - An idempotent shell incantation:
+    ```
+    cd "<projectRoot>"
+    WT="<projectRoot>/../<basename>-<role>"
+    git worktree add -b "<role>/work" "$WT" 2>/dev/null \\
+      || git worktree add "$WT" 2>/dev/null || true
+    cd "$WT" 2>/dev/null || cd "<projectRoot>"
+    ```
+    Falls back to attaching to an existing branch / worktree if
+    `<role>/work` is already taken; ultimately falls back to the
+    project root if anything fails. Safe to re-run.
+
+**Activation snippet budget.** The `cursor` / `claude`
+activation-snippet length cap was bumped from 1500 → 2200 bytes
+to fit Step 0 (the snippet was ~1300 before; the new block adds
+~500). One-step climb on the same ladder used historically.
+
+**Tests.** `tests/prompt.test.ts` updated: budget assertion
+1500 → 2200; one new content assertion checks the snippet
+contains `git worktree add`, `project.json`, and the
+`<role>/work` branch convention. 549 → 549 (one assertion
+added inline; no new test cases).
+
 ### v3.0.x — `gojaja watch` now reads `project.json` (T3 bug fix)
 
 `gojaja watch` previously constructed its `LocalFsStore` via

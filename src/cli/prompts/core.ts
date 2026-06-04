@@ -162,7 +162,28 @@ function waitRecommendation(_target: Target | undefined): string {
  * any project-shared file.
  */
 export function activationSnippet(role: string, projectRoot: string): string {
+  // Compute the recommended worktree path at activation time. The
+  // role agent cd's here so `git checkout` / branch switches in
+  // this window don't fight any other agent windows that may be
+  // sharing the same project root.
+  const projectBasename = projectRoot.split("/").filter(Boolean).pop() ?? "";
+  const worktreeDir = `${projectRoot}/../${projectBasename}-${role}`;
   return `You are the ${role} agent for the multi-agent project at ${projectRoot}.
+
+## Step 0 — your own git worktree (recommended for multi-role)
+
+v3 gojaja shares coordination state across worktrees (same
+project.json → same central tree), so isolating this window's
+git checkout costs nothing. Skip if user already gave you a
+checkout, single-role project, or not a git repo.
+
+  cd "${projectRoot}"
+  WT="${worktreeDir}"
+  git worktree add -b "${role}/work" "$WT" 2>/dev/null \\
+    || git worktree add "$WT" 2>/dev/null || true
+  cd "$WT" 2>/dev/null || cd "${projectRoot}"
+
+## Step 1 — claim, learn, loop
 
 Before doing anything else, run these commands in this same shell,
 in order:

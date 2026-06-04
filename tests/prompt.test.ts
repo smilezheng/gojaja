@@ -221,12 +221,16 @@ describe("buildActivation (role-bound, never persisted)", () => {
   it("cursor and claude activations stay short — they assume the runtime body is installed", () => {
     const cursor = buildActivation("cursor", "PM", ctx.root);
     const claude = buildActivation("claude", "PM", ctx.root);
-    // Short: well under 2 KB, NOT the multi-KB runtime body. The
+    // Short: well under 2.2 KB, NOT the multi-KB runtime body. The
     // budget was bumped from 800 to 1500 in PR8e to accommodate the
     // "run role show + gojaja -h" three-step onboarding sequence
-    // that prevents the agent from skipping self-introduction.
-    expect(cursor.length).toBeLessThan(1500);
-    expect(claude.length).toBeLessThan(1500);
+    // that prevents the agent from skipping self-introduction. Bumped
+    // again to 2200 in v3.0.x T5 to accommodate the recommended
+    // "Step 0 — your own git worktree" pre-step that teaches the
+    // agent to isolate its git checkout when multiple roles share
+    // a project tree (cheap thanks to v3's shared central root).
+    expect(cursor.length).toBeLessThan(2200);
+    expect(claude.length).toBeLessThan(2200);
     expect(cursor).not.toContain("Collaboration handbook");
     expect(claude).not.toContain("Collaboration handbook");
     // PR8e content invariants: the new snippet must address the agent
@@ -235,6 +239,10 @@ describe("buildActivation (role-bound, never persisted)", () => {
     expect(cursor).toContain('eval "$(gojaja claim PM --eval)"');
     expect(cursor).toContain("gojaja role show PM");
     expect(cursor).toContain("gojaja -h");
+    // v3.0.x T5: snippet teaches worktree isolation as Step 0.
+    expect(cursor).toContain("git worktree add");
+    expect(cursor).toContain("project.json");
+    expect(cursor).toContain("PM/work");
   });
 
   it("generic activation bundles the runtime body because there is no install location", () => {
