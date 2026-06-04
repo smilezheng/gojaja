@@ -6,6 +6,48 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### v3.0.x — watch dashboard: P0 turns green, priority legend, danger semantics tokenised (T12, T13)
+
+Two visual tweaks plus one small refactor to keep "priority" and
+"danger" from sharing a colour.
+
+**T13: P0 turns green; danger stays red.** P0 was sourced from
+`--p0: #cf222e` (red), but the same red was also being reused
+for blocked-by-deps icons (`⛔`), required-field asterisks, and
+error feedback messages. The dual semantics confused the
+operator: a P0 task and a blocked task both rendered red even
+though one means "do this first" and the other means "this is
+stuck". After T13:
+
+  - `--p0: #1a7f37` (bright green; same value as `--live`).
+    P0 task cards and archived task chips pick this up.
+  - `.blk { color: var(--err-border) }` (red; was `--p0`).
+    Blocked-by-deps marker stays red on purpose.
+  - `.action label.req::before { color: var(--err-border) }`
+    (red; was `--p0`). Required-field asterisks read as
+    "required → red" (web convention), not "P0".
+  - `.action .feedback.err`, `.init-card .feedback.err`
+    (red; was `--p0`). Errors are danger.
+
+`--err-border` already exists in `:root` for the `#err` banner;
+the four migrated rules now reuse it instead of pretending to
+be P0. No new palette token added.
+
+**T12: priority legend in the Task board heading.** Inline
+chips next to `<h2>Task board</h2>` showing the four priority
+swatches (`P0` green / `P1` amber / `P2` blue / `P3` gray).
+Each chip mimics the actual task card's left stripe (3px border
+in the matching priority colour) so the visual association is
+instant — operators don't need to memorise the mapping.
+
+  - New CSS: `.legend`, `.legend .leg`, `.legend .leg-p0..p3`.
+  - HTML: chips inserted into the `Task board` section heading
+    via plain `<span class="legend">…</span>` (no JS wiring —
+    the legend is static).
+
+Both T12 and T13 are visual; no unit tests added. 550/550 still
+green.
+
 ### v3.0.x — watch dashboard chat-bubble polish: dashed divider + colour-coded event types (T10, T11)
 
 Two small visual tweaks on the Activity tab to make the chat

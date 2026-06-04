@@ -40,7 +40,16 @@ export const DASHBOARD_HTML = `<!doctype html>
        red since those ARE real warnings. */
     --working: #0969da; --working-bg: #ddf4ff; --working-border: #80ccff;
     --stalled: #cf222e; --stalled-bg: #ffebe9; --stalled-border: #ffc4be;
-    --p0: #cf222e;        /* was #f85149 */
+    /* Priority swatches.
+       v3.0.x T13: P0 was red (#cf222e), but red is also our
+       "danger / blocked / error" colour and the dual-use was
+       confusing — a P0 task and a blocked task both read as
+       red even though one is "do this first" and the other is
+       "this is stuck". P0 is now bright green (matches --live);
+       red is reserved for danger semantics (.blk block icon,
+       error feedback, required-field markers — all migrated to
+       --err-border below). */
+    --p0: #1a7f37;        /* was #cf222e (T13); was #f85149 (pre-T4 dark) */
     --p1: #9a6700;        /* was #d29922 */
     --p2: #0969da;        /* was #6ea8fe */
     --p3: #57606a;        /* was #8b93a7 */
@@ -131,7 +140,25 @@ export const DASHBOARD_HTML = `<!doctype html>
   .task .to { color: var(--dim); font-size: 11px; }
   .task.p0 { border-left-color: var(--p0); } .task.p1 { border-left-color: var(--p1); }
   .task.p2 { border-left-color: var(--p2); } .task.p3 { border-left-color: var(--p3); }
-  .blk { color: var(--p0); font-size: 11px; }
+  /* v3.0.x T12: priority legend rendered next to the Task board
+     section title. Each chip mimics the actual task card — same
+     3px left stripe in the matching priority colour — so the
+     visual association is instant. Sized down + dim so it lives
+     as a subtitle, not a competing heading. */
+  .legend { font-size: 11px; font-weight: 400; text-transform: none;
+    letter-spacing: 0; color: var(--dim); display: inline-flex;
+    gap: 6px; margin-left: 12px; vertical-align: middle; }
+  .legend .leg { display: inline-block; padding: 1px 6px;
+    border: 1px solid var(--line); border-left-width: 3px;
+    border-radius: 3px; font-family: ui-monospace, monospace;
+    font-size: 10px; color: var(--fg); background: var(--panel2); }
+  .legend .leg-p0 { border-left-color: var(--p0); }
+  .legend .leg-p1 { border-left-color: var(--p1); }
+  .legend .leg-p2 { border-left-color: var(--p2); }
+  .legend .leg-p3 { border-left-color: var(--p3); }
+  /* v3.0.x T13: blocked-by-deps marker keeps the red
+     (sourced from --err-border now; --p0 went green). */
+  .blk { color: var(--err-border); font-size: 11px; }
   .rfcs { display: flex; flex-direction: column; gap: 10px; }
   .rfc { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
     padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -248,9 +275,11 @@ export const DASHBOARD_HTML = `<!doctype html>
      handler refuses the request when the field is empty (see
      postReport / postRfc / postTask / postRole / postPrompt /
      postActivate in src/cli/commands/watch.ts). The asterisk colour
-     reuses the P0 red so it reads "you must fill this" without an
-     extra palette token. */
-  .action label.req::before { content: "* "; color: var(--p0); font-weight: 700; }
+     reuses the danger red (--err-border) so it reads "you must
+     fill this" without an extra palette token. v3.0.x T13: was
+     sourced from --p0 before P0 went green; the asterisk is
+     "required → red" by web convention, not "P0-priority". */
+  .action label.req::before { content: "* "; color: var(--err-border); font-weight: 700; }
   .action input, .action select, .action textarea {
     width: 100%; box-sizing: border-box; background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; font: 12px ui-monospace, monospace; }
@@ -261,7 +290,9 @@ export const DASHBOARD_HTML = `<!doctype html>
   .action button:disabled { opacity: .5; cursor: not-allowed; }
   .action .feedback { margin-top: 8px; font-size: 11px; min-height: 14px; }
   .action .feedback.ok { color: var(--live); }
-  .action .feedback.err { color: var(--p0); }
+  /* v3.0.x T13: error feedback stays red (--err-border) — was
+     --p0 before P0 went green. Errors are danger, not P0. */
+  .action .feedback.err { color: var(--err-border); }
   .action .hint { font-size: 11px; color: var(--dim); margin-top: 6px; }
   /* Tab nav. Sits under the sticky header; switches which top-level
      panel is visible. Active tab uses the accent underline. */
@@ -339,7 +370,7 @@ export const DASHBOARD_HTML = `<!doctype html>
   .init-card button.primary:disabled { opacity: .5; cursor: not-allowed; }
   .init-card button.danger { background: var(--stalled); }
   .init-card .feedback { margin-top: 10px; font-size: 12px; min-height: 16px; }
-  .init-card .feedback.err { color: var(--p0); }
+  .init-card .feedback.err { color: var(--err-border); } /* T13: red, not P0 (now green) */
   .init-card .feedback.ok { color: var(--live); }
 </style>
 </head>
@@ -388,7 +419,12 @@ export const DASHBOARD_HTML = `<!doctype html>
 <main id="panels" style="display:none">
 <section class="panel active" id="panel-dashboard">
   <section><h2>Roles</h2><div class="roles" id="roles"></div></section>
-  <section><h2>Task board</h2><div class="board" id="board"></div></section>
+  <section><h2>Task board <span class="legend" title="Priority legend — set per task via --priority. Bar colour matches each card's left stripe.">
+    <span class="leg leg-p0">P0</span>
+    <span class="leg leg-p1">P1</span>
+    <span class="leg leg-p2">P2</span>
+    <span class="leg leg-p3">P3</span>
+  </span></h2><div class="board" id="board"></div></section>
   <section><h2>RFCs</h2><div class="rfcs" id="rfcs"></div></section>
   <section><h2>Activity</h2><div class="feed" id="feed"></div></section>
 </section>
