@@ -428,11 +428,12 @@ gojaja reset --confirm <project-basename>     # actually remove
 
 The default invocation prints a preview and exits without touching anything; the exact `--confirm` token is the project root's directory name. Reset removes:
 
-- `<project>/.gojaja/` recursively (events, state, RFCs, worklogs, sessions, locks).
+- `<project>/.gojaja/` (user tree) — contract files (config.yaml, roles, project_state, VERSION, project.json).
+- `~/.gojaja/projects/<id>/` (central tree) — runtime state (events, task board, RFCs, worklogs, sessions, locks). The central tree is soft-deleted to `~/.gojaja/trash/<id>-<ISO-TS>/` with a 7-day retention.
 - `<project>/.cursor/rules/gojaja-runtime.mdc` and the empty `.cursor/rules/` / `.cursor/` parents.
 - The `<!-- gojaja-runtime:BEGIN ... :END -->` block inside `<project>/CLAUDE.md` and `<project>/AGENTS.md`. Content outside the block is preserved; the file is deleted only if the marker block was its only content.
 
-Everything gojaja installs is **project-local** — there is no user-level footprint to clean up separately. Reset is also the canonical "delete the audit trail" operation since events live entirely under `.gojaja/` — `cp -r .gojaja .gojaja.bak` first if you want a snapshot.
+In v3, runtime state lives under `~/.gojaja/` (a user-level directory), and reset cleans both trees. If you want an audit snapshot before reset, git commit the contract files in `.gojaja/` first.
 
 ### Upgrade the CLI
 

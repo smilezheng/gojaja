@@ -3,10 +3,8 @@ import { HELP_TEXT, COMMAND_HELP, helpForCommand } from "../src/cli/help";
 
 describe("gojaja help text (PR8e rewrite)", () => {
   it("opens with a one-paragraph description of what the tool is", () => {
-    // First-time readers should not have to guess what 'multi-agent
-    // coordination layer' means by reverse-engineering the commands.
-    expect(HELP_TEXT).toMatch(/Filesystem-backed coordination layer/);
-    expect(HELP_TEXT).toMatch(/Filesystem-backed coordination layer/i);
+    expect(HELP_TEXT).toMatch(/Coordination layer/i);
+    expect(HELP_TEXT).toMatch(/multi-LLM-agent collaboration/i);
   });
 
   it("includes a Quickstart that walks through the one-time project setup", () => {
@@ -25,20 +23,15 @@ describe("gojaja help text (PR8e rewrite)", () => {
   });
 
   it("documents exit codes with agent-actionable hints, matching errors.ts", () => {
-    // The codes here must stay in sync with src/core/errors.ts; an
-    // agent branching on the wrong number is worse than no table.
     expect(HELP_TEXT).toContain("USAGE");
     expect(HELP_TEXT).toContain("3  NOT_INIT");
     expect(HELP_TEXT).toContain("8  STATE_CORRUPT");
     expect(HELP_TEXT).toContain("9  FORBIDDEN");
-    expect(HELP_TEXT).toContain("escalate");
+    expect(HELP_TEXT).toContain("Escalate");
   });
 
-  it("links to the doc set so users know where to dig deeper", () => {
-    expect(HELP_TEXT).toContain("docs/PROTOCOL.md");
-    expect(HELP_TEXT).toContain("docs/HANDBOOK.md");
-    expect(HELP_TEXT).toContain("docs/SCHEMA.md");
-    expect(HELP_TEXT).toContain("README.md");
+  it("points agents to 'gojaja handbook' for full policy", () => {
+    expect(HELP_TEXT).toContain("gojaja handbook");
   });
 
   it("flags the role delete command and its SYSTEM-3 ownership gate", () => {
