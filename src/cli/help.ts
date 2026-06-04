@@ -373,8 +373,8 @@ Keepalive (agent, requires GOJAJA_SESSION):
       Parks the agent in ONE blocking call (no token cost) until ANY
       event the role would see in its manifest arrives, or the deadline
       passes. It polls the event stream internally every --poll-interval
-      (default 30s) — that is an in-process check cadence, NOT a
-      re-invocation interval. Before blocking it prints a start line
+      (default 10s, override via config.yaml:settings.waitPollInterval) —
+      that is an in-process check cadence, NOT a re-invocation interval. Before blocking it prints a start line
       (WAITING role=<r> now=<iso> ...) so you can see the wall clock.
 
       Deadline (optional; omit BOTH to wait indefinitely until an event

@@ -9,6 +9,11 @@ import {
   openStoreUncheckedAsync,
 } from "../runtime";
 import { LocalFsStore } from "../../core/local-fs-store";
+import {
+  DEFAULT_RESOLVED_SETTINGS,
+  resolveSettings,
+  type ResolvedSettings,
+} from "../../core/settings";
 import { DASHBOARD_HTML } from "../dashboard/html";
 import { inspectInitState, performInit } from "./init";
 import { roleMarkdownHasTbd } from "./role";
@@ -28,7 +33,6 @@ const PROMPT_TARGETS: ReadonlySet<Target> = new Set([
 ]);
 
 const DEFAULT_PORT = 7421;
-const EVENT_TAIL = 300;
 
 /**
  * Operational / framework-internal event types that should NOT
@@ -57,34 +61,24 @@ function isOperationalEvent(type: string): boolean {
   return OPERATIONAL_EVENT_TYPES.has(type);
 }
 /**
- * How long a `Done` task can sit before the watch dashboard moves it
- * into the Archived tab. Hard-coded at 48 hours — long enough that
- * deliberate Done-and-walk-away workflow is preserved, short enough
- * that the active board doesn't fill with last week's wins. Run on
- * watch startup AND every 30 minutes thereafter so a window left
- * open over the weekend catches up to the same state as a fresh
- * one started Monday morning.
- */
-const AUTO_ARCHIVE_THRESHOLD_MS = 48 * 3600 * 1000;
-const AUTO_ARCHIVE_INTERVAL_MS = 30 * 60 * 1000;
-/**
- * Threshold past which a `live`-session role with no `wait` session
- * on disk is flagged as `working` (v3.0.x N rename — previously
- * `stalled-no-wait`). The signal is the same: live session lease
- * held, no `wait.json` parked, no recent gojaja activity. In
- * practice this overwhelmingly means the agent is heads-down on
- * code (writing files, running tests) rather than wedged, so the
- * dashboard treats it as informational. The PR8t / PR8v ack-but-
- * no-wait failure mode is still detectable here for operators who
- * want to nudge after a long silence.
+ * Tunable cadences and caps. Sourced from `config.yaml:settings`
+ * (resolved via `core/settings.ts`); the values below are the
+ * built-in defaults for an uninitialised project, and also what
+ * ships in a fresh `gojaja init` config block. See `ResolvedSettings`
+ * for what each knob does.
  *
- * 60 s is a deliberately lenient default: a fast turn (read manifest,
- * post one worklog, wait) finishes well under this; only a role that
- * actually got stuck shows red. Tunable via `?stalledThresholdMs=`
- * on the `/api/state` query string for ops that prefer tighter
- * monitoring.
+ *   - `taskArchiveAfterMs`        Done-task age before archive (48h)
+ *   - `taskArchiveSweepEveryMs`   how often the sweep runs (30m)
+ *   - `stalledThresholdMs`        live-without-wait silence → `working` (60s)
+ *   - `dashboardEventTail`        max events kept in /api/state (300)
+ *
+ * The auto-archive sweep also runs once at startup so a watch opened
+ * after a long pause catches up immediately. The "60 s" stalled
+ * threshold is deliberately lenient: a fast turn finishes well under
+ * it; only a role that actually got stuck shows up. The
+ * `?stalledThresholdMs=` URL query overrides the per-project default
+ * for ops dashboards that want tighter monitoring.
  */
-const STALLED_NO_WAIT_THRESHOLD_MS = 60_000;
 
 /**
  * `gojaja watch [--port <n>] [--host <addr>] [--no-open] [--root <path>]`
@@ -155,8 +149,18 @@ export async function runWatch(args: ParsedArgs): Promise<number> {
     }
   }
 
+  // Settings are loaded once at startup and threaded through every
+  // request handler. Hand-edits to `config.yaml:settings` require a
+  // watch restart to pick up — predictable behaviour, and the
+  // alternative (re-reading on every poll) would re-tune the
+  // archive sweep cadence mid-flight which is the kind of surprise
+  // that makes operators distrust the dashboard. For an
+  // uninitialised project we fall back to the built-in defaults so
+  // the init landing page can still serve `/api/state`.
+  let settings: ResolvedSettings = await loadSettingsOrDefaults(store);
+
   const server = http.createServer((req, res) => {
-    handleRequest(req, res, store, root, host).catch((err) => {
+    handleRequest(req, res, store, root, host, settings).catch((err) => {
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: String((err as Error)?.message ?? err) }));
     });
@@ -189,7 +193,9 @@ export async function runWatch(args: ParsedArgs): Promise<number> {
   const runArchive = async (): Promise<void> => {
     try {
       if (!(await store.isInitialised())) return;
-      await store.autoArchiveDoneTasks({ thresholdMs: AUTO_ARCHIVE_THRESHOLD_MS });
+      await store.autoArchiveDoneTasks({
+        thresholdMs: settings.taskArchiveAfterMs,
+      });
     } catch (err) {
       process.stderr.write(
         `gojaja watch: auto-archive sweep failed: ${(err as Error).message}\n`,
@@ -197,7 +203,7 @@ export async function runWatch(args: ParsedArgs): Promise<number> {
     }
   };
   await runArchive();
-  const archiveTimer = setInterval(runArchive, AUTO_ARCHIVE_INTERVAL_MS);
+  const archiveTimer = setInterval(runArchive, settings.taskArchiveSweepEveryMs);
   // unref so an idle archive timer is never the thing keeping the
   // process alive (in tests this matters; in production the HTTP
   // server holds the loop open).
@@ -324,12 +330,31 @@ function sendJson(
 }
 
 /**
+ * Resolve `config.yaml:settings` for the running watch, or return
+ * the built-in defaults if the project is uninitialised / the read
+ * fails. Called once at watch startup; we deliberately do not
+ * re-resolve per request so the archive sweep cadence and event-tail
+ * cap are stable for the life of the process.
+ */
+export async function loadSettingsOrDefaults(
+  store: LocalFsStore,
+): Promise<ResolvedSettings> {
+  try {
+    if (!(await store.isInitialised())) return DEFAULT_RESOLVED_SETTINGS;
+    return resolveSettings(await store.readConfig());
+  } catch {
+    return DEFAULT_RESOLVED_SETTINGS;
+  }
+}
+
+/**
  * Test-only export of the request handler. Lets the integration
  * suite (`tests/watch.test.ts`) spin a real HTTP server bound to a
  * fresh ephemeral port and exercise the full method-and-path
  * routing, the loopback gate, and the error-mapping for write
  * endpoints — all without exposing the handler as a public API
- * (the underscore prefix is the convention).
+ * (the underscore prefix is the convention). Settings default to
+ * the built-ins when not passed so existing tests keep compiling.
  */
 export const __test_handleRequest = (
   req: http.IncomingMessage,
@@ -337,7 +362,8 @@ export const __test_handleRequest = (
   store: LocalFsStore,
   root: string,
   host: string,
-): Promise<void> => handleRequest(req, res, store, root, host);
+  settings: ResolvedSettings = DEFAULT_RESOLVED_SETTINGS,
+): Promise<void> => handleRequest(req, res, store, root, host, settings);
 
 async function handleRequest(
   req: http.IncomingMessage,
@@ -345,6 +371,7 @@ async function handleRequest(
   store: LocalFsStore,
   root: string,
   host: string,
+  settings: ResolvedSettings,
 ): Promise<void> {
   const url = req.url ?? "/";
   const method = req.method ?? "GET";
@@ -378,8 +405,13 @@ async function handleRequest(
     const stalledThresholdMs =
       override !== null && Number.isFinite(override) && override > 0
         ? override
-        : STALLED_NO_WAIT_THRESHOLD_MS;
-    const snapshot = await buildSnapshot(store, root, stalledThresholdMs);
+        : settings.stalledThresholdMs;
+    const snapshot = await buildSnapshot(
+      store,
+      root,
+      stalledThresholdMs,
+      settings.dashboardEventTail,
+    );
     // Capabilities tell the dashboard front-end whether the Actions
     // panel should render. The server-side gate (POST handlers)
     // re-checks the same condition, so a hand-crafted curl from the
@@ -742,6 +774,7 @@ export async function buildSnapshot(
   store: LocalFsStore,
   root: string,
   stalledThresholdMs: number,
+  eventTail: number = DEFAULT_RESOLVED_SETTINGS.dashboardEventTail,
 ) {
   const now = Date.now();
   const [version, config, board, rfcs, allEvents] = await Promise.all([
@@ -755,7 +788,7 @@ export async function buildSnapshot(
   // Index the most recent event per role-as-author. Used below to
   // detect "live session but no follow-up after ack" — the
   // single-most-common per-turn failure mode the dashboard exists to
-  // surface (see STALLED_NO_WAIT_THRESHOLD_MS).
+  // surface (see `stalledThresholdMs` / `settings.stalledThreshold`).
   const lastActionAtMsByRole = new Map<string, number>();
   for (const e of allEvents) {
     if (e.from === "SYSTEM") continue;
@@ -945,7 +978,7 @@ export async function buildSnapshot(
   //
   // v3.0.x T9: filter out operational / framework-internal events
   // (SESSION_*, LOCK_BROKEN, RFC_REPAIRED, ROLE_DELETED) BEFORE the
-  // EVENT_TAIL slice. The chat-bubble Activity tab is for "what
+  // event-tail slice. The chat-bubble Activity tab is for "what
   // people said and did", not "what gojaja itself logged for audit".
   // Operational events stay in `comms/events/*.json` for
   // `gojaja history` / `gojaja doctor` (PR9, planned); only the
@@ -953,7 +986,7 @@ export async function buildSnapshot(
   // exclusion list `Store.filterVisibleEventsForRole` uses.
   const events = allEvents
     .filter((e) => !isOperationalEvent(e.type))
-    .slice(-EVENT_TAIL)
+    .slice(-eventTail)
     .reverse()
     .map((e) => {
       const raw = (e.payload as { message?: unknown })?.message;

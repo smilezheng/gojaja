@@ -50,6 +50,20 @@ describe("Store.initialise (PR8f-B project_state.md skeleton)", () => {
     expect(gi).not.toMatch(/^worklog\/?$/m);
   });
 
+  it("seeds config.yaml:settings with the canonical tunable defaults", async () => {
+    await ctx.store.initialise("2.0.0-test");
+    const cfg = await ctx.store.readConfig();
+    // The defaults are also the resolver's fallbacks, but seeding
+    // the block on disk lets a project owner discover the knobs by
+    // skimming config.yaml — without reading docs/SCHEMA.md.
+    expect(cfg.settings).toBeDefined();
+    expect(cfg.settings?.taskArchiveAfter).toBe("48h");
+    expect(cfg.settings?.taskArchiveSweepEvery).toBe("30m");
+    expect(cfg.settings?.waitPollInterval).toBe("10s");
+    expect(cfg.settings?.stalledThreshold).toBe("60s");
+    expect(cfg.settings?.dashboardEventTail).toBe(300);
+  });
+
   it("seeds the skeleton only on first init; AlreadyInitializedError on second run", async () => {
     await ctx.store.initialise("2.0.0-test");
     const stateFile = path.join(ctx.root, "state/project_state.md");

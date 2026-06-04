@@ -6,6 +6,133 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### v3.0.x — config.yaml gains a `settings` block; watch dashboard's Task board collapses (T16)
+
+Two small but operator-visible changes.
+
+**`config.yaml:settings` — five knobs lifted out of source.** Until
+now the Done-task auto-archive threshold (48 h), the auto-archive
+sweep cadence (30 min), `gojaja wait`'s default `--poll-interval`
+(10 s), the `live`-without-`wait.json` "working" threshold (60 s),
+and the watch dashboard's recent-events cap (300) were all hard-
+coded constants in `src/cli/commands/wait.ts` and
+`src/cli/commands/watch.ts`. They are now optional fields under a
+new `settings:` block in `config.yaml`, resolved through
+`src/core/settings.ts`. Behaviour:
+
+  - `gojaja init` now seeds the block with the canonical defaults
+    (`taskArchiveAfter: 48h`, `taskArchiveSweepEvery: 30m`,
+    `waitPollInterval: 10s`, `stalledThreshold: 60s`,
+    `dashboardEventTail: 300`) so a project owner can discover the
+    knobs by skimming `config.yaml` without reading the schema doc.
+  - All fields are optional; missing or malformed values silently
+    fall back to the built-in defaults so a hand-edit typo cannot
+    brick the dashboard or `wait`.
+  - `wait`'s precedence: explicit `--poll-interval` > config
+    `waitPollInterval` > built-in (10 s).
+  - `watch` reads the block once at startup and threads the values
+    through `runArchive` / `buildSnapshot` / `handleRequest`. Hand-
+    edits require a watch restart to take effect (no surprise
+    mid-flight cadence retunes).
+  - The `?stalledThresholdMs=` URL query on `/api/state` continues
+    to override per request.
+
+Schema is backward-compatible (the new field is optional). Tests:
+new `tests/settings.test.ts` covers the resolver (defaults,
+explicit overrides, malformed inputs); `tests/init.test.ts`
+gains coverage that the seeded block carries the canonical
+strings. 561/561 green.
+
+**Task board collapses to its column headers.** Mirrors the
+per-RFC collapse that landed in T7. The Task board section's
+`<h2>` is now a click target with a caret like the RFC header
+rows; clicking toggles `.board.collapsed`, which hides every
+`.task` card and the "—" empty placeholder while keeping each
+column's `<h3>` (status name + count chip) visible. Use case:
+once the board is "what each lane is carrying", an operator
+running a 1500-px workstation often wants to glance at the
+distribution without scanning the cards. Persisted via
+`localStorage["gojaja:boardCollapsed"]` so poll-driven
+re-renders and page reloads snap back to the user's intent.
+i18n: `sec.boardCollapseHint` strings added for en and zh-CN.
+
+Files touched: `src/core/types.ts` (new `ProjectSettings`
+interface), `src/core/settings.ts` (new resolver, kept in `core`
+so it does not depend on `cli/`), `src/core/local-fs-store.ts`
+(`freshConfig` seeds defaults), `src/cli/commands/wait.ts`,
+`src/cli/commands/watch.ts`, `src/cli/dashboard/html.ts`,
+`src/cli/help.ts`, `docs/SCHEMA.md`, `tests/settings.test.ts`
+(new), `tests/init.test.ts`.
+
+### v3.0.x — watch dashboard: i18n (en + zh-CN) with auto-detect + manual switcher (T15)
+
+The dashboard used to be English-only. T15 adds a tiny
+self-contained i18n layer so the same offline-friendly single-file
+template renders in either English or Simplified Chinese, with the
+right one picked automatically the first time the page loads.
+
+**No server / contract changes.** Status enum values
+(`Backlog`/`Pending`/...), role health states
+(`live`/`stale`/`none`/`working`/`waiting`), event types
+(`REPORT`/`WORKLOG`/...) all stay verbatim on the wire and on
+disk — they are storage / CSS-class contracts. The dashboard
+only translates the **display label** wrapped around them via
+`t("status.Backlog")` etc. This keeps audit logs, manifests,
+and the CLI happy in any locale.
+
+**Mechanism (all inside `src/cli/dashboard/html.ts`):**
+
+  - `MESSAGES = { en: {...}, "zh-CN": {...} }` flat key/value dict
+    with dotted namespacing (`header.*`, `tabs.*`, `sec.*`,
+    `status.*`, `badge.*`, `role.*`, `rfc.*`, `feed.*`,
+    `task.*`, `time.*`, `init.*`, `setup.*`, `actions.*`,
+    `fillRole.*`). Adding a third language = one new object
+    plus one `<option>`.
+  - `t(key, params?)` helper: lookup in current lang → fallback
+    to `en` → fallback to the raw key (loud, easy to spot in
+    QA). Placeholders are `{name}` (chosen over `${name}` so
+    the source template literal does not need extra escaping).
+  - `detectLang()` reads `localStorage["gojaja:lang"]` first,
+    then falls back to `navigator.language` (anything starting
+    with `zh-*` → `zh-CN`; everything else → `en`).
+  - `applyI18n(root?)` walks `[data-i18n]`, `[data-i18n-html]`,
+    and `[data-i18n-attr="attr:key;attr2:key2"]` elements and
+    substitutes their text / innerHTML / attributes. Called at
+    boot and after every language switch.
+  - Language picker: small `<select>` styled like a chip in the
+    header (EN / 中文). On change: persist, `applyI18n()`, then
+    `tick()` to force an immediate re-render of dynamic content.
+
+**Coverage:** every operator-visible string — header chips, tab
+labels, section titles, role cards (badges / session meta /
+waiting / working note / owns), task cards (status column
+labels, blocked-by note, "(unassigned)"), RFC cards (heads,
+options, comments, decisions, "click to expand"), Activity feed
+("@All" broadcast label, "no message body" placeholder), Init
+landing page (button states, git status detail, all feedback),
+Setup panel (Create role / Install runtime files / Activate
+snippet — labels / placeholders / hints / button feedback),
+Actions panel (Send report / Open RFC / Create task — same),
+empty states, relative time ("3m ago" / "in 2h" / "Today" /
+"Yesterday"), and the "Lost connection" toast.
+
+**Server-side error messages** (the body of a USAGE / FORBIDDEN /
+INIT_GIT_GATE response) stay verbatim from the server. The
+client only localises the **prefix / state strings** it owns
+("initialising…", "Refused.", "Already initialised — refreshing.",
+etc.). Translating server-side messages would require either
+shipping the dict to Node or piping `Accept-Language` through —
+deliberately out of scope; the server response carries a stable
+`errorCode` and the client already maps that to a localised
+button state for INIT_GIT_GATE / ALREADY_INITIALISED.
+
+**Tests:** `npm run typecheck` clean, 44/44 `tests/watch.test.ts`
+green (the snapshot builder is unchanged). Dashboard HTML
+rendering is not unit-tested per the existing convention; a
+build-time smoke check parses the inline JS via
+`new Function(...)` to catch template-literal escape regressions
+before bundling.
+
 ### v3.0.x — watch dashboard: responsive layout for tablet / phone widths (T14)
 
 The dashboard was designed for a 1500 px workstation. Below that:

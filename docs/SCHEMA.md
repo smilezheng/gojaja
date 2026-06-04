@@ -165,12 +165,44 @@ roles:
     reportsTo: []
     mustNotEdit:
       - state/architecture.md
+settings:
+  taskArchiveAfter: 48h
+  taskArchiveSweepEvery: 30m
+  waitPollInterval: 10s
+  stalledThreshold: 60s
+  dashboardEventTail: 300
 ```
 
 Field rules:
 
 - `schemaVersion` must match the on-disk `VERSION` file.
 - `roles` is `Record<RoleId, RoleConfig>`.
+- `settings` is **optional** — every field falls back to a built-in
+  default declared in `src/core/settings.ts`. A malformed value (e.g.
+  `taskArchiveAfter: yesterday`) is tolerated: the resolver logs no
+  warning and silently uses the default so the dashboard / `wait`
+  command keep working. Tunable knobs:
+  - `taskArchiveAfter` (duration; default `48h`) — how long a `Done`
+    task can sit before `gojaja watch`'s auto-archive sweep moves it
+    to the Archived tab.
+  - `taskArchiveSweepEvery` (duration; default `30m`) — cadence of
+    the auto-archive sweep while watch is up. The first sweep also
+    fires once at startup.
+  - `waitPollInterval` (duration; default `10s`) — default
+    `--poll-interval` for `gojaja wait`. CLI flag overrides this
+    per call. In-process polling cadence (no token cost), not a
+    re-invocation interval.
+  - `stalledThreshold` (duration; default `60s`) — how long a
+    `live`-session role with no `wait.json` parked must be silent
+    before the dashboard tags it `working`. The
+    `?stalledThresholdMs=` URL query on `/api/state` still
+    overrides per request for ops that prefer tighter monitoring.
+  - `dashboardEventTail` (positive integer; default `300`) — how
+    many recent events the watch dashboard's Activity tab keeps
+    in each `/api/state` snapshot. Hand-edits to `settings.*`
+    require a `gojaja watch` restart to pick up; durations and
+    cadences are loaded once at watch startup and threaded through
+    every request.
 - `RoleConfig.owns` is **enforced at write time**. Each entry matches
   either an exact relative path (`state/project_state.md`) or a
   directory prefix (`docs/architecture/` or `docs/architecture`, with

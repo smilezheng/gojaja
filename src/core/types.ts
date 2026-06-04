@@ -244,6 +244,59 @@ export interface ProjectConfig {
    * a reliable counter (deleted RFC ids would be reused otherwise).
    */
   rfcCounter?: number;
+  /**
+   * Tunable runtime knobs (sweep cadences, dashboard caps, default
+   * `wait` poll interval, ...). All fields are optional; missing ones
+   * fall back to the built-in defaults declared in
+   * `src/core/settings.ts`. Values that represent durations are stored
+   * as human-readable strings parsed by `parseDuration` ("48h", "10s",
+   * "30m"); counts are plain integers. Hand-edits are supported and
+   * picked up on next process start (watch reads them once at boot;
+   * wait reads them on each invocation).
+   */
+  settings?: ProjectSettings;
+}
+
+/**
+ * Project-level operational tunables. None of these affect on-disk
+ * shape; they only change cadences and caps. Stored in config.yaml so
+ * a project owner can tune them per project (and so a fresh clone
+ * inherits the same defaults for everyone via git).
+ *
+ * Duration strings use the same grammar as `--in` / `--poll-interval`
+ * (`<n>ms|s|m|h|d`). Tested resolution lives in `src/core/settings.ts`.
+ */
+export interface ProjectSettings {
+  /**
+   * How long a `Done` task can sit in the active board before the
+   * `gojaja watch` auto-archive sweep moves it into the Archived tab.
+   * Default: "48h".
+   */
+  taskArchiveAfter?: string;
+  /**
+   * How often the auto-archive sweep runs while watch is up. Default:
+   * "30m". The first sweep also fires once at startup.
+   */
+  taskArchiveSweepEvery?: string;
+  /**
+   * Default `--poll-interval` for `gojaja wait` when the caller does
+   * not pass the flag. In-process polling cadence (no token cost),
+   * not a re-invocation interval. Default: "10s".
+   */
+  waitPollInterval?: string;
+  /**
+   * How long a `live`-session role with no `wait.json` parked must be
+   * silent before the dashboard tags it `working`. Smaller values
+   * surface stuck agents faster; larger values reduce false positives
+   * for legitimate heads-down coding sessions. Default: "60s".
+   */
+  stalledThreshold?: string;
+  /**
+   * How many recent events the watch dashboard's Activity tab keeps
+   * in the polled snapshot. Trimmed before render so a chatty project
+   * doesn't blow the response size unbounded. Default: 300.
+   */
+  dashboardEventTail?: number;
 }
 
 /**

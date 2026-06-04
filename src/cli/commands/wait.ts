@@ -7,6 +7,7 @@ import {
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, openStoreOrThrow } from "../runtime";
 import { resolveIdentity } from "../identity";
+import { resolveSettings } from "../../core/settings";
 import type {
   Event,
   RoleId,
@@ -18,25 +19,36 @@ import type {
 import type { Store } from "../../core/store";
 
 /**
- * How often `wait` re-checks the event stream WHILE it is blocked. This
- * is an in-process cadence, not a re-invocation interval: a single
- * `wait` call parks the agent and loops internally every poll-interval
- * until the condition fires or the deadline passes. So it costs no agent
- * tokens (one tool call for the whole wait); a smaller value only means
- * snappier detection at negligible CPU. Tests pass a shorter value to
- * keep wall-clock cost low.
+ * `wait`'s in-process polling cadence is the rate at which a single
+ * blocked call re-scans the event stream — not a re-invocation
+ * interval: ONE `wait` call parks the agent and loops internally
+ * until the condition fires or the deadline passes. So it costs no
+ * agent tokens (one tool call for the whole wait); a smaller value
+ * only means snappier detection at negligible CPU.
+ *
+ * Resolution order (most explicit wins):
+ *   1. CLI `--poll-interval <duration>` (per-call override)
+ *   2. `config.yaml:settings.waitPollInterval` (per-project default)
+ *   3. The hard-coded default in `core/settings.ts` (10s)
+ *
+ * Tests pass `--poll-interval` directly to keep wall-clock cost low.
  */
-const DEFAULT_POLL_INTERVAL_MS = 10 * 1000;
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function resolvePollIntervalMs(args: ParsedArgs): number {
+async function resolvePollIntervalMs(
+  args: ParsedArgs,
+  store: Store,
+): Promise<number> {
   const pollRaw = optionalString(args.flags, "poll-interval");
-  const ms = pollRaw !== undefined ? parseDuration(pollRaw) : DEFAULT_POLL_INTERVAL_MS;
-  if (ms <= 0) throw new UsageError("--poll-interval must be > 0.");
-  return ms;
+  if (pollRaw !== undefined) {
+    const ms = parseDuration(pollRaw);
+    if (ms <= 0) throw new UsageError("--poll-interval must be > 0.");
+    return ms;
+  }
+  const config = await store.readConfig();
+  return resolveSettings(config).waitPollIntervalMs;
 }
 
 /**
@@ -324,7 +336,7 @@ export async function runWait(args: ParsedArgs): Promise<number> {
   }
 
   const nowMs = Date.now();
-  const pollIntervalMs = resolvePollIntervalMs(args);
+  const pollIntervalMs = await resolvePollIntervalMs(args, store);
   const existing = await store.readWaitState(role);
 
   // Deadline resolution. `deadlineMs === Infinity` means an indefinite

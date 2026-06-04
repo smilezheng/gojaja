@@ -37,6 +37,7 @@ import {
 import { classifyPath } from "./path-routing";
 import { validateRoleId, validateSlug } from "./role-id";
 import { renderRoleMarkdown } from "./role-template";
+import { DEFAULT_PROJECT_SETTINGS } from "./settings";
 import type { Store } from "./store";
 import {
   ACTIVE_TASK_STATUSES,
@@ -95,7 +96,17 @@ function attachActorMeta(
 }
 
 function freshConfig(schemaVersion: string): ProjectConfig {
-  return { schemaVersion, roles: {} };
+  // Seed `settings` with the canonical defaults so `gojaja init`
+  // leaves a hand-editable knob block in config.yaml. Each value is
+  // also the built-in default in `core/settings.ts` — wiping the
+  // block (or any single key) is fine, the resolver falls back to
+  // the same numbers. Re-emitted on disk so the operator can
+  // discover the tunables without reading the schema doc.
+  return {
+    schemaVersion,
+    roles: {},
+    settings: { ...DEFAULT_PROJECT_SETTINGS },
+  };
 }
 
 function freshTaskBoard(schemaVersion: string): TaskBoard {
