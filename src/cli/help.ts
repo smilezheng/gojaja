@@ -601,14 +601,16 @@ export const COMMAND_HELP: Record<string, string> = {
       the Actions panel so a LAN-shared dashboard stays read-only.
       Ctrl-C to stop.`,
 
-  reset: `  gojaja reset [--dry-run] [--confirm <basename>] [--purge]
+  reset: `  gojaja reset [--dry-run] [--confirm <basename>] [--purge] [--force]
       Remove everything gojaja installed: .gojaja/, the Cursor rule, and
       the managed block in CLAUDE.md / AGENTS.md. PR9.6: v3 projects
       also archive the central tree (~/.gojaja/projects/<ULID>/) to
       ~/.gojaja/trash/<ULID>-<TS>/ (recoverable). --purge hard-deletes
       the central tree without trash — irrecoverable, explicit opt-in.
       Preview unless --confirm <project-basename>. No GOJAJA_SESSION
-      in the shell.`,
+      in the shell. Refuses on a dirty or non-git project (same posture
+      as 'gojaja init'); --force bypasses the git-state gate. Re-run
+      with --force --confirm <basename> after reviewing the preview.`,
 
   version: `  gojaja version [--json]
       Print the CLI and on-disk schema version.`,

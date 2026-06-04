@@ -96,6 +96,9 @@ describe("reset on v3 projects: trash by default", () => {
         args({
           root: ctx.projectRoot,
           confirm: path.basename(ctx.projectRoot),
+          // Tests use tmpdir projects (not git repos); --force
+          // bypasses reset's git-state safety gate.
+          force: true,
           json: true,
         }),
       );
@@ -127,6 +130,7 @@ describe("reset on v3 projects: trash by default", () => {
           root: ctx.projectRoot,
           confirm: path.basename(ctx.projectRoot),
           purge: true,
+          force: true,
           json: true,
         }),
       );

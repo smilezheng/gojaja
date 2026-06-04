@@ -4,6 +4,7 @@ import { boolFlag, optionalString, type ParsedArgs } from "../argv";
 import { UsageError } from "../../core/errors";
 import { discoverProjectRoot, LAYER_DIRNAME } from "../runtime";
 import { gojajaHome, readProjectJson } from "../central-root";
+import { inspectGit } from "../util/git-state";
 import {
   RUNTIME_MARKER_BEGIN as CLAUDE_MARKER_BEGIN,
   RUNTIME_MARKER_END as CLAUDE_MARKER_END,
@@ -214,10 +215,18 @@ export async function runReset(args: ParsedArgs): Promise<number> {
   // opt-in. v2 projects ignore both flags (no central tree to
   // handle).
   const purge = boolFlag(args.flags, "purge");
+  // Mirrors `gojaja init`: --force bypasses the git-state safety
+  // gate (dirty work tree / non-git project). Reset is even more
+  // destructive than init, so the default refuses on a dirty tree.
+  const force = boolFlag(args.flags, "force");
   const trashTimestamp = isoTimestampForFs(new Date());
 
   const plan = await buildPlan(projectRoot, { purge, trashTimestamp });
   const items = planToRemovedList(plan);
+
+  // Probe git state up front so the preview can show it alongside
+  // the planned removals. The execute branch re-checks below.
+  const git = await inspectGit(projectRoot);
 
   if (items.length === 0) {
     if (json) {
@@ -244,6 +253,7 @@ export async function runReset(args: ParsedArgs): Promise<number> {
           projectRoot,
           confirmToken: expectedToken,
           willRemove: items,
+          git,
         }) + "\n",
       );
       return 0;
@@ -254,6 +264,22 @@ export async function runReset(args: ParsedArgs): Promise<number> {
       process.stdout.write(`  - ${it.path}  [${it.kind}]\n`);
     }
     process.stdout.write("\n");
+    if (git.kind === "dirty") {
+      process.stdout.write(
+        `Git state: dirty (uncommitted changes in ${projectRoot}). Reset\n` +
+          `will refuse to run until you commit or stash. Sample:\n\n` +
+          git.sample.map((l) => `    ${l}`).join("\n") +
+          (git.sample.length >= 10 ? "\n    ...\n" : "\n") +
+          `\n(Override with 'gojaja reset --force --confirm ...' if you ` +
+          `understand the risk.)\n\n`,
+      );
+    } else if (git.kind === "not-a-repo") {
+      process.stdout.write(
+        `Git state: not a git repository. Without version control there\n` +
+          `is no clean way to undo this reset; --force will be required\n` +
+          `to proceed.\n\n`,
+      );
+    }
     if (dryRun) {
       process.stdout.write(`Dry-run: nothing was removed.\n`);
       return 0;
@@ -269,6 +295,31 @@ export async function runReset(args: ParsedArgs): Promise<number> {
       `--confirm token mismatch. Expected '${expectedToken}' ` +
         `(the basename of the project root). Got '${confirm}'.`,
     );
+  }
+
+  // Git-state safety gate (matches `gojaja init`'s posture, scaled
+  // up because reset is more destructive). --force bypasses both
+  // branches; the execute path otherwise refuses on a dirty tree
+  // or a non-git project so the user has a revert point.
+  if (!force) {
+    if (git.kind === "dirty") {
+      throw new UsageError(
+        `Refusing to reset: ${projectRoot} has uncommitted git changes.\n\n` +
+          git.sample.map((l) => `    ${l}`).join("\n") +
+          (git.sample.length >= 10 ? "\n    ...\n" : "\n") +
+          `\nCommit or stash them first so reset's deletions land in a\n` +
+          `clean, revertable state. Then re-run 'gojaja reset --confirm ${expectedToken}'.\n` +
+          `(Override with 'gojaja reset --force --confirm ${expectedToken}' if you understand the risk.)`,
+      );
+    }
+    if (git.kind === "not-a-repo") {
+      throw new UsageError(
+        `Refusing to reset: ${projectRoot} is not a git repository.\n` +
+          `Without version control there is no clean way to undo reset's\n` +
+          `deletions. Re-run with 'gojaja reset --force --confirm ${expectedToken}'\n` +
+          `to proceed anyway, or initialise git first.`,
+      );
+    }
   }
 
   // Execute the plan.

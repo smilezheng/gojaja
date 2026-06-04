@@ -1,5 +1,4 @@
 import * as path from "node:path";
-import { execFile } from "node:child_process";
 import * as readline from "node:readline";
 import { LocalFsStore } from "../../core/local-fs-store";
 import { LAYER_DIRNAME, SCHEMA_VERSION } from "../runtime";
@@ -10,12 +9,11 @@ import {
   centralRootForProject,
   writeProjectJson,
 } from "../central-root";
+import { inspectGit, type GitState } from "../util/git-state";
 import type { ProjectJson } from "../../core/types";
 
-export type GitState =
-  | { kind: "clean" }
-  | { kind: "dirty"; sample: string[] }
-  | { kind: "not-a-repo" };
+/** Re-export for backward compatibility — gitState lives in util now. */
+export { type GitState } from "../util/git-state";
 
 /**
  * Headless inspector + initializer for use outside the interactive
@@ -127,46 +125,6 @@ export async function performInit(
     projectId,
     centralRoot,
   };
-}
-
-/**
- * Inspect the git state of `root`. `gojaja init` writes a new `.gojaja/`
- * tree (and later `prompt --write` touches `.cursor/` / `CLAUDE.md`); we
- * want the user to have a clean revert point first, and to consciously
- * accept the risk if the project is not under version control at all.
- *
- * Resolution:
- *   - git present + inside a work tree + clean      → { clean }
- *   - git present + inside a work tree + dirty       → { dirty, sample }
- *   - git missing, or not inside a work tree         → { not-a-repo }
- */
-async function inspectGit(root: string): Promise<GitState> {
-  const inside = await runGit(root, ["rev-parse", "--is-inside-work-tree"]);
-  if (inside === null || inside.trim() !== "true") {
-    return { kind: "not-a-repo" };
-  }
-  const status = await runGit(root, ["status", "--porcelain"]);
-  if (status === null || status.trim().length === 0) {
-    return { kind: "clean" };
-  }
-  const sample = status
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-    .slice(0, 10);
-  return { kind: "dirty", sample };
-}
-
-function runGit(cwd: string, args: string[]): Promise<string | null> {
-  return new Promise((resolve) => {
-    execFile("git", args, { cwd, timeout: 5000 }, (err, stdout) => {
-      if (err) {
-        resolve(null);
-        return;
-      }
-      resolve(stdout);
-    });
-  });
 }
 
 /** Ask a yes/no question on a TTY. Resolves false on EOF / non-yes. */

@@ -6,7 +6,27 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Currently empty. Future v3.0.x work lands here.
+### v3.0.x — `gojaja reset` git-state safety gate
+
+`gojaja reset` now refuses on a dirty git work tree or a non-git
+project unless `--force` is passed, mirroring the posture
+`gojaja init` has carried since v1. Reset is more destructive than
+init (it deletes the whole layer + archives / purges the central
+tree), so the same "no clean revert path" gate applies — with the
+same `--force` escape hatch.
+
+`inspectGit` (previously private to `init.ts`) extracted to
+`src/cli/util/git-state.ts` so both commands share one
+implementation. No behaviour change to `init`.
+
+`reset --dry-run` / preview JSON now surface the git state
+alongside the planned removals, so the user sees the gate decision
+before re-running with `--confirm`.
+
+Tests: 3 new cases in `tests/reset.test.ts` cover refuse-on-not-
+a-repo, refuse-on-dirty-tree, preview-surfaces-git-state. Existing
+fixtures use tmpdirs (not git repos), so they were updated to pass
+`force: true` where they call the execute path. 530 → 533.
 
 ## [3.0.0] — 2026-06-03
 
