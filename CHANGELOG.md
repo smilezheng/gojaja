@@ -6,6 +6,47 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### v3.0.x — watch dashboard: responsive layout for tablet / phone widths (T14)
+
+The dashboard was designed for a 1500 px workstation. Below that:
+
+  - The 6-column task board (`grid-template-columns: repeat(6, 1fr)`)
+    shrank each column to a sliver — task titles wrapped onto 5+
+    lines and the column headers themselves wrapped.
+  - The `.actions` / Setup grid floored at `minmax(320px, 1fr)`,
+    which forces a horizontal scroll on anything under ~640 px.
+  - The Archived tab's 4-column grid (`80px 1fr 140px 40px`)
+    crushed the title column to a few glyphs.
+  - Bubbles capped at `max-width: 72%`, leaving large empty
+    margins on phone widths.
+  - The sticky tabs offset (`top: 49px`) assumed a single-row
+    header; on phone, where the chips wrap below the title, the
+    real header height is ~80 px and the sticky tabs overlapped
+    the header.
+
+T14 adds three breakpoints, all CSS-only inside
+`src/cli/dashboard/html.ts`:
+
+  - **tablet (`max-width: 1024px`)**: the task board switches from
+    a 6-column grid to a horizontal-scroll Kanban strip (fixed
+    200 px columns, `scroll-snap-type: x mandatory`). This
+    preserves the side-by-side status comparison — the kanban's
+    whole point — instead of collapsing into a vertical
+    accordion where you lose that. `.roles` / `.actions` drop
+    their minmax floors; main / section padding tightens.
+  - **phone (`max-width: 640px`)**: chips wrap to a second row,
+    tabs become a horizontally-scrolling strip, bubbles widen to
+    92%, archived rows stack vertically (id + pri inline, title
+    + owner on their own lines). Both `header` and `.tabs` drop
+    `position: sticky` so the now-two-row header doesn't overlap
+    the tabs strip.
+  - **tiny (`max-width: 380px`)**: last padding pass for ~360 px
+    Android viewports; kanban columns narrow to 160 px.
+
+No JS or markup changes; no new palette tokens. Existing
+desktop layout (`>1024px`) is byte-identical. 44/44 watch tests
+still green; typecheck clean.
+
 ### v3.0.x — watch dashboard: P0 turns green, priority legend, danger semantics tokenised (T12, T13)
 
 Two visual tweaks plus one small refactor to keep "priority" and

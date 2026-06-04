@@ -372,6 +372,91 @@ export const DASHBOARD_HTML = `<!doctype html>
   .init-card .feedback { margin-top: 10px; font-size: 12px; min-height: 16px; }
   .init-card .feedback.err { color: var(--err-border); } /* T13: red, not P0 (now green) */
   .init-card .feedback.ok { color: var(--live); }
+
+  /* Responsive breakpoints. The dashboard was designed for a 1500px
+     workstation; below that the 6-column kanban, the 320px-min action
+     cards, and the 4-column archived rows all overflow or shrink to
+     illegibility. Three breakpoints:
+
+       - tablet  (<=1024px): kanban switches to a horizontal-scroll
+         strip with fixed 200px columns (preserves the column-per-
+         status mental model — swipe instead of squeeze); roles /
+         actions / setup drop their minmax floors so they collapse
+         to one column gracefully.
+       - phone   (<=640px):  header / tabs collapse, paddings tighten,
+         bubbles widen to ~92%, archived rows stack vertically.
+       - tiny    (<=380px):  last bit of padding stripped so the
+         dashboard is still usable on a 360px viewport (common
+         Android width).
+
+     The kanban deliberately uses horizontal scroll rather than
+     reflowing into one column per status: at this point the
+     board's value IS the side-by-side comparison across statuses,
+     and a vertical accordion loses that. */
+  @media (max-width: 1024px) {
+    main { padding: 12px; gap: 12px; }
+    section { padding: 10px 12px; }
+    .roles { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+    .actions { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    .board {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: 200px;
+      grid-template-columns: none;
+      overflow-x: auto;
+      padding-bottom: 8px;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+    }
+    .board .col { scroll-snap-align: start; }
+    .bubble { max-width: 85%; }
+    .feed { max-height: min(700px, 65vh); }
+  }
+  @media (max-width: 640px) {
+    header { padding: 8px 12px; gap: 8px; }
+    header h1 { font-size: 14px; }
+    header .root { font-size: 11px; word-break: break-all; }
+    .chips { margin-left: 0; gap: 6px; width: 100%; }
+    .chip { padding: 2px 8px; font-size: 11px; }
+    /* Header wraps to two rows on phone (chips drop below the
+       title), so its height is no longer the 49px the desktop
+       sticky-tabs offset assumed. Drop position:sticky on both
+       header and tabs to avoid an overlap; the dashboard is short
+       enough on phone that scroll-to-top is cheap. */
+    header { position: static; }
+    .tabs { position: static; padding: 0 8px; overflow-x: auto;
+      white-space: nowrap; -webkit-overflow-scrolling: touch; }
+    .tab { padding: 9px 10px; }
+    main { padding: 10px; gap: 10px; }
+    section { padding: 10px; border-radius: 8px; }
+    .roles { grid-template-columns: 1fr; gap: 8px; }
+    .actions { grid-template-columns: 1fr; gap: 10px; }
+    .board { grid-auto-columns: 180px; }
+    .bubble { max-width: 92%; }
+    .bubble-meta { flex-wrap: wrap; gap: 6px; }
+    /* Archived rows: the 4-column grid (id / title / owner / pri)
+       loses the title column to nothing on phone widths. Stack the
+       fields so each card reads top-to-bottom; pri stays inline
+       with id as a chip pair. */
+    .arch-card {
+      grid-template-columns: 1fr;
+      gap: 2px;
+      padding: 8px 0;
+    }
+    .arch-card .aid::after { content: " · "; color: var(--dim); }
+    .arch-card .apr { text-align: left; }
+    .init-card { padding: 20px 18px; border-radius: 8px; }
+    .init-card h2 { font-size: 16px; }
+    .legend { flex-wrap: wrap; margin-left: 8px; }
+    .rfc-options .opt { grid-template-columns: 50px 1fr; gap: 6px; }
+  }
+  @media (max-width: 380px) {
+    main { padding: 8px; }
+    section { padding: 8px; }
+    .board { grid-auto-columns: 160px; }
+    .bubble { max-width: 96%; padding: 7px 8px; }
+    .feed { max-height: min(560px, 60vh); }
+  }
 </style>
 </head>
 <body>
