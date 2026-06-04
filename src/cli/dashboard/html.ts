@@ -12,19 +12,42 @@ export const DASHBOARD_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>gojaja watch</title>
 <style>
+  /* v3.0.x T4: light-colour palette. The previous dark-mode tokens
+     are retained as comments alongside each new value for easy
+     rollback (pre-T4 commits also have them in git history if you
+     want to revert this whole file). All hard-coded #hex values
+     elsewhere in the stylesheet were tokenised here too so a
+     future theme switch only needs to edit this :root block. */
   :root {
-    --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a;
-    --fg: #e6e8ee; --dim: #8b93a7; --accent: #6ea8fe;
-    --live: #3fb950; --stale: #d29922; --none: #6b7280;
-    /* v3.0.x N: the previously red "stalled" treatment for live-
-       session-no-wait roles was renamed to a neutral blue
-       "Working" — empirically a quiet role is usually heads-down
-       on code, not wedged. The destructive UI in the Init card
-       (dirty git tree warning, danger button) keeps the red
-       --stalled-* tokens since those ARE real warnings. */
-    --working: #6b9bff; --working-bg: #1d2638; --working-border: #2c3e5a;
-    --stalled: #f85149; --stalled-bg: #3d1418; --stalled-border: #6e2128;
-    --p0: #f85149; --p1: #d29922; --p2: #6ea8fe; --p3: #8b93a7;
+    color-scheme: light;
+    --bg: #f6f8fa;        /* was #0f1115 */
+    --panel: #ffffff;     /* was #171a21 */
+    --panel2: #f1f4f8;    /* was #1e222b */
+    --line: #d8dee5;      /* was #2a2f3a */
+    --fg: #1a1f29;        /* was #e6e8ee */
+    --dim: #57606a;       /* was #8b93a7 */
+    --accent: #0969da;    /* was #6ea8fe */
+    --live: #1a7f37;      /* was #3fb950 */
+    --stale: #9a6700;     /* was #d29922 */
+    --none: #6e7781;      /* was #6b7280 */
+    /* v3.0.x N: working = neutral blue (informational, NOT alarm).
+       Init card's dirty-git warning + danger button keep --stalled
+       red since those ARE real warnings. */
+    --working: #0969da; --working-bg: #ddf4ff; --working-border: #80ccff;
+    --stalled: #cf222e; --stalled-bg: #ffebe9; --stalled-border: #ffc4be;
+    --p0: #cf222e;        /* was #f85149 */
+    --p1: #9a6700;        /* was #d29922 */
+    --p2: #0969da;        /* was #6ea8fe */
+    --p3: #57606a;        /* was #8b93a7 */
+    /* T4 new tokens: previously hard-coded inline. */
+    --live-border: #aceebb;        /* was #224a2c */
+    --system-bubble-bg: #ddf4ff;   /* was #1d2638 */
+    --system-bubble-border: #80ccff;
+    --system-bubble-who: #0550ae;  /* was #8cb4ff */
+    --err-bg: #ffebe9;             /* was #3d1418 */
+    --err-border: #cf222e;         /* was #f85149 */
+    --err-fg: #82071e;             /* was #ffb4ae */
+    --btn-fg-on-accent: #ffffff;   /* was #0b1220 */
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--fg);
@@ -57,7 +80,7 @@ export const DASHBOARD_HTML = `<!doctype html>
   .role .working-note { margin-top: 6px; color: var(--working); font-size: 11px; }
   .badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line);
     text-transform: uppercase; letter-spacing: .04em; }
-  .badge.live { color: var(--live); border-color: #224a2c; } .badge.stale { color: var(--stale); }
+  .badge.live { color: var(--live); border-color: var(--live-border); } .badge.stale { color: var(--stale); }
   .badge.none { color: var(--none); }
   .badge.working { color: var(--working); border-color: var(--working-border); }
   .board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
@@ -149,11 +172,11 @@ export const DASHBOARD_HTML = `<!doctype html>
   .bubble { max-width: 72%; background: var(--panel2);
     border: 1px solid var(--line); border-radius: 10px;
     padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; }
-  .bubble.from-system { background: #1d2638; border-color: #2c3e5a; }
+  .bubble.from-system { background: var(--system-bubble-bg); border-color: var(--system-bubble-border); }
   .bubble-meta { display: flex; gap: 8px; font-size: 11px;
     color: var(--dim); align-items: baseline; }
   .bubble-meta .who { color: var(--fg); font-weight: 600; }
-  .bubble.from-system .bubble-meta .who { color: #8cb4ff; }
+  .bubble.from-system .bubble-meta .who { color: var(--system-bubble-who); }
   .bubble-meta .ety { font-size: 10px; text-transform: uppercase;
     letter-spacing: 0.5px; padding: 1px 5px; border-radius: 999px;
     border: 1px solid var(--line); color: var(--dim); }
@@ -167,7 +190,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     word-wrap: break-word; line-height: 1.45; }
   .bubble-body.empty { color: var(--dim); font-style: italic; }
   .empty { color: var(--dim); font-style: italic; }
-  #err { display: none; background: #3d1418; border: 1px solid #f85149; color: #ffb4ae;
+  #err { display: none; background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err-fg);
     padding: 8px 12px; border-radius: 8px; margin: 0 16px; }
   /* Actions panel: project-owner write surface. Hidden when the
      server reports !capabilities.writeEnabled (non-loopback bind). */
@@ -187,7 +210,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     width: 100%; box-sizing: border-box; background: var(--bg); color: var(--fg);
     border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; font: 12px ui-monospace, monospace; }
   .action textarea { min-height: 60px; resize: vertical; }
-  .action button { margin-top: 10px; background: var(--accent); color: #0b1220; border: 0;
+  .action button { margin-top: 10px; background: var(--accent); color: var(--btn-fg-on-accent); border: 0;
     border-radius: 5px; padding: 6px 14px; font: 600 12px ui-sans-serif, system-ui;
     cursor: pointer; }
   .action button:disabled { opacity: .5; cursor: not-allowed; }
@@ -265,7 +288,7 @@ export const DASHBOARD_HTML = `<!doctype html>
   .init-card .git.bad { border-color: var(--stalled); background: var(--stalled-bg); }
   .init-card .git pre { margin: 6px 0 0; font: 11px ui-monospace, monospace; color: var(--dim);
     white-space: pre-wrap; word-break: break-all; max-height: 160px; overflow: auto; }
-  .init-card button.primary { background: var(--accent); color: #0b1220; border: 0;
+  .init-card button.primary { background: var(--accent); color: var(--btn-fg-on-accent); border: 0;
     border-radius: 6px; padding: 9px 18px; font: 600 13px ui-sans-serif, system-ui;
     cursor: pointer; margin-top: 8px; }
   .init-card button.primary:disabled { opacity: .5; cursor: not-allowed; }

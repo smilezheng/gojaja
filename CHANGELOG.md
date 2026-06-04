@@ -6,6 +6,40 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### v3.0.x — `gojaja watch` light theme (T4)
+
+The dashboard switched from the historical dark palette to a
+light one. Same information density, same component layout —
+only the colours flip.
+
+**Method.** All previously hard-coded `#hex` values inside the
+stylesheet were tokenised into `:root` CSS variables, then the
+variable values were swapped to a light palette. A single block
+at the top of `dashboard/html.ts` now defines:
+
+  - background tokens: `--bg`, `--panel`, `--panel2`, `--line`
+  - text tokens: `--fg`, `--dim`
+  - accent / status: `--accent`, `--live`, `--stale`, `--none`,
+    `--working`, `--stalled`, plus matching `*-bg` and `*-border`
+    pairs where used
+  - priority chips: `--p0` … `--p3`
+  - new tokens previously inlined: `--live-border`,
+    `--system-bubble-{bg,border,who}`, `--err-{bg,border,fg}`,
+    `--btn-fg-on-accent`
+
+`color-scheme: light` declared so browser-rendered widgets
+(scrollbars, native form controls) match.
+
+The previous dark-palette values are kept inline as comments
+next to each new value so the next maintainer can see the diff
+at a glance and a future "dark mode" toggle is cheap to add.
+
+**Reversibility.** This commit touches only
+`src/cli/dashboard/html.ts`. Reverting the single commit
+restores the dark theme exactly. (Why this PR shipped as a
+separate commit: the user wanted easy rollback if the new
+look doesn't land.)
+
 ### v3.0.x — activate snippet teaches `git worktree` isolation (T5)
 
 `gojaja activate <role>` now prepends a "Step 0" to the
