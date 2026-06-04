@@ -17,15 +17,20 @@ export const DASHBOARD_HTML = `<!doctype html>
      rollback (pre-T4 commits also have them in git history if you
      want to revert this whole file). All hard-coded #hex values
      elsewhere in the stylesheet were tokenised here too so a
-     future theme switch only needs to edit this :root block. */
+     future theme switch only needs to edit this :root block.
+
+     v3.0.x T6: warmed up the previously cold off-white background
+     to a subtle cream / beige tint. Easier on the eyes for long
+     watch sessions. The accent / status / priority colours are
+     unchanged (they already work on either warm or cold whites). */
   :root {
     color-scheme: light;
-    --bg: #f6f8fa;        /* was #0f1115 */
-    --panel: #ffffff;     /* was #171a21 */
-    --panel2: #f1f4f8;    /* was #1e222b */
-    --line: #d8dee5;      /* was #2a2f3a */
+    --bg: #faf6ec;        /* was #f6f8fa (T4 cold white); was #0f1115 (pre-T4 dark) */
+    --panel: #fffdf6;     /* was #ffffff; very faint cream, still reads as white but harmonises with --bg */
+    --panel2: #f3ecdc;    /* was #f1f4f8; warm step between bg and panel */
+    --line: #d9d0bc;      /* was #d8dee5; warm gray-beige border */
     --fg: #1a1f29;        /* was #e6e8ee */
-    --dim: #57606a;       /* was #8b93a7 */
+    --dim: #6b6453;       /* was #57606a; warmer gray for secondary text */
     --accent: #0969da;    /* was #6ea8fe */
     --live: #1a7f37;      /* was #3fb950 */
     --stale: #9a6700;     /* was #d29922 */
