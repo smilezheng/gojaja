@@ -835,17 +835,57 @@ export async function buildSnapshot(
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
     .map(projectTask);
 
-  const rfcList = rfcs.map((p) => ({
-    id: p.id,
-    title: p.title,
-    status: p.status,
-    deciders: p.deciders,
-    voters: p.voters,
-    createdBy: p.createdBy,
-    options: (p.options ?? []).map((o) => o.id),
-    relatedTasks: p.relatedTasks ?? [],
-    deadline: p.deadline ?? null,
-  }));
+  // v3.0.x L: enrich the RFC list with full proposal + threaded
+  // comments + decision so the dashboard can render a complete
+  // detail card without firing another round-trip per RFC.
+  // readRfc() is the same call the CLI's `rfc show` uses; the
+  // payload it returns is already shape-stable.
+  //
+  // Cost note: a project with N RFCs and M comments per RFC sends
+  // ~M*N comment records per state poll. M is typically small
+  // (RFCs tend to converge in <20 comments) but a future enhancement
+  // could cap to the latest K comments + an "older" link.
+  const rfcList = await Promise.all(
+    rfcs.map(async (p) => {
+      const detail = await store.readRfc(p.id).catch(() => null);
+      const comments = detail?.comments ?? [];
+      const decision = detail?.decision ?? null;
+      return {
+        id: p.id,
+        title: p.title,
+        status: p.status,
+        deciders: p.deciders,
+        voters: p.voters,
+        createdBy: p.createdBy,
+        description: p.description ?? "",
+        // Full {id, summary} pairs (renderer can do the table).
+        options: (p.options ?? []).map((o) => ({
+          id: o.id,
+          summary: o.summary,
+        })),
+        relatedTasks: p.relatedTasks ?? [],
+        deadline: p.deadline ?? null,
+        comments: comments.map((c) => ({
+          id: c.id,
+          role: c.role,
+          ts: c.ts,
+          preferred: c.preferred,
+          rationale: c.rationale,
+          replyTo: c.replyTo ?? null,
+          kind: c.kind ?? null,
+        })),
+        decision: decision
+          ? {
+              outcome: decision.outcome,
+              decidedBy: decision.decidedBy,
+              ts: decision.ts,
+              chosenOption: decision.chosenOption ?? null,
+              rationale: decision.rationale,
+            }
+          : null,
+      };
+    }),
+  );
 
   // Newest-first tail of the global event stream = the activity feed.
   const events = allEvents

@@ -299,6 +299,63 @@ describe("watch HTTP server — Actions endpoints (loopback-gated)", () => {
     });
   });
 
+  it("buildSnapshot surfaces each RFC's options + comments + decision (v3.0.x L)", async () => {
+    // Direct snapshot test — wires the same data path as the HTTP
+    // server but skips the network boundary for clarity. The
+    // dashboard's RFC card reads exactly this shape.
+    const proposal = await ctx.store.createRfc({
+      slug: "auth-style",
+      title: "Auth style",
+      voters: ["Backend"],
+      deciders: ["PM"],
+      options: [
+        { id: "A", summary: "JWT" },
+        { id: "B", summary: "session cookie" },
+      ],
+      createdBy: "SYSTEM",
+      description: "pick one before login launches",
+      relatedTasks: [],
+    });
+    await ctx.store.commentRfc({
+      rfcId: proposal.id,
+      role: "Backend",
+      preferred: "A",
+      rationale: "JWT is what our mobile client expects.",
+    });
+    // PM is registered with task-board ownership in freshStore()
+    // but lacks a session for decideRfc; claim one to satisfy its
+    // requireSession gate.
+    const s = await ctx.store.claimSession("PM", 60);
+    process.env.GOJAJA_SESSION = s.sessionId;
+    try {
+      await ctx.store.decideRfc({
+        rfcId: proposal.id,
+        decidedBy: "PM",
+        chosenOption: "A",
+        rationale: "Going with A.",
+      });
+    } finally {
+      delete process.env.GOJAJA_SESSION;
+    }
+
+    const snap = await buildSnapshot(ctx.store, ctx.root, 60_000);
+    const r1 = snap.rfcs.find((x) => x.id === proposal.id);
+    expect(r1).toBeDefined();
+    expect(r1?.description).toBe("pick one before login launches");
+    expect(r1?.options).toEqual([
+      { id: "A", summary: "JWT" },
+      { id: "B", summary: "session cookie" },
+    ]);
+    expect(
+      r1?.comments.some(
+        (c) => c.role === "Backend" && c.rationale.includes("JWT"),
+      ),
+    ).toBe(true);
+    expect(r1?.decision).not.toBeNull();
+    expect(r1?.decision?.outcome).toBe("accepted");
+    expect(r1?.decision?.chosenOption).toBe("A");
+  });
+
   it("POST /api/rfc creates a SYSTEM-authored RFC", async () => {
     await withServer("127.0.0.1", async (origin) => {
       const r = await fetch(`${origin}/api/rfc`, {

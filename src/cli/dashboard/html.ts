@@ -86,13 +86,48 @@ export const DASHBOARD_HTML = `<!doctype html>
   .task.p0 { border-left-color: var(--p0); } .task.p1 { border-left-color: var(--p1); }
   .task.p2 { border-left-color: var(--p2); } .task.p3 { border-left-color: var(--p3); }
   .blk { color: var(--p0); font-size: 11px; }
-  .rfcs { display: flex; flex-direction: column; gap: 8px; }
+  .rfcs { display: flex; flex-direction: column; gap: 10px; }
   .rfc { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
-    padding: 8px 10px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+    padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .rfc-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
   .rfc .rid { font-family: ui-monospace, monospace; color: var(--dim); }
   .rfc .st { font-size: 10px; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); }
   .rfc .st.open { color: var(--live); } .rfc .st.revising { color: var(--stale); }
   .rfc .st.accepted { color: var(--accent); } .rfc .st.rejected { color: var(--none); }
+  .rfc-title { font-weight: 600; flex: 1; }
+  .rfc-meta { color: var(--dim); font-size: 11px; }
+  .rfc-desc { color: var(--fg); font-size: 12px; white-space: pre-wrap;
+    background: var(--panel); border-left: 2px solid var(--line);
+    padding: 6px 8px; border-radius: 4px; }
+  .rfc-options { display: flex; flex-direction: column; gap: 3px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 4px; padding: 6px 8px; }
+  .rfc-options .opt { display: grid; grid-template-columns: 60px 1fr;
+    gap: 8px; font-size: 12px; }
+  .rfc-options .opt .oid { font-family: ui-monospace, monospace;
+    color: var(--accent); }
+  .rfc-section-h { color: var(--dim); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; }
+  .rfc-comments { display: flex; flex-direction: column; gap: 5px; }
+  .rfc-cmt { font-size: 12px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+  .rfc-cmt:last-child { border-bottom: none; }
+  .rfc-cmt .cmt-who { color: var(--accent); font-weight: 600; }
+  .rfc-cmt .cmt-kind { font-size: 10px; text-transform: uppercase;
+    padding: 1px 5px; border-radius: 999px; border: 1px solid var(--line);
+    color: var(--dim); margin-left: 6px; }
+  .rfc-cmt .cmt-kind.pre-decision { color: var(--stale); }
+  .rfc-cmt .cmt-kind.ack { color: var(--live); }
+  .rfc-cmt .cmt-kind.object { color: var(--none); }
+  .rfc-cmt .cmt-body { white-space: pre-wrap; color: var(--fg); margin-top: 2px; }
+  .rfc-cmt .cmt-reply { padding-left: 14px; border-left: 2px solid var(--line); }
+  .rfc-decision { background: var(--panel); border: 1px solid var(--accent);
+    border-radius: 4px; padding: 8px 10px; }
+  .rfc-decision.rejected { border-color: var(--none); }
+  .rfc-decision .dec-head { font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--accent); }
+  .rfc-decision.rejected .dec-head { color: var(--none); }
+  .rfc-decision .dec-body { white-space: pre-wrap; font-size: 12px;
+    margin-top: 4px; color: var(--fg); }
   .feed { max-height: 420px; overflow: auto; }
   .ev { display: grid; grid-template-columns: 70px 130px 1fr; gap: 10px; padding: 5px 0;
     border-bottom: 1px solid var(--line); align-items: baseline; }
@@ -463,12 +498,79 @@ export const DASHBOARD_HTML = `<!doctype html>
   function renderRfcs(rfcs){
     if(!rfcs.length) return '<div class="empty">No RFCs.</div>';
     return rfcs.map(function(r){
-      return '<div class="rfc"><span class="rid">'+esc(r.id)+'</span>'+
-        '<span class="st '+esc(r.status)+'">'+esc(r.status)+'</span>'+
-        '<span style="flex:1">'+esc(r.title)+'</span>'+
-        '<span class="role-meta" style="color:var(--dim);font-size:11px">deciders: '+esc((r.deciders||[]).join(", "))+
-        ' · voters: '+esc((r.voters||[]).join(", "))+
-        ((r.relatedTasks&&r.relatedTasks.length)?' · tasks: '+esc(r.relatedTasks.join(", ")):"")+'</span></div>';
+      var head =
+        '<div class="rfc-head">'+
+          '<span class="rid">'+esc(r.id)+'</span>'+
+          '<span class="st '+esc(r.status)+'">'+esc(r.status)+'</span>'+
+          '<span class="rfc-title">'+esc(r.title)+'</span>'+
+          '<span class="rfc-meta">deciders: '+esc((r.deciders||[]).join(", "))+
+          ' · voters: '+esc((r.voters||[]).join(", "))+
+          ((r.relatedTasks&&r.relatedTasks.length)
+            ? ' · tasks: '+esc(r.relatedTasks.join(", ")) : "")+
+          (r.deadline ? ' · deadline: '+esc(r.deadline) : "")+
+          '</span>'+
+        '</div>';
+
+      var desc = "";
+      if(r.description && r.description.length > 0){
+        desc = '<div class="rfc-desc">'+esc(r.description)+'</div>';
+      }
+
+      var opts = "";
+      if(r.options && r.options.length > 0){
+        opts =
+          '<div class="rfc-section-h">Options</div>'+
+          '<div class="rfc-options">'+
+            r.options.map(function(o){
+              return '<div class="opt"><span class="oid">'+esc(o.id)+'</span>'+
+                '<span>'+esc(o.summary || "(no summary)")+'</span></div>';
+            }).join("")+
+          '</div>';
+      }
+
+      var cmts = "";
+      if(r.comments && r.comments.length > 0){
+        cmts =
+          '<div class="rfc-section-h">Comments ('+r.comments.length+')</div>'+
+          '<div class="rfc-comments">'+
+            r.comments.map(function(c){
+              var kindBadge = "";
+              if(c.kind){
+                kindBadge = '<span class="cmt-kind '+esc(c.kind)+'">'+
+                  esc(c.kind)+'</span>';
+              }
+              var pref = c.preferred
+                ? '<span class="rfc-meta"> → '+esc(c.preferred)+'</span>'
+                : "";
+              var cls = c.replyTo ? "rfc-cmt cmt-reply" : "rfc-cmt";
+              return '<div class="'+cls+'">'+
+                '<span class="cmt-who">'+esc(c.role)+'</span>'+
+                kindBadge+pref+
+                '<span class="rfc-meta"> · '+esc(ago(c.ts))+'</span>'+
+                '<div class="cmt-body">'+esc(c.rationale || "")+'</div>'+
+                '</div>';
+            }).join("")+
+          '</div>';
+      }
+
+      var dec = "";
+      if(r.decision){
+        var decCls = r.decision.outcome === "rejected"
+          ? "rfc-decision rejected" : "rfc-decision";
+        var optStr = r.decision.chosenOption
+          ? ' · option '+esc(r.decision.chosenOption) : "";
+        dec =
+          '<div class="'+decCls+'">'+
+            '<div class="dec-head">'+esc(r.decision.outcome)+
+              ' by '+esc(r.decision.decidedBy)+
+              optStr+
+              ' · '+esc(ago(r.decision.ts))+
+            '</div>'+
+            '<div class="dec-body">'+esc(r.decision.rationale || "")+'</div>'+
+          '</div>';
+      }
+
+      return '<div class="rfc">'+head+desc+opts+cmts+dec+'</div>';
     }).join("");
   }
 

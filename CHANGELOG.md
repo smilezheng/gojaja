@@ -6,6 +6,44 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### v3.0.x — watch RFC detail card
+
+The watch dashboard's RFC list used to be a single line per RFC
+(id, status, title, deciders, voters). To see comments, options,
+or the decision rationale, the operator had to leave the
+dashboard and grep through `comms/events/`. Now each RFC card
+expands to show the full proposal + threaded comments +
+decision block inline.
+
+**Backend.** `buildSnapshot`'s `rfcList` now calls `readRfc(id)`
+for every proposal and includes:
+
+  - `description` (full text);
+  - `options` as `{ id, summary }[]` (was just ids);
+  - `comments[]` (id, role, ts, preferred, rationale, replyTo,
+    kind) — the same threaded ledger `rfc show` prints;
+  - `decision` block (outcome, decidedBy, ts, chosenOption,
+    rationale) when present, otherwise `null`;
+  - `deadline` (already there).
+
+Payload cost: a project with N RFCs and M comments per RFC sends
+~N×M comment records per state poll. M is typically small;
+pagination / "older" links can be added if observed to bite.
+
+**Frontend.** `renderRfcs` rewritten to render each RFC as a
+card with sections: head line, optional description, options
+table, threaded comments (with kind badges for `pre-decision` /
+`ack` / `object`), and an accepted-or-rejected decision block.
+New CSS classes (`.rfc-head`, `.rfc-desc`, `.rfc-options`,
+`.rfc-cmt`, `.rfc-cmt .cmt-kind.{ack,object,pre-decision}`,
+`.rfc-decision`) match the existing dashboard tone.
+
+**Tests.** 1 new case in `tests/watch.test.ts` exercises the
+end-to-end path: create an RFC with options + description,
+leave a comment, decide it, then assert
+`buildSnapshot().rfcs[<id>]` carries the entire shape (options
+with summaries, comments thread, decision block). 541 → 542.
+
 ### v3.0.x — SYSTEM broadcast announcements (`report --to '*'`)
 
 `gojaja report` gains a broadcast recipient: passing `--to '*'`
