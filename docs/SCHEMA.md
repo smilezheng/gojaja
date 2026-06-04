@@ -203,7 +203,9 @@ tasks:
   T-0001:
     id: T-0001
     title: Implement /login API
-    status: Ready          # Backlog | Ready | InProgress | Blocked | Review | Done
+    status: Pending        # Backlog | Pending | InProgress | Blocked | Review | Done
+                            # ("Ready" remains accepted as a legacy alias for
+                            #  "Pending" through v3.0.x; v3.1 will drop it.)
     owner: Backend
     priority: P1
     dependsOn: []
@@ -462,7 +464,7 @@ Invariants:
 
 The manifest also carries a `tasks` array: a list of `TaskSummary`
 records filtered to those where `owner == role` and
-`status ∈ {Ready, InProgress, Blocked, Review}`. Each summary carries
+`status ∈ {Pending, InProgress, Blocked, Review}`. Each summary carries
 only `id`, `title`, `status`, `priority`, and `blockedBy` (the subset
 of `dependsOn` that is not yet Done). The full task record is fetched
 on demand via `gojaja task show <id>`.

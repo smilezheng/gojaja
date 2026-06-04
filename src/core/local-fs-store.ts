@@ -116,6 +116,16 @@ function backfillTaskFields(t: Task): void {
   if (!Array.isArray(t.deliverables)) t.deliverables = [];
   if (!Array.isArray(t.tags)) t.tags = [];
   if (!Array.isArray(t.reviewers)) t.reviewers = [];
+  // v3.0.x rename: "Ready" → "Pending". Apply at the read boundary
+  // so every downstream consumer (dashboard, manifest, handbook
+  // rendering) only ever sees the new name. The legacy literal
+  // stays accepted on the input side (see TaskStatus union) so
+  // hand-edited boards / external callers never crash. The next
+  // setTaskStatus / createTask call writes "Pending" back to YAML,
+  // so the migration is naturally completed by ordinary use.
+  if ((t.status as string) === "Ready") {
+    t.status = "Pending";
+  }
   // `archived` stays optional — undefined === false for filters. We
   // intentionally do NOT default-set it to false, to keep the on-disk
   // YAML tight for the (overwhelmingly common) un-archived case.
@@ -2015,7 +2025,10 @@ export class LocalFsStore implements Store {
       // surfaces the task (Backlog is filtered out of manifest.tasks
       // by design). Without an owner, the task is a product/PM backlog
       // item that needs triage before anyone should pick it up.
-      const initialStatus: TaskStatus = owner !== null ? "Ready" : "Backlog";
+      // v3.0.x: new tasks land in "Pending" (renamed from "Ready").
+      // The reader normalises legacy boards on the way in, so this
+      // is the only writer of the canonical name.
+      const initialStatus: TaskStatus = owner !== null ? "Pending" : "Backlog";
       const task: Task = {
         id,
         title,
@@ -2110,6 +2123,12 @@ export class LocalFsStore implements Store {
         `Invalid status '${input.newStatus}'. Use one of: ${TASK_STATUSES.join(", ")}.`,
       );
     }
+    // v3.0.x: silently normalise the legacy "Ready" literal at the
+    // input boundary so the persisted event + task carry only the
+    // canonical "Pending" name. Mirrors the reader-side fold in
+    // `backfillTaskFields`.
+    const newStatus: TaskStatus =
+      input.newStatus === "Ready" ? "Pending" : input.newStatus;
     return this.withLock("task-board", async () => {
       const board = await this.readTaskBoard();
       const task = board.tasks[input.taskId];
@@ -2137,7 +2156,7 @@ export class LocalFsStore implements Store {
         input.actor !== "SYSTEM" && task.reviewers.includes(input.actor);
       const isSystem = input.actor === "SYSTEM";
       let permitted = false;
-      if (input.newStatus === "Done") {
+      if (newStatus === "Done") {
         if (isSystem) permitted = true;
         else if (isReviewer) permitted = true;
         else if (isTaskOwner && isCreator) permitted = true;
@@ -2147,7 +2166,7 @@ export class LocalFsStore implements Store {
         else if (isReviewer) permitted = true;
       }
       if (!permitted) {
-        if (input.newStatus === "Done" && isTaskOwner && !isCreator) {
+        if (newStatus === "Done" && isTaskOwner && !isCreator) {
           // Special-case the most common failure mode so the error is
           // informative: owner trying to Done a task they did not
           // create AND with no reviewers configured.
@@ -2166,7 +2185,7 @@ export class LocalFsStore implements Store {
         await this.requireOwnership(input.actor, Paths.taskBoardFile);
       }
       const previousStatus = task.status;
-      if (previousStatus === input.newStatus) return task;
+      if (previousStatus === newStatus) return task;
 
       // Deliverable gate on Done. Every `kind: "file"` deliverable
       // must point at an existing file in the project tree, otherwise
@@ -2174,7 +2193,7 @@ export class LocalFsStore implements Store {
       // bypasses with an audit event so the trail explains "this was
       // a knowing approval, not silent loss".
       let bypassMissing: string[] = [];
-      if (input.newStatus === "Done") {
+      if (newStatus === "Done") {
         const missing = await this.findMissingFileDeliverables(task);
         if (missing.length > 0) {
           if (!input.forceIncomplete) {
@@ -2190,7 +2209,7 @@ export class LocalFsStore implements Store {
         }
       }
 
-      task.status = input.newStatus;
+      task.status = newStatus;
       task.updatedAt = new Date().toISOString();
       await this.writeTaskBoardUnlocked(board);
 
@@ -2218,7 +2237,7 @@ export class LocalFsStore implements Store {
         payload: {
           taskId: input.taskId,
           previousStatus,
-          newStatus: input.newStatus,
+          newStatus,
         },
         ...attachActorMeta(input.actor, input.actorMeta),
       });
@@ -2373,7 +2392,12 @@ export class LocalFsStore implements Store {
         const counts = { ready: 0, inProgress: 0, blocked: 0, review: 0, done: 0 };
         for (const c of children) {
           switch (c.status) {
+            case "Pending":
             case "Ready":
+              // Dual-read: count legacy "Ready" alongside "Pending".
+              // The reader normalises on the way in so this case is
+              // only triggered by in-flight code that hasn't been
+              // re-read yet, but keep both for safety.
               counts.ready++;
               break;
             case "InProgress":

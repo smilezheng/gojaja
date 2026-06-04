@@ -254,6 +254,19 @@ export interface ProjectConfig {
  */
 export type TaskStatus =
   | "Backlog"
+  | "Pending"
+  /**
+   * v3.0.x rename of "Ready" → "Pending". Kept in the union as
+   * an accepted INPUT for backward compatibility: existing
+   * task_board.yaml files and any external caller still passing
+   * "Ready" are silently normalised to "Pending" by the Store at
+   * read AND write time. In-memory representations and new
+   * writes always use "Pending"; "Ready" never reaches a fresh
+   * downstream consumer.
+   *
+   * Drop from this union in v3.1 once dual-read has had a release
+   * worth of exposure.
+   */
   | "Ready"
   | "InProgress"
   | "Blocked"
@@ -262,6 +275,10 @@ export type TaskStatus =
 
 export const TASK_STATUSES: ReadonlyArray<TaskStatus> = [
   "Backlog",
+  "Pending",
+  // "Ready" remains accepted on the input side for backward
+  // compatibility; the Store normalises it to "Pending" at both
+  // read and write boundaries (see v3.0.x CHANGELOG J entry).
   "Ready",
   "InProgress",
   "Blocked",
@@ -275,6 +292,11 @@ export const TASK_STATUSES: ReadonlyArray<TaskStatus> = [
  * fall outside this set: Backlog is product/PM space, Done is history.
  */
 export const ACTIVE_TASK_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  "Pending",
+  // Dual-read window: a board mid-migration may still hold tasks
+  // with the legacy "Ready" literal in memory (defensive defaults
+  // run before normalisation in some paths); keep it active so
+  // manifests don't silently drop them.
   "Ready",
   "InProgress",
   "Blocked",
@@ -414,6 +436,13 @@ export interface TaskSummary {
    * stay tight.
    */
   childCounts?: {
+    /**
+     * Count of children in the "queued but not started" bucket.
+     * v3.0.x: this corresponds to status `"Pending"` (renamed from
+     * `"Ready"`); the field name is kept as `ready` to avoid a
+     * breaking change to the manifest shape. Treat the two as
+     * synonyms in display.
+     */
     ready: number;
     inProgress: number;
     blocked: number;

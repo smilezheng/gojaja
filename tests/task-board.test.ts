@@ -70,14 +70,14 @@ describe("Store.createTask", () => {
     ).rejects.toMatchObject({ code: "USAGE" });
   });
 
-  it("Step 5b: createTask with --owner defaults status to Ready", async () => {
+  it("Step 5b: createTask with --owner defaults status to Pending", async () => {
     // The whole point: PM creates and assigns; the owner must see the
     // task in their next plan, which filters Backlog out. So new tasks
-    // with an owner start in Ready.
+    // with an owner start in Pending (v3.0.x rename from "Ready").
     const t = await ctx.store.createTask({
       title: "Build login", owner: "Backend", actor: "PM",
     });
-    expect(t.status).toBe("Ready");
+    expect(t.status).toBe("Pending");
   });
 
   it("Step 5b: createTask without --owner defaults status to Backlog", async () => {
@@ -86,6 +86,63 @@ describe("Store.createTask", () => {
     });
     expect(t.status).toBe("Backlog");
     expect(t.owner).toBeNull();
+  });
+
+  it("v3.0.x: legacy 'Ready' input is silently normalised to 'Pending' (dual-read)", async () => {
+    // 1. Input normalisation: setTaskStatus accepts "Ready" but
+    //    persists "Pending".
+    const t = await ctx.store.createTask({
+      title: "x", owner: "Backend", actor: "PM",
+    });
+    // First push it off Pending so we have somewhere to come back from.
+    await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "InProgress", actor: "Backend",
+    });
+    // Now ask for "Ready" — should land as "Pending".
+    await ctx.store.setTaskStatus({
+      taskId: t.id, newStatus: "Ready", actor: "Backend",
+    });
+    const after = await ctx.store.readTask(t.id);
+    expect(after.status).toBe("Pending");
+    // The TASK_STATUS_CHANGED event should also carry the normalised
+    // value — the audit log reflects the canonical name.
+    const events = await ctx.store.listEventsAfter("");
+    const latestChange = events
+      .filter((e) => e.type === "TASK_STATUS_CHANGED")
+      .pop();
+    expect(latestChange?.payload.newStatus).toBe("Pending");
+
+    // 2. Read normalisation: hand-write a v2-style task_board.yaml
+    //    with literal "Ready" and confirm the reader folds it.
+    const legacyBoard = {
+      schemaVersion: "2.0.0-task-v2",
+      nextId: 1,
+      tasks: {
+        "T-0099": {
+          id: "T-0099",
+          title: "legacy",
+          status: "Ready",
+          owner: "Backend",
+          priority: "P2",
+          dependsOn: [],
+          acceptance: "",
+          createdAt: "2026-06-01T00:00:00Z",
+          updatedAt: "2026-06-01T00:00:00Z",
+          parent: null,
+          creator: "SYSTEM",
+          assets: [],
+          deliverables: [],
+          tags: [],
+          reviewers: [],
+        },
+      },
+    };
+    await fsp.writeFile(
+      path.join(ctx.root, "state/task_board.yaml"),
+      yaml.dump(legacyBoard, { lineWidth: 100, noRefs: true }),
+    );
+    const reloaded = await ctx.store.readTask("T-0099");
+    expect(reloaded.status).toBe("Pending");
   });
 
   it("Step 12: createTask refuses an owner that is not registered (USAGE — likely a typo)", async () => {
@@ -156,8 +213,9 @@ describe("Store.assignTask / setTaskStatus", () => {
     expect(updated.status).toBe("InProgress");
     const events = await ctx.store.listEventsAfter("");
     const change = events.find((e) => e.type === "TASK_STATUS_CHANGED");
-    // Step 5b: createTask with an owner defaults to Ready, not Backlog.
-    expect(change?.payload.previousStatus).toBe("Ready");
+    // Step 5b (v3.0.x): createTask with an owner defaults to
+    // Pending, not Backlog (was "Ready" pre-v3.0.x).
+    expect(change?.payload.previousStatus).toBe("Pending");
     expect(change?.payload.newStatus).toBe("InProgress");
   });
 

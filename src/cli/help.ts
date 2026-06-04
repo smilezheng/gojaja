@@ -184,7 +184,7 @@ access; status transitions follow per-task permissions below):
            [--reviewer <role> ...]
            [--asset 'kind:ref::desc' ...]
            [--deliverable 'kind:ref::desc' ...]
-      Tasks created WITH an owner default to status Ready (the owner's
+      Tasks created WITH an owner default to status Pending (the owner's
       next plan surfaces them). Without an owner, default is Backlog
       (PM-side product idea pending triage). The actor is recorded as
       task.creator and is immutable after create.
@@ -216,7 +216,7 @@ access; status transitions follow per-task permissions below):
       goes to a nobody). task.creator records the ORIGINAL creator
       and is NOT updated on reassignment (audit log carries
       reassignment history).
-  task status <task-id> <Backlog|Ready|InProgress|Blocked|Review|Done>
+  task status <task-id> <Backlog|Pending|InProgress|Blocked|Review|Done>
                        [--force-incomplete]
       Permission:
         - Done is allowed for: SYSTEM, a role in task.reviewers, the
@@ -561,7 +561,8 @@ export const COMMAND_HELP: Record<string, string> = {
                   [--tag <l> ...] [--reviewer <role> ...]
                   [--asset 'kind:ref::desc' ...] [--deliverable 'kind:ref::desc' ...]
   gojaja task assign <id> --to <role>
-  gojaja task status <id> <Backlog|Ready|InProgress|Blocked|Review|Done> [--force-incomplete]
+  gojaja task status <id> <Backlog|Pending|InProgress|Blocked|Review|Done> [--force-incomplete]
+      (v3.0.x: "Ready" is silently accepted as a legacy alias for "Pending".)
   gojaja task list [--owner <role>] [--status <s>] [--tag <label> ...] [--json]
   gojaja task show <id>
       Manage the shared task board. file-kind deliverables are

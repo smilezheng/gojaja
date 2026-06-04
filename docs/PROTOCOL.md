@@ -221,7 +221,7 @@ agent can recover its full operating identity by running `plan` once;
 it does not duplicate the full role contract or protocol docs.
 
 `manifest.tasks` is the role's active task list: tasks where
-`owner == role` and `status ∈ {Ready, InProgress, Blocked, Review}`.
+`owner == role` and `status ∈ {Pending, InProgress, Blocked, Review}`.
 Each entry is a `TaskSummary` (`id`, `title`, `status`, `priority`,
 `blockedBy`). Backlog and Done are intentionally excluded — the
 former is product/PM space, the latter is history. Call
@@ -406,7 +406,11 @@ The full schema is documented in
 - Does NOT change `task.creator` — that field records the original
   creator. Reassignment is auditable via the event stream alone.
 
-### `gojaja task status <task-id> <Backlog|Ready|InProgress|Blocked|Review|Done> [--force-incomplete]`
+### `gojaja task status <task-id> <Backlog|Pending|InProgress|Blocked|Review|Done> [--force-incomplete]`
+
+(v3.0.x: `Ready` remains accepted as a legacy alias for `Pending`;
+the Store normalises it transparently at both read and write
+boundaries.)
 
 - Sets `task.status` and emits `TASK_STATUS_CHANGED`.
 - v2 does not enforce status transitions; any role with write access

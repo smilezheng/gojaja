@@ -6,6 +6,55 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### v3.0.x — task status `Ready` renamed to `Pending` (silent dual-read)
+
+The "queued, not yet started" status is now spelled `Pending`. The
+old name `Ready` read awkwardly for the bucket's actual semantics
+(it is more "waiting to be picked up" than "ready to ship") and
+collided with the verb "ready" in user-facing copy.
+
+**No schema bump.** The `TaskStatus` union still accepts `"Ready"`
+as input; the Store normalises it to `"Pending"` at both the
+read boundary (`backfillTaskFields` in `local-fs-store.ts`) and
+the write boundary (`setTaskStatus`'s input is folded; `createTask`
+emits `"Pending"`). Existing YAML files with `status: Ready`
+load and continue to work; the next `setTaskStatus` /
+`createTask` writes `Pending` back, so the migration completes
+naturally through ordinary use.
+
+**Manifest shape preserved.** `TaskSummary.childCounts.ready` is
+kept under that name to avoid breaking any agent reading the
+manifest; the field's documented semantics now refer to the
+`"Pending"` bucket (with a comment in `types.ts`).
+
+**Surface changes.**
+
+  - `TASK_STATUSES` array gains `"Pending"` ahead of `"Ready"`;
+    both remain valid input.
+  - `ACTIVE_TASK_STATUSES` set includes both during the deprecation
+    window so manifests don't silently drop in-flight tasks
+    mid-read.
+  - `createTask` default with owner: `"Ready"` → `"Pending"`.
+  - Dashboard `STATUSES` array, help text status enumerations
+    (`gojaja task status -h`, the manual page), and core prompt
+    template all switched to `"Pending"`.
+  - `docs/SCHEMA.md` and `docs/PROTOCOL.md` updated; ROADMAP and
+    CHANGELOG historical entries unchanged (they describe
+    past-tense PRs).
+
+**Tests.** Existing fixtures that previously asserted `"Ready"`
+are migrated to assert `"Pending"`. One new regression test
+covers BOTH directions of dual-read: an explicit
+`setTaskStatus({ newStatus: "Ready" })` call is observed to
+persist as `"Pending"` (in the task record AND the
+`TASK_STATUS_CHANGED` event), and a hand-written legacy
+task_board.yaml with `status: Ready` reads back as
+`status: "Pending"`. 533 → 534.
+
+**Forward plan.** Drop `"Ready"` from the `TaskStatus` union in
+v3.1.0 once we've seen one release cycle of dual-read in the
+wild. No work today.
+
 ### v3.0.x — `gojaja reset` git-state safety gate
 
 `gojaja reset` now refuses on a dirty git work tree or a non-git

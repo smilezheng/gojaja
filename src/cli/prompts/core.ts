@@ -100,7 +100,7 @@ or you'll burn tokens narrating an idle block.
 - **NEVER end a turn without \`gojaja wait\` as the final tool call.**
   Even for a conversational message: answer the user, then \`wait\`.
   "I'm online, ready for instructions" is NOT a turn end.
-- **Tasks pull.** If \`plan\` shows a task you own (Ready / InProgress
+- **Tasks pull.** If \`plan\` shows a task you own (Pending / InProgress
   / Blocked), start it — accepting the task in plan IS the start.
   Don't ask "shall I begin?" or "ready when you are". For a blocking
   ambiguity use \`gojaja report\` (\`reportsTo\` / reviewer / parent

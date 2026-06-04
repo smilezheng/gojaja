@@ -395,7 +395,7 @@ export const DASHBOARD_HTML = `<!doctype html>
 
 </main>
 <script>
-  var STATUSES = ["Backlog","Ready","InProgress","Blocked","Review","Done"];
+  var STATUSES = ["Backlog","Pending","InProgress","Blocked","Review","Done"];
   function esc(s){ s = (s==null?"":String(s));
     return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function ago(iso){ if(!iso) return ""; var t = Date.parse(iso); if(!isFinite(t)) return "";
