@@ -145,6 +145,42 @@ same opt-in shape applies but absence returns "" (default) instead of
 throwing. Never opens `$EDITOR` for optional fields — surprise editor
 prompts on omitted optional flags are worse than implicit empties.
 
+## "Working" is the heads-down state, not an alarm
+
+The watch dashboard shows each role's `healthStatus`. Five
+values; the one that matters most for operators is `"working"`
+(renamed from `"stalled-no-wait"` in v3.0.x N).
+
+**What it means.** The role has a live session lease, no
+`wait.json` parked, and no recent `gojaja` activity (over the
+60s default threshold). Three real causes, ordered by
+frequency:
+
+1. **Heads down on code** — the agent is writing files, running
+   tests, reading docs, anything that doesn't produce a gojaja
+   event. This is the *common* case.
+2. **Mid-think** — the LLM is consuming a large response with no
+   tool call in flight.
+3. **Wedged** — the original PR8t/PR8v failure mode: ran `ack`,
+   saw success, forgot to `wait`, silent forever. Rare but real.
+
+**What to do.** Nothing, by default. The dashboard's neutral
+blue treatment (vs the old red) is a deliberate signal that
+silence is not a problem; it's the default state of a productive
+team. Only intervene when:
+
+  - the role has been Working for **much** longer than your
+    project's typical task length (e.g. >30 min on a project
+    where most tasks finish in 5–15 min), AND
+  - you have new context to offer (a blocker resolved upstream,
+    a priority shift), OR
+  - you want to verify the agent isn't wedged.
+
+The right intervention is a `gojaja report` with new info, NOT
+"hey are you still there". Asking the agent to break out of
+flow to confirm it's working is the failure mode this section
+exists to prevent.
+
 ## SYSTEM bypass is now explicit (`--as-system`)
 
 Before PR9, commands that accepted a `RoleId | "SYSTEM"` actor

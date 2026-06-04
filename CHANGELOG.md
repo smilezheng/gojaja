@@ -6,6 +6,70 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+(Currently empty. v3.0.2 work lands here.)
+
+## [3.0.1] — 2026-06-04
+
+Polish wave on top of v3.0.0's structural changes. Five
+themed milestones, all visible at the dashboard surface +
+one schema rename:
+
+  - **J** — Task status `Ready` renamed to `Pending` (silent
+    dual-read, no schema bump).
+  - **K** — SYSTEM broadcast announcements
+    (`gojaja report --to '*' --as-system`, dashboard `@All`
+    dropdown entry).
+  - **L** — Watch RFC card now shows the full proposal,
+    options, threaded comments, and decision inline.
+  - **M** — Watch Activity tab rewritten as chat bubbles
+    (SYSTEM right / member left, multi-line bodies, `@to` /
+    `@All` headers).
+  - **N** — `stalled-no-wait` role health status renamed to
+    `working` with neutral-blue treatment; HANDBOOK now
+    documents "silence is the heads-down state, not an alarm".
+
+Per-milestone detail:
+
+### v3.0.x N — `stalled-no-wait` renamed to `working`, recoloured
+
+The watch dashboard's `stalled-no-wait` role state was rendered
+in red with a "⚠ stalled — last action X ago, nudge the role"
+warning. Empirically, the most common cause of that state is
+the agent being heads-down on code (writing files, running
+tests) rather than wedged — the operator was being told to
+intervene on healthy work.
+
+**Renamed.** `healthStatus === "stalled-no-wait"` →
+`"working"`. `counts.stalledRoles` → `counts.workingRoles`. The
+detection logic (`live session + no wait.json +
+lastActionAgeMs > stalledThresholdMs`) is unchanged; only the
+label / framing / colour flips.
+
+**Recoloured.** Two new CSS tokens (`--working`,
+`--working-bg`, `--working-border`) for a muted blue. The old
+`--stalled-*` red tokens are retained for the Init-card's
+genuine warnings (dirty git tree, destructive button) — those
+ARE alarming and should stay red. Badge / chip / inline note
+all use the new tokens.
+
+**Copy.** Warning bubble's text changed from "⚠ stalled — last
+action … no `gojaja wait` since. Nudge the role to wait or end
+the turn." to "💼 Working — heads down for … No `gojaja`
+activity since; usually means writing code or running tests."
+
+**Handbook.** New section `"Working" is the heads-down state,
+not an alarm` in `docs/HANDBOOK.md`: explains the three real
+causes (heads-down, mid-think, wedged), gives an explicit "do
+nothing by default" recommendation, and lists the two narrow
+cases that warrant an intervention. The point is to prevent
+operators from training agents to break flow with
+"are-you-still-there" pings.
+
+**Tests.** `tests/watch.test.ts` updated: the threshold-
+crossing test now asserts `healthStatus === "working"` and
+`counts.workingRoles >= 1`. No new tests; the rename is the
+contract.
+
 ### v3.0.x — Activity tab as chat bubbles
 
 The watch dashboard's Activity feed was a fixed-column grid that

@@ -16,6 +16,13 @@ export const DASHBOARD_HTML = `<!doctype html>
     --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a;
     --fg: #e6e8ee; --dim: #8b93a7; --accent: #6ea8fe;
     --live: #3fb950; --stale: #d29922; --none: #6b7280;
+    /* v3.0.x N: the previously red "stalled" treatment for live-
+       session-no-wait roles was renamed to a neutral blue
+       "Working" — empirically a quiet role is usually heads-down
+       on code, not wedged. The destructive UI in the Init card
+       (dirty git tree warning, danger button) keeps the red
+       --stalled-* tokens since those ARE real warnings. */
+    --working: #6b9bff; --working-bg: #1d2638; --working-border: #2c3e5a;
     --stalled: #f85149; --stalled-bg: #3d1418; --stalled-border: #6e2128;
     --p0: #f85149; --p1: #d29922; --p2: #6ea8fe; --p3: #8b93a7;
   }
@@ -46,13 +53,13 @@ export const DASHBOARD_HTML = `<!doctype html>
   .role .title { color: var(--dim); font-size: 12px; }
   .role .meta { color: var(--dim); font-size: 11px; margin-top: 6px; font-family: ui-monospace, monospace; }
   .role .waiting { margin-top: 6px; color: var(--accent); font-size: 11px; }
-  .role.stalled { background: var(--stalled-bg); border-color: var(--stalled-border); }
-  .role .stalled-warn { margin-top: 6px; color: var(--stalled); font-size: 11px; font-weight: 600; }
+  .role.working { background: var(--working-bg); border-color: var(--working-border); }
+  .role .working-note { margin-top: 6px; color: var(--working); font-size: 11px; }
   .badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line);
     text-transform: uppercase; letter-spacing: .04em; }
   .badge.live { color: var(--live); border-color: #224a2c; } .badge.stale { color: var(--stale); }
   .badge.none { color: var(--none); }
-  .badge.stalled { color: var(--stalled); border-color: var(--stalled-border); }
+  .badge.working { color: var(--working); border-color: var(--working-border); }
   .board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
   /* Column header: status label + a count "pill" sitting flush
      against the label. Previously the layout was space-between, which
@@ -275,7 +282,7 @@ export const DASHBOARD_HTML = `<!doctype html>
   <div class="chips">
     <span class="chip"><span class="dot live pulse"></span><span id="upd">connecting…</span></span>
     <span class="chip">roles live <b id="c-live">–</b></span>
-    <span class="chip" id="chip-stalled" style="display:none">stalled <b id="c-stalled">–</b></span>
+    <span class="chip" id="chip-working" style="display:none">working <b id="c-working">–</b></span>
     <span class="chip">open RFCs <b id="c-rfc">–</b></span>
     <span class="chip">events <b id="c-ev">–</b></span>
   </div>
@@ -481,24 +488,25 @@ export const DASHBOARD_HTML = `<!doctype html>
       } else { meta = "no active session"; }
       var waiting = r.wait ? '<div class="waiting">⏳ waiting for '+esc(condText(r.wait.for))+" · "+esc(until(r.wait.deadline))+"</div>" : "";
       var owns = (r.owns&&r.owns.length) ? '<div class="meta">owns: '+esc(r.owns.join(", "))+"</div>" : "";
-      var stalled = r.healthStatus === "stalled-no-wait";
-      // The most common per-turn failure mode: agent ran ack, saw the
-      // success line, then sat silent waiting for user input. Live
-      // session, no wait.json, no recent action — surfaced here so
-      // the operator can nudge.
-      var stalledWarn = stalled
-        ? '<div class="stalled-warn">⚠ stalled — last action '+
+      // v3.0.x N: the role is "working" when it holds a live session
+      // but hasn't posted gojaja activity recently. Empirically this
+      // is the heads-down-on-code state, not a wedge. Treat
+      // informationally; the operator can still see the dwell time
+      // and nudge if context warrants.
+      var working = r.healthStatus === "working";
+      var workingNote = working
+        ? '<div class="working-note">💼 Working — heads down for '+
           esc(fmtAge(r.lastActionAgeMs))+
-          ' ago, no <code>gojaja wait</code> since. Nudge the role to wait or end the turn.</div>'
+          '. No <code>gojaja</code> activity since; usually means writing code or running tests.</div>'
         : "";
-      var badge = stalled
-        ? '<span class="badge stalled">stalled</span>'
+      var badge = working
+        ? '<span class="badge working">working</span>'
         : '<span class="badge '+st+'">'+st+'</span>';
-      return '<div class="role'+(stalled?' stalled':'')+'"><div style="display:flex;justify-content:space-between;align-items:baseline">'+
+      return '<div class="role'+(working?' working':'')+'"><div style="display:flex;justify-content:space-between;align-items:baseline">'+
         '<span class="name">'+esc(r.id)+'</span>'+
         badge+'</div>'+
         '<div class="title">'+esc(r.title)+'</div>'+
-        '<div class="meta">'+meta+'</div>'+owns+waiting+stalledWarn+'</div>';
+        '<div class="meta">'+meta+'</div>'+owns+waiting+workingNote+'</div>';
     }).join("");
   }
 
@@ -728,11 +736,11 @@ export const DASHBOARD_HTML = `<!doctype html>
     document.getElementById("root").textContent = s.project.root+"  ·  v"+s.project.version;
     document.getElementById("upd").textContent = "updated "+ago(s.project.generatedAt);
     document.getElementById("c-live").textContent = s.counts.liveRoles;
-    var stalledCount = s.counts.stalledRoles || 0;
-    var stalledChip = document.getElementById("chip-stalled");
-    document.getElementById("c-stalled").textContent = stalledCount;
-    stalledChip.style.display = stalledCount > 0 ? "" : "none";
-    stalledChip.style.color = stalledCount > 0 ? "var(--stalled)" : "";
+    var workingCount = s.counts.workingRoles || 0;
+    var workingChip = document.getElementById("chip-working");
+    document.getElementById("c-working").textContent = workingCount;
+    workingChip.style.display = workingCount > 0 ? "" : "none";
+    workingChip.style.color = workingCount > 0 ? "var(--working)" : "";
     document.getElementById("c-rfc").textContent = s.counts.openRfcs;
     document.getElementById("c-ev").textContent = s.counts.totalEvents;
     document.getElementById("roles").innerHTML = renderRoles(s.roles);
@@ -770,11 +778,11 @@ export const DASHBOARD_HTML = `<!doctype html>
     // Some chips lose meaning on the init screen (zero-state); hide
     // the count chips but keep the "updated" pulse so the user can
     // see watch is alive.
-    ["c-live","c-stalled","c-rfc","c-ev"].forEach(function(id){
+    ["c-live","c-working","c-rfc","c-ev"].forEach(function(id){
       var el = document.getElementById(id);
       if(el && el.parentElement) el.parentElement.style.display = "none";
     });
-    document.getElementById("chip-stalled").style.display = "none";
+    document.getElementById("chip-working").style.display = "none";
   }
 
   function showInitialisedChrome(){

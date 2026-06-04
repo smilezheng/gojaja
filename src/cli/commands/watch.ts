@@ -38,12 +38,14 @@ const AUTO_ARCHIVE_THRESHOLD_MS = 48 * 3600 * 1000;
 const AUTO_ARCHIVE_INTERVAL_MS = 30 * 60 * 1000;
 /**
  * Threshold past which a `live`-session role with no `wait` session
- * on disk is flagged as `stalled-no-wait`. Empirically the most
- * common per-turn failure mode is "agent runs `gojaja ack`, sees the
- * success line, sits silent waiting for the user" — the role still
- * holds a live session lease, but no event can wake it because
- * nothing parked it on `wait`. The dashboard surfaces this so the
- * human-as-scheduler can nudge.
+ * on disk is flagged as `working` (v3.0.x N rename — previously
+ * `stalled-no-wait`). The signal is the same: live session lease
+ * held, no `wait.json` parked, no recent gojaja activity. In
+ * practice this overwhelmingly means the agent is heads-down on
+ * code (writing files, running tests) rather than wedged, so the
+ * dashboard treats it as informational. The PR8t / PR8v ack-but-
+ * no-wait failure mode is still detectable here for operators who
+ * want to nudge after a long silence.
  *
  * 60 s is a deliberately lenient default: a fast turn (read manifest,
  * post one worklog, wait) finishes well under this; only a role that
@@ -693,7 +695,7 @@ function makeUsage(message: string): Error & { code: string } {
 /**
  * Build the JSON snapshot served by `/api/state`. Exported for unit
  * tests of the dashboard's derived signals (in particular the
- * "stalled-no-wait" health status); production code path goes via
+ * "working" health status); production code path goes via
  * `handleRequest`.
  */
 export async function buildSnapshot(
@@ -737,18 +739,24 @@ export async function buildSnapshot(
         sessionState = expiresAt > now ? "live" : "stale";
       }
 
-      // Health status — a derived "what should the operator do about
-      // this role right now" signal. Five states, ordered by
-      // urgency:
-      //   "no-session"        no claim; nothing to nudge
+      // Health status — a derived "what is this role doing right now"
+      // signal. Five states:
+      //   "no-session"        no claim
       //   "stale-session"     session lease expired; auto-takeover-eligible
-      //   "waiting"           wait.json present — the agent is parked,
-      //                       loop is alive, no action needed
-      //   "active"            live session, no wait.json, but the
-      //                       last action was recent: still mid-turn
-      //   "stalled-no-wait"   live session, no wait.json, last action
-      //                       older than the threshold — ack-but-no-
-      //                       wait failure mode; operator should nudge
+      //   "waiting"           wait.json present — agent parked, loop alive
+      //   "active"            live session, no wait.json, recent gojaja
+      //                       activity (mid-turn)
+      //   "working"           live session, no wait.json, no recent gojaja
+      //                       activity (probably heads-down on code).
+      //                       v3.0.x N renamed from "stalled-no-wait" —
+      //                       empirically most "stalled" agents are
+      //                       actually writing code without producing
+      //                       gojaja events, so the dashboard now treats
+      //                       this as informational (neutral colour, no
+      //                       warning copy) rather than alarming. The
+      //                       PR8t / PR8v ack-but-no-wait failure mode
+      //                       is still detectable via this state —
+      //                       just not flagged red by default.
       const lastActionAtMs = lastActionAtMsByRole.get(id) ?? null;
       const lastActionAgeMs =
         lastActionAtMs === null ? null : now - lastActionAtMs;
@@ -757,7 +765,7 @@ export async function buildSnapshot(
         | "stale-session"
         | "waiting"
         | "active"
-        | "stalled-no-wait" = "no-session";
+        | "working" = "no-session";
       if (sessionState === "none") {
         healthStatus = "no-session";
       } else if (sessionState === "stale") {
@@ -768,7 +776,7 @@ export async function buildSnapshot(
         lastActionAgeMs !== null &&
         lastActionAgeMs > stalledThresholdMs
       ) {
-        healthStatus = "stalled-no-wait";
+        healthStatus = "working";
       } else {
         healthStatus = "active";
       }
@@ -925,7 +933,7 @@ export async function buildSnapshot(
       totalEvents: allEvents.length,
       liveRoles: roles.filter((r) => r.session.state === "live").length,
       openRfcs: rfcList.filter((r) => r.status === "open" || r.status === "revising").length,
-      stalledRoles: roles.filter((r) => r.healthStatus === "stalled-no-wait").length,
+      workingRoles: roles.filter((r) => r.healthStatus === "working").length,
       archivedTasks: archivedTasks.length,
     },
     config: { stalledThresholdMs },

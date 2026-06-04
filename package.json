@@ -1,6 +1,6 @@
 {
   "name": "gojaja",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "gojaja (过家家) — file-system coordination layer for multi-LLM-agent collaboration (Codex, Claude Code, Cursor, ...). Let your agents play house on a shared codebase.",
   "keywords": [
     "gojaja",

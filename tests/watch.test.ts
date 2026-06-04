@@ -15,7 +15,8 @@ import {
 
 /**
  * The dashboard's most operator-actionable signal is `healthStatus`
- * — and specifically the `"stalled-no-wait"` value, which surfaces
+ * — and specifically the `"working"` value (renamed from
+ * `"stalled-no-wait"` in v3.0.x N), which surfaces
  * the empirically most common per-turn failure mode: an agent runs
  * `gojaja ack`, sees the success line, and sits silent waiting for
  * user input (live session, no wait.json, no recent action). The
@@ -87,17 +88,17 @@ describe("watch buildSnapshot — healthStatus derivation", () => {
     expect(pm.lastActionAgeMs).toBeGreaterThanOrEqual(0);
   });
 
-  it("live session, no wait.json, last action older than threshold -> 'stalled-no-wait'", async () => {
+  it("live session, no wait.json, last action older than threshold -> 'working' (renamed from 'stalled-no-wait' in v3.0.x N)", async () => {
     await ctx.store.claimSession("PM", 60);
     await ctx.store.publishWorklog({ from: "PM", message: "long ago" });
     // Use a very small threshold so the just-emitted worklog
     // immediately qualifies as "old".
     const snap = await buildSnapshot(ctx.store, ctx.root, 1);
     const pm = snap.roles.find((r) => r.id === "PM")!;
-    expect(pm.healthStatus).toBe("stalled-no-wait");
+    expect(pm.healthStatus).toBe("working");
     expect(pm.lastActionAgeMs).toBeGreaterThanOrEqual(0);
     // Counts roll up so the header chip can show a quick total.
-    expect(snap.counts.stalledRoles).toBeGreaterThanOrEqual(1);
+    expect(snap.counts.workingRoles).toBeGreaterThanOrEqual(1);
   });
 
   it("a role parked on `wait` is NEVER flagged stalled, even if last action is ancient", async () => {
