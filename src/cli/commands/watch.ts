@@ -29,6 +29,33 @@ const PROMPT_TARGETS: ReadonlySet<Target> = new Set([
 
 const DEFAULT_PORT = 7421;
 const EVENT_TAIL = 300;
+
+/**
+ * Operational / framework-internal event types that should NOT
+ * appear in the dashboard's Activity tab (chat-bubble layout). They
+ * live in `comms/events/*.json` for audit / `gojaja doctor` use,
+ * but they're not human conversation:
+ *
+ *   - SESSION_TAKEOVER / SESSION_RECOVERED: claim-lease bookkeeping
+ *   - LOCK_BROKEN: per-resource file-lock self-heal
+ *   - RFC_REPAIRED: store-side RFC self-heal
+ *   - ROLE_DELETED: governance op
+ *
+ * Mirrors the exclusion list in `Store.filterVisibleEventsForRole`,
+ * which already does this filtering for per-role manifests; the
+ * dashboard's project-wide Activity tab needed the same treatment.
+ */
+const OPERATIONAL_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "SESSION_TAKEOVER",
+  "SESSION_RECOVERED",
+  "LOCK_BROKEN",
+  "RFC_REPAIRED",
+  "ROLE_DELETED",
+]);
+
+function isOperationalEvent(type: string): boolean {
+  return OPERATIONAL_EVENT_TYPES.has(type);
+}
 /**
  * How long a `Done` task can sit before the watch dashboard moves it
  * into the Archived tab. Hard-coded at 48 hours — long enough that
@@ -915,7 +942,17 @@ export async function buildSnapshot(
   // poll-response size unbounded. Multi-line is the common case
   // post-PR8u (heredoc + --message -) and the chat-bubble UI is
   // designed for it.
+  //
+  // v3.0.x T9: filter out operational / framework-internal events
+  // (SESSION_*, LOCK_BROKEN, RFC_REPAIRED, ROLE_DELETED) BEFORE the
+  // EVENT_TAIL slice. The chat-bubble Activity tab is for "what
+  // people said and did", not "what gojaja itself logged for audit".
+  // Operational events stay in `comms/events/*.json` for
+  // `gojaja history` / `gojaja doctor` (PR9, planned); only the
+  // human-meaningful subset reaches the dashboard. Mirrors the
+  // exclusion list `Store.filterVisibleEventsForRole` uses.
   const events = allEvents
+    .filter((e) => !isOperationalEvent(e.type))
     .slice(-EVENT_TAIL)
     .reverse()
     .map((e) => {

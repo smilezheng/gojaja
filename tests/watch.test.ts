@@ -379,6 +379,55 @@ describe("watch HTTP server — Actions endpoints (loopback-gated)", () => {
     });
   });
 
+  it("buildSnapshot omits operational events (SESSION_TAKEOVER, LOCK_BROKEN, ...) from the Activity feed (v3.0.x T9)", async () => {
+    // Operational events are framework-internal audit signals
+    // (someone's session got taken over, a lock self-healed, etc).
+    // They live in comms/events/*.json for `gojaja history` /
+    // `gojaja doctor` but should NOT appear in the dashboard's
+    // chat-bubble Activity tab — there's no sender intent and no
+    // recipient to address.
+    //
+    // Synthesise the four operational types directly via
+    // appendEvent, plus one regular WORKLOG to verify human
+    // events DO survive the filter.
+    await ctx.store.appendEvent({
+      type: "SESSION_TAKEOVER",
+      from: "SYSTEM",
+      to: "*",
+      payload: { role: "PM" },
+    });
+    await ctx.store.appendEvent({
+      type: "LOCK_BROKEN",
+      from: "SYSTEM",
+      to: "*",
+      payload: { lockKey: "task-board" },
+    });
+    await ctx.store.appendEvent({
+      type: "ROLE_DELETED",
+      from: "SYSTEM",
+      to: "*",
+      payload: { roleId: "Ghost" },
+    });
+    // Plus a regular event that SHOULD survive the filter.
+    await ctx.store.publishWorklog({ from: "PM", message: "real work" });
+
+    const snap = await buildSnapshot(ctx.store, ctx.root, 60_000);
+
+    // None of the operational types reach the dashboard...
+    expect(snap.events.some((e) => e.type === "SESSION_TAKEOVER")).toBe(false);
+    expect(snap.events.some((e) => e.type === "LOCK_BROKEN")).toBe(false);
+    expect(snap.events.some((e) => e.type === "ROLE_DELETED")).toBe(false);
+    // ...but the WORKLOG does.
+    expect(snap.events.some((e) => e.type === "WORKLOG")).toBe(true);
+
+    // Audit invariant: filtering is dashboard-only. The events
+    // still exist in the underlying stream for forensic use.
+    const allRaw = await ctx.store.listEventsAfter("");
+    expect(allRaw.some((e) => e.type === "SESSION_TAKEOVER")).toBe(true);
+    expect(allRaw.some((e) => e.type === "LOCK_BROKEN")).toBe(true);
+    expect(allRaw.some((e) => e.type === "ROLE_DELETED")).toBe(true);
+  });
+
   it("buildSnapshot preserves full multi-line message bodies in events (v3.0.x M)", async () => {
     // Pre-PR8u worklog and report payloads were typically single
     // lines; the dashboard's feed mapper used to split on '\n' and

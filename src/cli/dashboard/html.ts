@@ -124,7 +124,15 @@ export const DASHBOARD_HTML = `<!doctype html>
   .rfcs { display: flex; flex-direction: column; gap: 10px; }
   .rfc { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
     padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
-  .rfc-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  /* v3.0.x T7: RFCs are collapsed by default (head row only); click
+     the head to expand. Expansion state survives polling re-renders
+     and page reloads via localStorage (see expandedRfcs Set in JS). */
+  .rfc.collapsed > :not(.rfc-head) { display: none; }
+  .rfc.collapsed { padding: 8px 12px; }
+  .rfc-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+    cursor: pointer; user-select: none; }
+  .rfc-caret { font-family: ui-monospace, monospace; color: var(--dim);
+    display: inline-block; width: 10px; text-align: center; }
   .rfc .rid { font-family: ui-monospace, monospace; color: var(--dim); }
   .rfc .st { font-size: 10px; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); }
   .rfc .st.open { color: var(--live); } .rfc .st.revising { color: var(--stale); }
@@ -168,8 +176,14 @@ export const DASHBOARD_HTML = `<!doctype html>
      (project-owner announcements) line up on the right. Multi-line
      bodies wrap natively. The first line of each bubble is the
      "@<recipient>" header (or "@All" for to === "*"); the body
-     starts on the next line so multi-line messages render legibly. */
-  .feed { max-height: 540px; overflow: auto; padding: 8px 0;
+     starts on the next line so multi-line messages render legibly.
+
+     v3.0.x T8: feed grew from max-height 540px to a viewport-aware
+     cap. Short windows scale down (75vh keeps the feed below the
+     fold); tall monitors get up to 900px before scrolling kicks
+     in. The previous fixed 540px wasted vertical real estate on
+     larger displays. */
+  .feed { max-height: min(900px, 75vh); overflow: auto; padding: 8px 0;
     display: flex; flex-direction: column; gap: 8px; }
   .bubble-row { display: flex; gap: 8px; align-items: flex-start; }
   .bubble-row.from-system { justify-content: flex-end; }
@@ -490,6 +504,25 @@ export const DASHBOARD_HTML = `<!doctype html>
 </main>
 <script>
   var STATUSES = ["Backlog","Pending","InProgress","Blocked","Review","Done"];
+
+  /* v3.0.x T7: tracks which RFCs the user has chosen to expand.
+     The dashboard re-renders the RFCs list every poll
+     (innerHTML = renderRfcs(...)), which would otherwise nuke
+     expansion state — keeping the source of truth in this Set
+     plus localStorage means a poll-driven re-render snaps each
+     card back to the user's intent. */
+  var EXPANDED_RFCS_KEY = "gojaja:expandedRfcs";
+  var expandedRfcs = (function(){
+    try {
+      var raw = localStorage.getItem(EXPANDED_RFCS_KEY);
+      if(!raw) return new Set();
+      return new Set(JSON.parse(raw));
+    } catch(e){ return new Set(); }
+  })();
+  function persistExpandedRfcs(){
+    try { localStorage.setItem(EXPANDED_RFCS_KEY, JSON.stringify([...expandedRfcs])); }
+    catch(e){}
+  }
   function esc(s){ s = (s==null?"":String(s));
     return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   function ago(iso){ if(!iso) return ""; var t = Date.parse(iso); if(!isFinite(t)) return "";
@@ -558,8 +591,15 @@ export const DASHBOARD_HTML = `<!doctype html>
   function renderRfcs(rfcs){
     if(!rfcs.length) return '<div class="empty">No RFCs.</div>';
     return rfcs.map(function(r){
+      // v3.0.x T7: each RFC starts collapsed (head row only). Click
+      // the head to expand. Expansion state lives in expandedRfcs +
+      // localStorage so it survives polling re-renders and reloads.
+      var expanded = expandedRfcs.has(r.id);
+      var caret = expanded ? "▼" : "▶";
       var head =
-        '<div class="rfc-head">'+
+        '<div class="rfc-head" data-rfc-id="'+esc(r.id)+'" title="Click to '+
+          (expanded?'collapse':'expand')+'">'+
+          '<span class="rfc-caret">'+caret+'</span>'+
           '<span class="rid">'+esc(r.id)+'</span>'+
           '<span class="st '+esc(r.status)+'">'+esc(r.status)+'</span>'+
           '<span class="rfc-title">'+esc(r.title)+'</span>'+
@@ -630,7 +670,8 @@ export const DASHBOARD_HTML = `<!doctype html>
           '</div>';
       }
 
-      return '<div class="rfc">'+head+desc+opts+cmts+dec+'</div>';
+      var rfcCls = expanded ? "rfc expanded" : "rfc collapsed";
+      return '<div class="'+rfcCls+'">'+head+desc+opts+cmts+dec+'</div>';
     }).join("");
   }
 
@@ -1157,9 +1198,36 @@ export const DASHBOARD_HTML = `<!doctype html>
       .then(render)
       .catch(function(e){ showErr("Lost connection to gojaja watch ("+e.message+"). Is the server still running?"); });
   }
+
+  /* v3.0.x T7: delegated click handler for RFC head rows. Toggles
+     expansion state (Set + localStorage) and updates the affected
+     card's class / caret in place — no /api/state round-trip. */
+  function bindRfcCollapseToggle(){
+    var container = document.getElementById("rfcs");
+    if(!container) return;
+    container.addEventListener("click", function(ev){
+      var head = ev.target.closest(".rfc-head");
+      if(!head || !container.contains(head)) return;
+      var id = head.getAttribute("data-rfc-id");
+      if(!id) return;
+      if(expandedRfcs.has(id)) expandedRfcs.delete(id);
+      else expandedRfcs.add(id);
+      persistExpandedRfcs();
+      var card = head.closest(".rfc");
+      if(!card) return;
+      var nowExpanded = expandedRfcs.has(id);
+      card.classList.toggle("expanded", nowExpanded);
+      card.classList.toggle("collapsed", !nowExpanded);
+      var caret = head.querySelector(".rfc-caret");
+      if(caret) caret.textContent = nowExpanded ? "▼" : "▶";
+      head.setAttribute("title", "Click to " + (nowExpanded ? "collapse" : "expand"));
+    });
+  }
+
   bindActionButtons();
   bindInitButton();
   bindTabs();
+  bindRfcCollapseToggle();
   tick();
   setInterval(tick, 2000);
 </script>

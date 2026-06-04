@@ -6,6 +6,56 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### v3.0.x — watch dashboard polish: collapsible RFCs, taller Activity, no operational noise (T7, T8, T9)
+
+Three quality-of-life tweaks to the watch dashboard from a real
+testing pass.
+
+**T7: RFCs collapsed by default.** The RFC card grew rich content
+in v3.0.x L (description, options table, threaded comments,
+decision block). For a project with several RFCs, that's a lot of
+vertical real estate consumed even when the operator just wants to
+glance at status. Each card now starts collapsed (head row only —
+id, status, title, deciders/voters, deadline). Click the head to
+expand; click again to collapse. Expansion state persists in
+`localStorage` (`gojaja:expandedRfcs`) so the same RFCs stay open
+across the dashboard's 2-second polling re-renders AND across
+page reloads.
+
+  - New CSS: `.rfc.collapsed > :not(.rfc-head) { display: none }`,
+    `.rfc-head { cursor: pointer }`, `.rfc-caret` for the
+    `▶ / ▼` indicator.
+  - New JS module-state: `expandedRfcs` Set hydrated from
+    localStorage at script load, persisted on every toggle.
+  - New `bindRfcCollapseToggle` event handler delegated on
+    `#rfcs`; toggles class + caret in place (no `/api/state`
+    round-trip).
+
+**T8: Activity feed grows.** The chat-bubble Activity tab was
+fixed at `max-height: 540px`, which wasted vertical real estate
+on tall monitors. Now `min(900px, 75vh)` — viewport-aware on
+small screens, capped at 900px on large.
+
+**T9: Operational events filtered from Activity.** SYSTEM-emitted
+framework-internal events (SESSION_TAKEOVER, SESSION_RECOVERED,
+LOCK_BROKEN, RFC_REPAIRED, ROLE_DELETED) used to appear in the
+chat-bubble feed as `(SESSION_TAKEOVER — no message body)` etc.
+That treatment was wrong: those events have no sender intent and
+no recipient to address; they're framework audit, not
+conversation. The dashboard now drops them BEFORE the `EVENT_TAIL`
+slice. Mirrors the exclusion list `Store.filterVisibleEventsForRole`
+already uses for per-role manifests.
+
+  - Operational events stay in `comms/events/*.json` for audit
+    use (`gojaja history`, `gojaja doctor`) — the filter is
+    dashboard-only.
+
+**Tests.** New `tests/watch.test.ts` case (T9) appends three
+operational types via `appendEvent` plus one ordinary WORKLOG,
+then asserts only the WORKLOG reaches `buildSnapshot().events`
+and that the operational types still exist in the underlying
+stream. 549 → 550. T7 / T8 are visual; no unit tests added.
+
 ### v3.0.x — `gojaja watch` light theme (T4)
 
 The dashboard switched from the historical dark palette to a
