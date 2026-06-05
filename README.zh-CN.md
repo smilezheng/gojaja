@@ -2,6 +2,8 @@
 
 **语言：** [English](./README.md) · 简体中文
 
+![介绍视频](assets/intro.mov)
+
 > 一个本地 CLI 工具，让多个 AI agent 窗口（Cursor / Claude Code / Codex CLI 等）协作开发同一个项目。没有服务器、没有数据库，所有协调状态都是仓库里的普通文件，可以直接 `git diff`。
 
 名字的来历："过家家"是小朋友的角色扮演游戏，每个人分一个家庭角色一起演——这个工具让你的多个 LLM agent 在同一个仓库上也能这样各司其职地配合。

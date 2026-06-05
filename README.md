@@ -2,6 +2,8 @@
 
 **Languages:** English · [简体中文](./README.zh-CN.md)
 
+![intro video](assets/intro.mov)
+
 > A local CLI that lets multiple AI agent windows (Cursor, Claude Code, Codex CLI, ...) collaborate on the same project — no server, no database, just files in your repo that you `git diff`.
 
 The name "过家家" (guò-jiā-jiā) is a Chinese phrase for kids' role-play games where each kid takes on a family role and pretends together — which is what this tool lets your LLM agents do on a shared codebase.
