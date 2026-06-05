@@ -2,7 +2,7 @@
 
 **语言：** [English](./README.md) · 简体中文
 
-[![观看介绍视频](assets/intro-poster.jpg)](assets/intro.mp4)
+https://github.com/user-attachments/assets/8b78d41e-eacb-453b-b979-74fd62fa883c
 
 > 一个本地 CLI 工具，让多个 AI agent 窗口（Cursor / Claude Code / Codex CLI 等）协作开发同一个项目。没有服务器、没有数据库，所有协调状态都是仓库里的普通文件，可以直接 `git diff`。
 

@@ -2,7 +2,7 @@
 
 **Languages:** English · [简体中文](./README.zh-CN.md)
 
-[![Watch the intro video](assets/intro-poster.jpg)](assets/intro.mp4)
+https://github.com/user-attachments/assets/8b78d41e-eacb-453b-b979-74fd62fa883c
 
 > A local CLI that lets multiple AI agent windows (Cursor, Claude Code, Codex CLI, ...) collaborate on the same project — no server, no database, just files in your repo that you `git diff`.
 
