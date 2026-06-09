@@ -426,6 +426,45 @@ describe("LocalFsStore.withLock", () => {
     const config = await ctx.store.readConfig();
     expect(config.rfcCounter).toBe(N);
   });
+
+  it("createRfc recovers rfcCounter from disk dirs when config counter is lost", async () => {
+    // Simulate: create 3 RFCs, then wipe rfcCounter from config.yaml
+    // (as if reset+init or hand-edit dropped it). The next createRfc
+    // must scan existing dirs and skip past RFC-0003.
+    for (let i = 0; i < 3; i++) {
+      await ctx.store.createRfc({
+        slug: `pre-${i}`,
+        title: `Pre ${i}`,
+        voters: [],
+        deciders: ["any-role"],
+        options: [],
+        createdBy: "SYSTEM",
+      });
+    }
+    const before = await ctx.store.readConfig();
+    expect(before.rfcCounter).toBe(3);
+
+    // Wipe the counter (simulates freshConfig after reset+init).
+    await ctx.store.updateConfig((cur) => {
+      const { rfcCounter: _, ...rest } = cur;
+      return rest as typeof cur;
+    });
+    const wiped = await ctx.store.readConfig();
+    expect(wiped.rfcCounter).toBeUndefined();
+
+    // Next RFC must get RFC-0004, not RFC-0001.
+    const fourth = await ctx.store.createRfc({
+      slug: "after-wipe",
+      title: "After counter wipe",
+      voters: [],
+      deciders: ["any-role"],
+      options: [],
+      createdBy: "SYSTEM",
+    });
+    expect(fourth.id).toBe("RFC-0004");
+    const after = await ctx.store.readConfig();
+    expect(after.rfcCounter).toBe(4);
+  });
 });
 
 describe("path validation", () => {

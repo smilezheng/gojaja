@@ -510,6 +510,56 @@ describe("watch HTTP server — Actions endpoints (loopback-gated)", () => {
     expect(r1?.decision?.chosenOption).toBe("A");
   });
 
+  it("buildSnapshot extracts rationale from RFC_COMMENT events into the Activity feed message", async () => {
+    const proposal = await ctx.store.createRfc({
+      slug: "feed-test",
+      title: "Feed body test",
+      voters: ["Backend"],
+      deciders: ["PM"],
+      options: [],
+      createdBy: "SYSTEM",
+    });
+    await ctx.store.commentRfc({
+      rfcId: proposal.id,
+      role: "Backend",
+      preferred: "",
+      rationale: "This is the comment body that should appear in the bubble.",
+    });
+    const snap = await buildSnapshot(ctx.store, ctx.root, 60_000);
+    const commentEv = snap.events.find((e) => e.type === "RFC_COMMENT");
+    expect(commentEv).toBeDefined();
+    expect(commentEv?.message).toContain(
+      "This is the comment body that should appear in the bubble.",
+    );
+  });
+
+  it("buildSnapshot joins title + rationale from RFC_CREATED events (all fields, not first-match)", async () => {
+    await ctx.store.createRfc({
+      slug: "all-fields",
+      title: "The RFC title",
+      voters: [],
+      deciders: ["PM"],
+      options: [],
+      createdBy: "SYSTEM",
+    });
+    const snap = await buildSnapshot(ctx.store, ctx.root, 60_000);
+    const createdEv = snap.events.find((e) => e.type === "RFC_CREATED");
+    expect(createdEv).toBeDefined();
+    expect(createdEv?.message).toContain("The RFC title");
+  });
+
+  it("buildSnapshot concatenates all text fields for REPORT (message only, no duplication)", async () => {
+    await ctx.store.publishReport({
+      from: "SYSTEM",
+      to: "Backend",
+      message: "single field report",
+    });
+    const snap = await buildSnapshot(ctx.store, ctx.root, 60_000);
+    const reportEv = snap.events.find((e) => e.type === "REPORT");
+    expect(reportEv).toBeDefined();
+    expect(reportEv?.message).toBe("single field report");
+  });
+
   it("POST /api/rfc creates a SYSTEM-authored RFC", async () => {
     await withServer("127.0.0.1", async (origin) => {
       const r = await fetch(`${origin}/api/rfc`, {

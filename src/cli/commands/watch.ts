@@ -60,6 +60,29 @@ const OPERATIONAL_EVENT_TYPES: ReadonlySet<string> = new Set([
 function isOperationalEvent(type: string): boolean {
   return OPERATIONAL_EVENT_TYPES.has(type);
 }
+
+/**
+ * Extract a human-readable body string from an event payload.
+ *
+ * Different event types store their body under different keys:
+ *   - REPORT / WORKLOG  → `payload.message`
+ *   - RFC_COMMENT / RFC_DECIDED / ...  → `payload.rationale`
+ *   - TASK_CREATED / RFC_CREATED       → `payload.title`
+ *
+ * All non-empty text fields are joined so nothing is silently dropped
+ * (e.g. an RFC_CREATED carries both title and description; an
+ * RFC_DECIDED carries both rationale and chosenOption context).
+ */
+function extractEventBody(e: { payload: Record<string, unknown> }): string | null {
+  const p = e.payload;
+  const parts: string[] = [];
+  for (const key of ["title", "message", "rationale"]) {
+    const v = p[key];
+    if (typeof v === "string" && v.length > 0) parts.push(v);
+  }
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
 /**
  * Tunable cadences and caps. Sourced from `config.yaml:settings`
  * (resolved via `core/settings.ts`); the values below are the
@@ -989,7 +1012,7 @@ export async function buildSnapshot(
     .slice(-eventTail)
     .reverse()
     .map((e) => {
-      const raw = (e.payload as { message?: unknown })?.message;
+      const raw = extractEventBody(e);
       const message =
         typeof raw === "string"
           ? raw.length > 8192 ? raw.slice(0, 8192) + "…[truncated]" : raw

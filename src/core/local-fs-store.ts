@@ -490,6 +490,22 @@ function formatRfcId(n: number): string {
 }
 
 /**
+ * Extract the highest numeric RFC id present among directory names
+ * matching `RFC-NNNN-*`. Returns 0 when the list is empty.
+ */
+function maxRfcIdOnDisk(dirNames: string[]): number {
+  let max = 0;
+  for (const d of dirNames) {
+    const m = d.match(/^RFC-(\d{4,})-/);
+    if (m) {
+      const n = Number(m[1]);
+      if (n > max) max = n;
+    }
+  }
+  return max;
+}
+
+/**
  * Match an `owns` / `mustNotEdit` entry against a target relative path.
  *
  * - Exact equality matches a single file.
@@ -2550,9 +2566,17 @@ export class LocalFsStore implements Store {
       // with `createRole` — without coordinated lock, a concurrent
       // role-create would read the same config, write its own version,
       // and clobber our +1.
+      //
+      // Resilience: if `rfcCounter` was lost (reset + re-init, hand-edit,
+      // migration that rewrote config.yaml), we scan existing RFC dirs on
+      // disk and use `max(rfcCounter, highest-on-disk-number)` as the
+      // base so the freshly allocated id never collides with a surviving
+      // historical RFC directory.
+      const maxOnDisk = maxRfcIdOnDisk(dirsBefore);
       let idNumber = 0;
       await this.updateConfig((cur) => {
-        idNumber = (cur.rfcCounter ?? 0) + 1;
+        const base = Math.max(cur.rfcCounter ?? 0, maxOnDisk);
+        idNumber = base + 1;
         return { ...cur, rfcCounter: idNumber };
       });
       const id = formatRfcId(idNumber);
