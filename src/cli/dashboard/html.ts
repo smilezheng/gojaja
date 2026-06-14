@@ -327,6 +327,28 @@ export const DASHBOARD_HTML = `<!doctype html>
      --p0 before P0 went green. Errors are danger, not P0. */
   .action .feedback.err { color: var(--err-border); }
   .action .hint { font-size: 11px; color: var(--dim); margin-top: 6px; }
+  /* Quick-report: compact horizontal send-report form inlined on
+     the Dashboard tab between RFCs and Activity. Same API endpoint
+     as Actions > Send report, just fewer vertical pixels. */
+  .quick-report { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+  .quick-report select,
+  .quick-report input,
+  .quick-report textarea {
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 5px;
+    padding: 6px 8px; font: 12px ui-monospace, monospace;
+  }
+  .quick-report select { min-width: 140px; }
+  .quick-report textarea { flex: 1; min-width: 200px; min-height: 34px;
+    max-height: 80px; resize: vertical; }
+  .quick-report input { width: 130px; }
+  .quick-report button { background: var(--accent); color: var(--btn-fg-on-accent); border: 0;
+    border-radius: 5px; padding: 6px 14px; font: 600 12px ui-sans-serif, system-ui;
+    cursor: pointer; white-space: nowrap; }
+  .quick-report button:disabled { opacity: .5; cursor: not-allowed; }
+  #sec-quick-report .feedback { margin-top: 6px; font-size: 11px; min-height: 14px; }
+  #sec-quick-report .feedback.ok { color: var(--live); }
+  #sec-quick-report .feedback.err { color: var(--err-border); }
   /* Tab nav. Sits under the sticky header; switches which top-level
      panel is visible. Active tab uses the accent underline. */
   .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line);
@@ -548,6 +570,16 @@ export const DASHBOARD_HTML = `<!doctype html>
     <span class="leg leg-p3">P3</span>
   </span></h2><div class="board" id="board"></div></section>
   <section><h2 data-i18n="sec.rfcs">RFCs</h2><div class="rfcs" id="rfcs"></div></section>
+  <section id="sec-quick-report" style="display:none">
+    <h2 data-i18n="quickReport.title">Send report</h2>
+    <div class="quick-report">
+      <select id="qr-to"></select>
+      <textarea id="qr-msg" rows="1" data-i18n-attr="placeholder:actions.report.msgPlaceholder" placeholder="What you need them to do next."></textarea>
+      <input id="qr-ref" data-i18n-attr="placeholder:quickReport.refPlaceholder" placeholder="Ref (optional)" />
+      <button id="qr-go" data-i18n="actions.report.button">Send report</button>
+    </div>
+    <div class="feedback" id="qr-fb"></div>
+  </section>
   <section><h2 data-i18n="sec.activity">Activity</h2><div class="feed" id="feed"></div></section>
 </section>
 
@@ -854,6 +886,9 @@ export const DASHBOARD_HTML = `<!doctype html>
       "setup.act.pickRole": "Pick a role first.",
       "setup.footer": "Setup actions require <code>.gojaja/</code> to exist (run <em>Initialise</em> first if missing) and must be on a loopback bind to be visible.",
 
+      "quickReport.title": "Send report",
+      "quickReport.refPlaceholder": "Ref (optional)",
+
       "actions.title": "Actions",
       "actions.subtitle": "— posted as <code style=\\"background:var(--panel2);padding:1px 5px;border-radius:3px\\">SYSTEM</code> (project-owner)",
       "actions.footer": "All actions emit events as <code>from: SYSTEM</code> — the same as running the gojaja CLI in a shell with no <code>GOJAJA_SESSION</code>. Visible only when watch is bound to loopback.",
@@ -1033,6 +1068,9 @@ export const DASHBOARD_HTML = `<!doctype html>
       "setup.act.copyFailed": "复制失败 — 请手动选择片段。",
       "setup.act.pickRole": "请先选择一个角色。",
       "setup.footer": "Setup 操作需要 <code>.gojaja/</code> 已存在（若缺失请先运行 <em>初始化</em>），且必须绑定到 loopback 地址才可见。",
+
+      "quickReport.title": "发送通知",
+      "quickReport.refPlaceholder": "引用（可选）",
 
       "actions.title": "操作",
       "actions.subtitle": "— 以 <code style=\\"background:var(--panel2);padding:1px 5px;border-radius:3px\\">SYSTEM</code>（项目所有者）身份发布",
@@ -1640,6 +1678,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     // project-owner action — see the section header).
     [
       ["rep-to", "fillRole.selectRole", true, false],
+      ["qr-to", "fillRole.selectRole", true, false],
       ["task-owner", "task.unassigned", false, true],
       ["act-role", "fillRole.selectRole", false, false],
     ].forEach(function(spec){
@@ -1674,8 +1713,10 @@ export const DASHBOARD_HTML = `<!doctype html>
     var enabled = s.capabilities && s.capabilities.writeEnabled;
     var actionsSec = document.getElementById("sec-actions");
     var setupSec = document.getElementById("sec-setup");
+    var qrSec = document.getElementById("sec-quick-report");
     actionsSec.style.display = enabled ? "" : "none";
     setupSec.style.display = enabled ? "" : "none";
+    if(qrSec) qrSec.style.display = enabled ? "" : "none";
     if(!enabled) return;
     fillRoleSelects(s.roles || []);
   }
@@ -1698,6 +1739,26 @@ export const DASHBOARD_HTML = `<!doctype html>
 
   function bindActionButtons(){
     var splitCsv = function(s){ return (s||"").split(",").map(function(x){return x.trim();}).filter(Boolean); };
+
+    document.getElementById("qr-go").addEventListener("click", function(){
+      var btn = this;
+      var to = document.getElementById("qr-to").value;
+      if(!to){ setFb("qr-fb", "err", t("setup.act.pickRole")); return; }
+      btn.disabled = true; setFb("qr-fb", "", t("actions.report.sending"));
+      postJson("/api/report", {
+        to: to,
+        message: document.getElementById("qr-msg").value,
+        ref: document.getElementById("qr-ref").value,
+      }).then(function(r){
+        btn.disabled = false;
+        if(!r.ok){ setFb("qr-fb", "err", r.body.error || ("HTTP "+r.status)); return; }
+        setFb("qr-fb", "ok", t("actions.report.sent", {id: (r.body.event && r.body.event.id) || ""}));
+        document.getElementById("qr-to").value = "";
+        document.getElementById("qr-msg").value = "";
+        document.getElementById("qr-ref").value = "";
+        tick();
+      }).catch(function(e){ btn.disabled = false; setFb("qr-fb", "err", String(e)); });
+    });
 
     document.getElementById("rep-go").addEventListener("click", function(){
       var btn = this;
